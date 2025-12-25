@@ -119,7 +119,7 @@ const Records = () => {
     }
   };
 
-  const handleViewFile = async (fileName, fileType, fileLogId) => {
+ const handleViewFile = async (fileName, fileType) => {
     setFileModal({
       isOpen: true,
       fileName: fileName,
@@ -130,8 +130,8 @@ const Records = () => {
     });
 
     try {
-      const response = await api.get('/records/file-content/' + fileLogId, {
-        params: { type: fileType }
+      const response = await api.get('/records/file-content/byname', {
+        params: { type: fileType, fileName: fileName }
       });
       setFileModal(prev => ({
         ...prev,
@@ -142,7 +142,7 @@ const Records = () => {
       setFileModal(prev => ({
         ...prev,
         loading: false,
-        error: 'Impossible de charger le contenu du fichier'
+        error: error.response?.data?.message || 'Impossible de charger le contenu du fichier'
       }));
     }
   };
@@ -416,7 +416,7 @@ const Records = () => {
                         <td className="file-cell">
                           <button 
                             className="file-link"
-                            onClick={() => handleViewFile(record.file_name, 'csv', record.file_log_id)}
+                            onClick={() => handleViewFile(record.file_name, 'csv')}
                             title="Voir le contenu du fichier"
                           >
                             <FileText size={14} />
@@ -467,7 +467,7 @@ const Records = () => {
                         <td className="file-cell xml-file">
                           <button 
                             className="file-link xml"
-                            onClick={() => handleViewFile(log.xml_file_name, 'xml', log.file_log_id)}
+                            onClick={() => handleViewFile(log.xml_file_name, 'xml')}
                             title="Voir le contenu XML"
                           >
                             <FileCode size={14} />
@@ -478,7 +478,7 @@ const Records = () => {
                           {log.source_file_name ? (
                             <button 
                               className="file-link"
-                              onClick={() => handleViewFile(log.source_file_name, 'csv', log.file_log_id)}
+                              onClick={() => handleViewFile(log.source_file_name, 'csv')}
                               title="Voir le fichier source"
                             >
                               <FileText size={14} />

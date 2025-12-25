@@ -160,6 +160,89 @@ router.get('/export/csv', authMiddleware, async (req, res) => {
   }
 });
 
+// Get file content by file name
+router.get('/file-content/byname', authMiddleware, async (req, res) => {
+  try {
+    const { type, fileName } = req.query;
+
+    if (!fileName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nom de fichier requis'
+      });
+    }
+
+    // Pour les fichiers XML, chercher le CSV correspondant
+    let searchFileName = fileName;
+    if (fileName.endsWith('.xml')) {
+      searchFileName = fileName.replace('.xml', '.csv');
+    }
+
+    const recordsQuery = `
+      SELECT 
+        pr.language, pr.first_name as "firstName", pr.last_name as "lastName",
+        pr.pan, pr.expiry, pr.phone, pr.behaviour, pr.action,
+        b.code as bank_code
+      FROM processed_records pr
+      JOIN banks b ON pr.bank_id = b.id
+      WHERE pr.file_name = $1
+      ORDER BY pr.id
+    `;
+    
+    const result = await db.query(recordsQuery, [searchFileName]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Aucun enregistrement trouve pour ce fichier'
+      });
+    }
+
+    const bankCode = result.rows[0].bank_code || 'UNKNOWN';
+
+    if (type === 'xml') {
+      let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
+      xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
+      
+      let idCounter = 1;
+      result.rows.forEach(row => {
+        const phone = row.phone && row.phone.startsWith('+') ? row.phone : '+' + (row.phone || '');
+        xmlContent += '  <add id="' + idCounter + '" cardNumber="' + row.pan + '" profileId="' + bankCode + '" cardStatus="ACTIVE">\n';
+        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
+        xmlContent += '  </add>\n';
+        idCounter++;
+        xmlContent += '  <setAuthMethod id="' + idCounter + '" cardNumber="' + row.pan + '" profileId="' + bankCode + '">\n';
+        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
+        xmlContent += '  </setAuthMethod>\n';
+        idCounter++;
+      });
+      xmlContent += '</cardRegistryRecords>';
+
+      res.json({ success: true, data: xmlContent });
+    } else {
+      const csvData = result.rows.map(row => ({
+        language: row.language,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        pan: row.pan,
+        expiry: row.expiry,
+        phone: row.phone,
+        behaviour: row.behaviour,
+        action: row.action
+      }));
+
+      res.json({ success: true, data: csvData });
+    }
+  } catch (error) {
+    console.error('Get file content error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la recuperation du contenu',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
 // Get file content by file_log_id
 router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {

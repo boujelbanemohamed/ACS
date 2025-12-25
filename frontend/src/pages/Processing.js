@@ -8,6 +8,26 @@ const Processing = () => {
   const [selectedBank, setSelectedBank] = useState('');
   const [baseUrl, setBaseUrl] = useState('https://175.0.2.15/ACS');
   const [processing, setProcessing] = useState(false);
+  const handleReset = () => {
+    setValidRows([]);
+    setErrors([]);
+    setStats(null);
+    setResult(null);
+    setManualEntries([]);
+    setManualForm({
+      language: 'fr',
+      firstName: '',
+      lastName: '',
+      pan: '',
+      expiry: '',
+      phone: '',
+      behaviour: 'otp',
+      action: 'update'
+    });
+    showNotification('Formulaire reinitialise');
+  };
+
+
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState([]);
   const [validRows, setValidRows] = useState([]);
@@ -366,15 +386,39 @@ const Processing = () => {
     showNotification(`Ligne ${removedRow.rowNumber} retiree`, 'warning');
   };
 
-  const handleFinalProcess = async () => {
+const handleFinalProcess = async () => {
+    if (!selectedBank || validRows.length === 0) {
+      alert('Veuillez selectionner une banque et avoir des lignes valides');
+      return;
+    }
+    
     setProcessing(true);
     try {
-      showNotification(`Traitement de ${validRows.length} lignes lance avec succes !`);
-      setTimeout(() => {
-        showNotification('Fichier XML genere avec succes !');
-      }, 1500);
+      const response = await processingAPI.processManualEntries({
+        bankId: selectedBank,
+        entries: validRows.map(row => ({
+          language: row.language || 'fr',
+          firstName: row.firstName || row.first_name || '',
+          lastName: row.lastName || row.last_name || '',
+          pan: row.pan || '',
+          expiry: row.expiry || '',
+          phone: row.phone || '',
+          behaviour: row.behaviour || 'otp',
+          action: row.action || 'update'
+        }))
+      });
+      
+      if (response.data.success) {
+        showNotification('Traitement reussi ! ' + validRows.length + ' lignes traitees. XML genere.');
+        setValidRows([]);
+        setErrors([]);
+        setStats(null);
+      } else {
+        alert('Erreur: ' + (response.data.message || 'Erreur inconnue'));
+      }
     } catch (error) {
-      alert('Erreur lors du traitement final');
+      console.error('Final process error:', error);
+      alert('Erreur lors du traitement: ' + (error.response?.data?.message || error.message));
     } finally {
       setProcessing(false);
     }
@@ -489,6 +533,9 @@ const Processing = () => {
               >
                 {processing ? <RefreshCw size={20} className="spin" /> : <Upload size={20} />}
                 {processing ? 'Upload en cours...' : 'Uploader et traiter'}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleReset} style={{marginLeft: '10px'}}>
+                <RefreshCw size={18} /> Reinitialiser
               </button>
             </form>
           </div>
@@ -665,6 +712,9 @@ const Processing = () => {
                     >
                       <Send size={18} /> Traiter et Generer CSV/XML
                     </button>
+                    <button type="button" className="btn btn-secondary" onClick={handleReset} style={{marginLeft: '10px'}}>
+                      <RefreshCw size={18} /> Reinitialiser
+                    </button>
                   </div>
                 </div>
 
@@ -731,24 +781,26 @@ const Processing = () => {
             <h2>{errors.length === 0 ? 'Toutes les lignes sont valides !' : `${errors.length} erreur(s) a corriger`}</h2>
           </div>
 
-          <div className="result-stats">
-            <div className="stat-box">
-              <span className="stat-label">Total lignes</span>
-              <span className="stat-value">{stats.totalRows}</span>
+{stats && (
+            <div className="result-stats">
+              <div className="stat-box">
+                <span className="stat-label">Total lignes</span>
+                <span className="stat-value">{stats.totalRows}</span>
+              </div>
+              <div className="stat-box success">
+                <span className="stat-label">Lignes valides</span>
+                <span className="stat-value">{stats.validRows}</span>
+              </div>
+              <div className="stat-box error">
+                <span className="stat-label">Lignes invalides</span>
+                <span className="stat-value">{stats.invalidRows}</span>
+              </div>
+              <div className="stat-box warning">
+                <span className="stat-label">Doublons (PAN)</span>
+                <span className="stat-value">{stats.duplicateRows}</span>
+              </div>
             </div>
-            <div className="stat-box success">
-              <span className="stat-label">Lignes valides</span>
-              <span className="stat-value">{stats.validRows}</span>
-            </div>
-            <div className="stat-box error">
-              <span className="stat-label">Lignes invalides</span>
-              <span className="stat-value">{stats.invalidRows}</span>
-            </div>
-            <div className="stat-box warning">
-              <span className="stat-label">Doublons (PAN)</span>
-              <span className="stat-value">{stats.duplicateRows}</span>
-            </div>
-          </div>
+          )}
 
           {/* Errors Block */}
           <div className="data-block errors-block">
