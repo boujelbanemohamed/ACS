@@ -72,6 +72,38 @@ router.post('/process-url', authMiddleware, async (req, res) => {
       // Save validated records
       await csvProcessor.saveValidatedRecords(bankId, result.validRows, fileName);
 
+      // Generate XML file
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const xmlFileName = 'ACS_CARDS_' + bank.code + '_' + timestamp + '.xml';
+      const xmlOutputUrl = bank.xml_output_url || '/data/xml';
+      
+      let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
+      xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
+      
+      let idCounter = 1;
+      result.validRows.forEach(row => {
+        const phone = row.phone && row.phone.startsWith('+') ? row.phone : '+' + (row.phone || '');
+        const pan = row.pan || '';
+        
+        xmlContent += '  <add id="' + idCounter + '" cardNumber="' + pan + '" profileId="' + bank.code + '" cardStatus="ACTIVE">\n';
+        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
+        xmlContent += '  </add>\n';
+        idCounter++;
+        
+        xmlContent += '  <setAuthMethod id="' + idCounter + '" cardNumber="' + pan + '" profileId="' + bank.code + '">\n';
+        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
+        xmlContent += '  </setAuthMethod>\n';
+        idCounter++;
+      });
+      
+      xmlContent += '</cardRegistryRecords>';
+      
+      // Log XML generation
+      await db.query(
+        'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
+        [bankId, result.fileLogId, xmlFileName, xmlOutputUrl, result.validRows.length, result.validRows.length * 2, 'success']
+      );
+
       // Move file to destination
       await csvProcessor.moveFileToDestination(
         fileUrl,
