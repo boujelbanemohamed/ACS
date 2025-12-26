@@ -17,7 +17,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const query = 'SELECT * FROM users WHERE username = $1';
+    const query = 'SELECT u.*, b.name as bank_name, b.code as bank_code FROM users u LEFT JOIN banks b ON u.bank_id = b.id WHERE u.username = $1';
     const result = await db.query(query, [username]);
 
     if (result.rows.length === 0) {
@@ -30,6 +30,14 @@ router.post('/login', async (req, res) => {
     const user = result.rows[0];
 
     // Comparaison avec bcrypt
+    // Vérifier si le compte est actif
+    if (user.is_active === false) {
+      return res.status(401).json({
+        success: false,
+        message: 'Compte desactive. Contactez l\'administrateur.'
+      });
+    }
+
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({
@@ -38,12 +46,16 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // Mettre à jour last_login
+    await db.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+
     const token = jwt.sign(
       { 
         id: user.id, 
         username: user.username, 
         email: user.email,
-        role: user.role 
+        role: user.role,
+        bank_id: user.bank_id
       },
       process.env.JWT_SECRET || 'your_super_secret_jwt_key',
       { expiresIn: process.env.JWT_EXPIRE || '24h' }
@@ -58,7 +70,10 @@ router.post('/login', async (req, res) => {
           id: user.id,
           username: user.username,
           email: user.email,
-          role: user.role
+          role: user.role,
+          bank_id: user.bank_id,
+          bank_name: user.bank_name,
+          bank_code: user.bank_code
         }
       }
     });

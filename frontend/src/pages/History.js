@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { Clock, Upload, Globe, Edit3, CheckCircle, XCircle, AlertTriangle, FileText, FileCode, Download, Eye, RefreshCw, Filter, ChevronDown, ChevronUp, ExternalLink, Archive } from 'lucide-react';
 import api from '../services/api';
 import './History.css';
 
 const History = () => {
+  const { user } = useAuth();
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState(null);
   const [banks, setBanks] = useState([]);

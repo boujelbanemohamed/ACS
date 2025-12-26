@@ -1,35 +1,61 @@
 const jwt = require('jsonwebtoken');
+const db = require('../config/database');
 
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    
+    const token = req.headers.authorization?.replace('Bearer ', '');
+
     if (!token) {
       return res.status(401).json({
         success: false,
-        message: 'Token d\'authentification manquant'
+        message: 'Token d\'authentification requis'
       });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_jwt_key');
-    req.user = decoded;
+    
+    // Récupérer les infos utilisateur à jour depuis la DB
+    const userResult = await db.query(
+      'SELECT id, username, email, role, bank_id, is_active FROM users WHERE id = $1',
+      [decoded.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Utilisateur non trouve'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    if (!user.is_active) {
+      return res.status(401).json({
+        success: false,
+        message: 'Compte desactive'
+      });
+    }
+
+    req.user = user;
     next();
   } catch (error) {
-    return res.status(401).json({
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token invalide'
+      });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token expire'
+      });
+    }
+    res.status(500).json({
       success: false,
-      message: 'Token invalide ou expiré'
+      message: 'Erreur d\'authentification'
     });
   }
 };
 
-const adminMiddleware = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      message: 'Accès refusé: droits administrateur requis'
-    });
-  }
-  next();
-};
-
-module.exports = { authMiddleware, adminMiddleware };
+module.exports = { authMiddleware };

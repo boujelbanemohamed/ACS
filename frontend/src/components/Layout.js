@@ -1,7 +1,7 @@
 import React from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon } from 'lucide-react';
 import './Layout.css';
 
 const Layout = () => {
@@ -13,24 +13,36 @@ const Layout = () => {
     navigate('/login');
   };
 
+  const isAdmin = user?.role === 'super_admin';
+  const isBank = user?.role === 'bank';
+
   return (
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <h2>Banking CSV</h2>
-          <p>Processeur</p>
+          <h2>ACS Banking</h2>
+          <span className="subtitle">CSV Processor</span>
         </div>
 
         <nav className="sidebar-nav">
-          <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink to="/" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <LayoutDashboard size={20} />
             <span>Dashboard</span>
           </NavLink>
 
-          <NavLink to="/banks" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <Building2 size={20} />
-            <span>Banques</span>
-          </NavLink>
+          {isAdmin && (
+            <NavLink to="/banks" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Building2 size={20} />
+              <span>Banques</span>
+            </NavLink>
+          )}
+
+          {isBank && (
+            <NavLink to="/banks" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Building2 size={20} />
+              <span>Ma Banque</span>
+            </NavLink>
+          )}
 
           <NavLink to="/processing" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <FileText size={20} />
@@ -47,24 +59,38 @@ const Layout = () => {
             <span>Historique</span>
           </NavLink>
 
-          <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <Clock size={20} />
-            <span>Scan Automatique</span>
-          </NavLink>
+          {isAdmin && (
+            <>
+              <NavLink to="/users" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                <Users size={20} />
+                <span>Utilisateurs</span>
+              </NavLink>
+
+              <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                <Clock size={20} />
+                <span>Scan Automatique</span>
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div className="sidebar-footer">
+          <NavLink to="/profile" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <User size={20} />
+            <span>Mon Profil</span>
+          </NavLink>
+          
           <div className="user-info">
-            <div className="user-avatar">
-              {user?.username?.charAt(0).toUpperCase()}
-            </div>
+            <div className="user-avatar">{user?.username?.charAt(0).toUpperCase()}</div>
             <div className="user-details">
-              <p className="user-name">{user?.username}</p>
-              <p className="user-role">{user?.role}</p>
+              <span className="user-name">{user?.username}</span>
+              <span className="user-role">{user?.role === 'super_admin' ? 'Admin' : user?.bank_name || 'Banque'}</span>
             </div>
           </div>
+          
           <button className="logout-btn" onClick={handleLogout}>
             <LogOut size={20} />
+            <span>Deconnexion</span>
           </button>
         </div>
       </aside>

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import api, { banksAPI, processingAPI } from '../services/api';
 import { Upload, Link as LinkIcon, PlayCircle, Download, RefreshCw, AlertTriangle, CheckCircle, X, Check, FileText, Send, ArrowRight, PenLine, Plus, Trash2, Globe } from 'lucide-react';
 import './Processing.css';
 
 const Processing = () => {
+  const { user } = useAuth();
   const [banks, setBanks] = useState([]);
   const [selectedBank, setSelectedBank] = useState('');
   const [baseUrl, setBaseUrl] = useState('https://175.0.2.15/ACS');
@@ -128,6 +130,13 @@ const Processing = () => {
   useEffect(() => {
     fetchBanks();
   }, []);
+
+  // Auto-select bank for bank users
+  useEffect(() => {
+    if (user?.role === 'bank' && user?.bank_id && banks.length > 0) {
+      setSelectedBank(user.bank_id.toString());
+    }
+  }, [user, banks]);
 
   useEffect(() => {
     if (result) {

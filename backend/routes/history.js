@@ -1,11 +1,12 @@
 const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
+const { filterByBank } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Get processing history with all details
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { bankId, sourceType, status, dateFrom, dateTo, limit = 50, offset = 0 } = req.query;
 
@@ -45,6 +46,11 @@ router.get('/', authMiddleware, async (req, res) => {
       LEFT JOIN xml_logs xl ON xl.file_log_id = fl.id
       WHERE 1=1
     `;
+    
+    // Filtrer par banque si utilisateur de type bank
+    if (req.bankFilter) {
+      query += ' AND fl.bank_id = ' + req.bankFilter;
+    }
 
     const params = [];
     let paramCount = 1;

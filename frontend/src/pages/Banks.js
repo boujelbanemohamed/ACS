@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { banksAPI } from '../services/api';
 import { Plus, Edit2, Trash2, Building2, FolderTree, FolderInput, Folder, FolderOutput, FileCode } from 'lucide-react';
 import './Banks.css';
 
 const Banks = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'super_admin';
   const [banks, setBanks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);

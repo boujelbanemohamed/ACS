@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { Download, Search, Filter, Trash2, FileText, FileCode, CheckCircle, XCircle, Clock, RefreshCw, X, Eye } from 'lucide-react';
 import api from '../services/api';
 import './Records.css';
 
 const Records = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('csv');
   const [records, setRecords] = useState([]);
   const [xmlLogs, setXmlLogs] = useState([]);

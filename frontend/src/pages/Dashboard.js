@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Building2, FileText, CheckCircle, Clock, AlertCircle, Database, Activity, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
 import './Dashboard.css';
 
 const Dashboard = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalBanks: 0,

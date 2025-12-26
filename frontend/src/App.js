@@ -9,6 +9,8 @@ import Processing from './pages/Processing';
 import CronManager from './pages/CronManager';
 import Records from './pages/Records';
 import History from './pages/History';
+import Users from './pages/Users';
+import Profile from './pages/Profile';
 import './App.css';
 
 const PrivateRoute = ({ children }) => {
@@ -40,6 +42,8 @@ function App() {
             <Route path="cron" element={<CronManager />} />
             <Route path="records" element={<Records />} />
             <Route path="history" element={<History />} />
+            <Route path="users" element={<Users />} />
+            <Route path="profile" element={<Profile />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

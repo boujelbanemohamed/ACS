@@ -1,11 +1,12 @@
 const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
+const { filterByBank } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Get all processed records with pagination and filters
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { 
       bankId, 

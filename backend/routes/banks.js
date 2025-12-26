@@ -1,13 +1,15 @@
 const express = require('express');
 const db = require('../config/database');
-const { authMiddleware, adminMiddleware } = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
+const { checkRole } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Get all banks
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const query = `
+    const { bankId } = req.query;
+    let query = `
       SELECT 
         b.*,
         COUNT(DISTINCT pr.id) as total_records,
@@ -63,7 +65,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 // Create bank (admin only)
-router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
+router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const { code, name, source_url, destination_url, old_url, xml_output_url, is_active } = req.body;
 
@@ -114,7 +116,7 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
 });
 
 // Update bank (admin only)
-router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
+router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const { code, name, source_url, destination_url, old_url, xml_output_url, is_active } = req.body;
 
@@ -175,7 +177,7 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
 });
 
 // Delete bank (admin only)
-router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const query = 'DELETE FROM banks WHERE id = $1 RETURNING *';
     const result = await db.query(query, [req.params.id]);
