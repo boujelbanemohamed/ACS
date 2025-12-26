@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -675,4 +676,137 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
     });
   }
 });
+
+// Call external API
+router.post('/call-api', authMiddleware, async (req, res) => {
+  try {
+    const { bankId, url, method, headers, body, authType, authToken, dataPath } = req.body;
+
+    if (!bankId || !url) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bank ID et URL requis'
+      });
+    }
+
+    // Build headers
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      ...headers
+    };
+
+    // Add authentication
+    if (authType === 'bearer' && authToken) {
+      requestHeaders['Authorization'] = 'Bearer ' + authToken;
+    } else if (authType === 'basic' && authToken) {
+      requestHeaders['Authorization'] = 'Basic ' + Buffer.from(authToken).toString('base64');
+    } else if (authType === 'apikey' && authToken) {
+      requestHeaders['X-API-Key'] = authToken;
+    }
+
+    // Make API call
+    const axiosConfig = {
+      method: method || 'GET',
+      url: url,
+      headers: requestHeaders,
+      timeout: 30000
+    };
+
+    if ((method === 'POST' || method === 'PUT') && body) {
+      axiosConfig.data = body;
+    }
+
+    const apiResponse = await axios(axiosConfig);
+    
+    // Extract data from response
+    let responseData = apiResponse.data;
+    
+    if (dataPath) {
+      const pathParts = dataPath.split('.');
+      for (const part of pathParts) {
+        if (responseData && responseData[part] !== undefined) {
+          responseData = responseData[part];
+        } else {
+          responseData = [];
+          break;
+        }
+      }
+    }
+
+    // Ensure responseData is an array
+    if (!Array.isArray(responseData)) {
+      responseData = [responseData];
+    }
+
+    // Map and validate the data
+    const mappedRows = [];
+    const validationErrors = [];
+    
+    responseData.forEach((item, index) => {
+      const row = {
+        language: item.language || item.lang || 'fr',
+        firstName: item.firstName || item.first_name || item.prenom || '',
+        lastName: item.lastName || item.last_name || item.nom || '',
+        pan: item.pan || item.cardNumber || item.card_number || '',
+        expiry: item.expiry || item.expiryDate || item.expiry_date || '',
+        phone: item.phone || item.phoneNumber || item.phone_number || item.telephone || '',
+        behaviour: item.behaviour || item.behavior || 'otp',
+        action: item.action || 'update'
+      };
+
+      // Validate row
+      const rowErrors = [];
+      
+      if (!row.pan || row.pan.length < 13 || row.pan.length > 19) {
+        rowErrors.push({ field: 'pan', message: 'PAN invalide' });
+      }
+      
+      if (!row.phone) {
+        rowErrors.push({ field: 'phone', message: 'Telephone requis' });
+      }
+
+      if (rowErrors.length > 0) {
+        validationErrors.push({
+          rowNumber: index + 1,
+          errors: rowErrors,
+          data: row
+        });
+      } else {
+        mappedRows.push(row);
+      }
+    });
+
+    // Create file log
+    const fileLogResult = await db.query(
+      'INSERT INTO file_logs (bank_id, file_name, original_path, status, source_type, total_rows, valid_rows, invalid_rows) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+      [bankId, 'API_' + new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-') + '.json', url, mappedRows.length > 0 ? 'success' : 'validation_error', 'api', responseData.length, mappedRows.length, validationErrors.length]
+    );
+
+    const fileLogId = fileLogResult.rows[0].id;
+
+    res.json({
+      success: true,
+      message: 'API appelee avec succes',
+      data: {
+        fileLogId,
+        validRows: mappedRows,
+        errors: validationErrors,
+        stats: {
+          totalRows: responseData.length,
+          validRows: mappedRows.length,
+          invalidRows: validationErrors.length,
+          duplicateRows: 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('External API call error:', error);
+    res.status(error.response?.status || 500).json({
+      success: false,
+      message: 'Erreur lors de l\'appel API externe',
+      error: error.response?.data?.message || error.message
+    });
+  }
+});
+
 module.exports = router;

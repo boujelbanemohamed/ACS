@@ -749,3 +749,122 @@
     flex-direction: column;
   }
 }
+
+/* API Section */
+.api-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.api-section .section-card {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.api-section .section-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  color: #333;
+  font-size: 18px;
+}
+
+.api-section .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+
+.api-section .form-group {
+  margin-bottom: 15px;
+}
+
+.api-section .form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: #374151;
+  font-size: 14px;
+}
+
+.api-section .form-group input,
+.api-section .form-group select,
+.api-section .form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.api-section .form-group input:focus,
+.api-section .form-group select:focus,
+.api-section .form-group textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.api-section .form-group small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.api-section .form-group textarea {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+}
+
+.api-section .form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.api-response {
+  border-left: 4px solid #667eea;
+}
+
+.api-response-info {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 15px;
+}
+
+.api-status {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.api-status.success {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.api-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.api-error {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+@media (max-width: 768px) {
+  .api-section .form-row {
+    grid-template-columns: 1fr;
+  }
+}

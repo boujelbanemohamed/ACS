@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { banksAPI, processingAPI } from '../services/api';
-import { Upload, Link as LinkIcon, PlayCircle, Download, RefreshCw, AlertTriangle, CheckCircle, X, Check, FileText, Send, ArrowRight, PenLine, Plus, Trash2 } from 'lucide-react';
+import { Upload, Link as LinkIcon, PlayCircle, Download, RefreshCw, AlertTriangle, CheckCircle, X, Check, FileText, Send, ArrowRight, PenLine, Plus, Trash2, Globe } from 'lucide-react';
 import './Processing.css';
 
 const Processing = () => {
@@ -27,6 +27,62 @@ const Processing = () => {
     showNotification('Formulaire reinitialise');
   };
 
+  const handleApiCall = async () => {
+    if (!apiConfig.url || !selectedBank) {
+      alert('Veuillez renseigner l\'URL de l\'API et selectionner une banque');
+      return;
+    }
+
+    setApiLoading(true);
+    setApiResponse(null);
+
+    try {
+      const response = await processingAPI.callExternalApi({
+        bankId: selectedBank,
+        url: apiConfig.url,
+        method: apiConfig.method,
+        headers: apiConfig.headers ? JSON.parse(apiConfig.headers) : {},
+        body: apiConfig.body ? JSON.parse(apiConfig.body) : null,
+        authType: apiConfig.authType,
+        authToken: apiConfig.authToken,
+        dataPath: apiConfig.dataPath
+      });
+
+      if (response.data.success) {
+        setApiResponse({
+          success: true,
+          statusCode: 200,
+          dataCount: response.data.data?.validRows?.length || 0
+        });
+        
+        if (response.data.data?.validRows) {
+          setValidRows(response.data.data.validRows);
+        }
+        if (response.data.data?.errors) {
+          setErrors(response.data.data.errors);
+        }
+        if (response.data.data?.stats) {
+          setStats(response.data.data.stats);
+        }
+        
+        showNotification('API appelee avec succes ! ' + (response.data.data?.validRows?.length || 0) + ' enregistrements recuperes.');
+      } else {
+        setApiResponse({
+          success: false,
+          error: response.data.message || 'Erreur lors de l\'appel API'
+        });
+      }
+    } catch (error) {
+      console.error('API call error:', error);
+      setApiResponse({
+        success: false,
+        statusCode: error.response?.status,
+        error: error.response?.data?.message || error.message || 'Erreur lors de l\'appel API'
+      });
+    } finally {
+      setApiLoading(false);
+    }
+  };
 
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState([]);
@@ -39,7 +95,7 @@ const Processing = () => {
     invalidRows: 0,
     duplicateRows: 0
   });
-  const [activeTab, setActiveTab] = useState('upload'); // 'upload', 'url', 'manual'
+  const [activeTab, setActiveTab] = useState('upload'); // 'upload', 'url', 'manual', 'api'
   const [manualEntries, setManualEntries] = useState([]);
   const [manualForm, setManualForm] = useState({
     language: 'fr',
@@ -51,6 +107,17 @@ const Processing = () => {
     behaviour: 'otp',
     action: 'update'
   });
+  const [apiConfig, setApiConfig] = useState({
+    url: '',
+    method: 'GET',
+    headers: '',
+    body: '',
+    authType: 'none',
+    authToken: '',
+    dataPath: ''
+  });
+  const [apiResponse, setApiResponse] = useState(null);
+  const [apiLoading, setApiLoading] = useState(false);
   const [manualFormErrors, setManualFormErrors] = useState({});
 
   useEffect(() => {
@@ -486,6 +553,12 @@ const handleFinalProcess = async () => {
         >
           <PenLine size={18} /> Saisie Manuelle
         </button>
+        <button 
+          className={`tab-btn ${activeTab === 'api' ? 'active' : ''}`}
+          onClick={() => setActiveTab('api')}
+        >
+          <Globe size={18} /> API Externe
+        </button>
       </div>
 
       {/* Bank Selection (common) */}
@@ -774,7 +847,154 @@ const handleFinalProcess = async () => {
       </div>
 
       {/* Results Section (for Upload and URL tabs) */}
-      {result && activeTab !== 'manual' && (
+      {activeTab === 'api' && (
+          <div className="api-section">
+            <div className="section-card">
+              <h3><Globe size={20} /> Configuration API</h3>
+              
+              <div className="form-group">
+                <label>URL de l'API *</label>
+                <input
+                  type="text"
+                  placeholder="https://api.example.com/cards"
+                  value={apiConfig.url}
+                  onChange={(e) => setApiConfig({...apiConfig, url: e.target.value})}
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Methode HTTP</label>
+                  <select 
+                    value={apiConfig.method}
+                    onChange={(e) => setApiConfig({...apiConfig, method: e.target.value})}
+                  >
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Authentification</label>
+                  <select 
+                    value={apiConfig.authType}
+                    onChange={(e) => setApiConfig({...apiConfig, authType: e.target.value})}
+                  >
+                    <option value="none">Aucune</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="basic">Basic Auth</option>
+                    <option value="apikey">API Key</option>
+                  </select>
+                </div>
+              </div>
+
+              {apiConfig.authType !== 'none' && (
+                <div className="form-group">
+                  <label>Token / Credentials</label>
+                  <input
+                    type="password"
+                    placeholder={apiConfig.authType === 'bearer' ? 'Bearer token...' : apiConfig.authType === 'basic' ? 'username:password' : 'API Key...'}
+                    value={apiConfig.authToken}
+                    onChange={(e) => setApiConfig({...apiConfig, authToken: e.target.value})}
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Headers personnalises (JSON)</label>
+                <textarea
+                  placeholder='{"Content-Type": "application/json"}'
+                  value={apiConfig.headers}
+                  onChange={(e) => setApiConfig({...apiConfig, headers: e.target.value})}
+                  rows={3}
+                />
+              </div>
+
+              {(apiConfig.method === 'POST' || apiConfig.method === 'PUT') && (
+                <div className="form-group">
+                  <label>Corps de la requete (JSON)</label>
+                  <textarea
+                    placeholder='{"filter": "active"}'
+                    value={apiConfig.body}
+                    onChange={(e) => setApiConfig({...apiConfig, body: e.target.value})}
+                    rows={4}
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Chemin des donnees (ex: data.records ou results)</label>
+                <input
+                  type="text"
+                  placeholder="data.records"
+                  value={apiConfig.dataPath}
+                  onChange={(e) => setApiConfig({...apiConfig, dataPath: e.target.value})}
+                />
+                <small>Laissez vide si les donnees sont a la racine de la reponse</small>
+              </div>
+
+              <div className="form-group">
+                <label>Banque *</label>
+                <select 
+                  value={selectedBank} 
+                  onChange={(e) => setSelectedBank(e.target.value)}
+                >
+                  <option value="">Selectionnez une banque</option>
+                  {banks.map(bank => (
+                    <option key={bank.id} value={bank.id}>{bank.name} ({bank.code})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-actions">
+                <button 
+                  className="btn btn-primary"
+                  onClick={handleApiCall}
+                  disabled={apiLoading || !apiConfig.url || !selectedBank}
+                >
+                  {apiLoading ? <><RefreshCw size={18} className="spin" /> Appel en cours...</> : <><Globe size={18} /> Appeler l'API</>}
+                </button>
+                <button 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setApiConfig({
+                      url: '',
+                      method: 'GET',
+                      headers: '',
+                      body: '',
+                      authType: 'none',
+                      authToken: '',
+                      dataPath: ''
+                    });
+                    setApiResponse(null);
+                    setValidRows([]);
+                    setErrors([]);
+                  }}
+                >
+                  <RefreshCw size={18} /> Reinitialiser
+                </button>
+              </div>
+            </div>
+
+            {apiResponse && (
+              <div className="section-card api-response">
+                <h3><FileText size={20} /> Reponse API</h3>
+                <div className="api-response-info">
+                  <span className={'api-status ' + (apiResponse.success ? 'success' : 'error')}>
+                    Status: {apiResponse.statusCode || 'N/A'}
+                  </span>
+                  <span>Donnees recues: {apiResponse.dataCount || 0} enregistrements</span>
+                </div>
+                {apiResponse.error && (
+                  <div className="api-error">{apiResponse.error}</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+      {result && activeTab !== 'manual' && activeTab !== 'api' && (
         <div className="result-section">
           <div className={`result-header ${errors.length === 0 ? 'success' : 'error'}`}>
             {errors.length === 0 ? <CheckCircle size={32} /> : <AlertTriangle size={32} />}
