@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { banksAPI, processingAPI } from '../services/api';
+import api, { banksAPI, processingAPI } from '../services/api';
 import { Upload, Link as LinkIcon, PlayCircle, Download, RefreshCw, AlertTriangle, CheckCircle, X, Check, FileText, Send, ArrowRight, PenLine, Plus, Trash2, Globe } from 'lucide-react';
 import './Processing.css';
 
@@ -118,6 +118,11 @@ const Processing = () => {
   });
   const [apiResponse, setApiResponse] = useState(null);
   const [apiLoading, setApiLoading] = useState(false);
+  const [apiKeys, setApiKeys] = useState([]);
+  const [apiKeyForm, setApiKeyForm] = useState({ name: '', institution: '', bankId: '', expiresAt: '' });
+  const [showNewKeyModal, setShowNewKeyModal] = useState(false);
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState(null);
+  const [apiKeyStats, setApiKeyStats] = useState(null);
   const [manualFormErrors, setManualFormErrors] = useState({});
 
   useEffect(() => {
@@ -134,6 +139,73 @@ const Processing = () => {
       });
     }
   }, [errors, validRows, result]);
+
+  const fetchApiKeys = async () => {
+    try {
+      const response = await api.get('/api-keys');
+      setApiKeys(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching API keys:', error);
+    }
+  };
+
+  const fetchApiKeyStats = async () => {
+    try {
+      const response = await api.get('/api-keys/stats');
+      setApiKeyStats(response.data.data);
+    } catch (error) {
+      console.error('Error fetching API key stats:', error);
+    }
+  };
+
+  const handleCreateApiKey = async () => {
+    if (!apiKeyForm.name) {
+      alert('Veuillez saisir un nom pour la cle API');
+      return;
+    }
+    try {
+      const response = await api.post('/api-keys', {
+        name: apiKeyForm.name,
+        institution: apiKeyForm.institution,
+        bankId: apiKeyForm.bankId || null,
+        expiresAt: apiKeyForm.expiresAt || null
+      });
+      if (response.data.success) {
+        setNewlyCreatedKey(response.data.data.api_key);
+        setApiKeyForm({ name: '', institution: '', bankId: '', expiresAt: '' });
+        fetchApiKeys();
+        showNotification('Cle API creee avec succes!');
+      }
+    } catch (error) {
+      alert('Erreur: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
+  const handleToggleApiKey = async (id, isActive) => {
+    try {
+      await api.put('/api-keys/' + id, { isActive: !isActive });
+      fetchApiKeys();
+      showNotification('Cle API ' + (isActive ? 'desactivee' : 'activee'));
+    } catch (error) {
+      alert('Erreur: ' + error.message);
+    }
+  };
+
+  const handleDeleteApiKey = async (id) => {
+    if (!window.confirm('Supprimer cette cle API ?')) return;
+    try {
+      await api.delete('/api-keys/' + id);
+      fetchApiKeys();
+      showNotification('Cle API supprimee');
+    } catch (error) {
+      alert('Erreur: ' + error.message);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    showNotification('Copie dans le presse-papier!');
+  };
 
   const fetchBanks = async () => {
     try {
@@ -559,6 +631,12 @@ const handleFinalProcess = async () => {
         >
           <Globe size={18} /> API Externe
         </button>
+        <button 
+          className={`tab-btn ${activeTab === 'api-internal' ? 'active' : ''}`}
+          onClick={() => setActiveTab('api-internal')}
+        >
+          <FileText size={18} /> API Interne
+        </button>
       </div>
 
       {/* Bank Selection (common) */}
@@ -580,6 +658,48 @@ const handleFinalProcess = async () => {
         {activeTab === 'upload' && (
           <div className="processing-section">
             <h2><Upload size={24} /> Upload Manuel de Fichier CSV</h2>
+            
+            <div className="doc-section">
+              <h4>📋 Guide d'utilisation</h4>
+              <div className="steps-guide">
+                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee dans la liste deroulante ci-dessus</div>
+                <div className="step-item"><span className="step-number">2</span> Cliquez sur "Choisir un fichier" et selectionnez votre fichier CSV</div>
+                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Uploader et traiter" pour lancer le traitement</div>
+                <div className="step-item"><span className="step-number">4</span> Corrigez les erreurs eventuelles et validez</div>
+                <div className="step-item"><span className="step-number">5</span> Le fichier XML sera genere automatiquement</div>
+              </div>
+              
+              <h4>📄 Format du fichier CSV requis</h4>
+              <div className="format-info">
+                <p><strong>Encodage :</strong> UTF-8 | <strong>Separateur :</strong> Point-virgule (;) | <strong>Extension :</strong> .csv</p>
+                <table className="format-table">
+                  <thead>
+                    <tr>
+                      <th>Colonne</th>
+                      <th>Description</th>
+                      <th>Obligatoire</th>
+                      <th>Exemple</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>language</td><td>Code langue (fr, en, ar)</td><td>Non</td><td>fr</td></tr>
+                    <tr><td>first_name</td><td>Prenom du porteur</td><td>Non</td><td>Mohamed</td></tr>
+                    <tr><td>last_name</td><td>Nom du porteur</td><td>Non</td><td>Ben Ali</td></tr>
+                    <tr><td>pan</td><td>Numero de carte (13-19 chiffres)</td><td><strong>Oui</strong></td><td>4111111111111111</td></tr>
+                    <tr><td>expiry</td><td>Date d'expiration (MM/YY)</td><td><strong>Oui</strong></td><td>12/25</td></tr>
+                    <tr><td>phone</td><td>Telephone avec indicatif</td><td><strong>Oui</strong></td><td>+21612345678</td></tr>
+                    <tr><td>behaviour</td><td>Comportement OTP</td><td>Non</td><td>otp</td></tr>
+                    <tr><td>action</td><td>Action (update, add, delete)</td><td>Non</td><td>update</td></tr>
+                  </tbody>
+                </table>
+                <div className="example-csv">
+                  <strong>Exemple de fichier :</strong>
+                  <pre>language;first_name;last_name;pan;expiry;phone;behaviour;action{`
+fr;Mohamed;Ben Ali;4111111111111111;12/25;+21612345678;otp;update
+fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
+                </div>
+              </div>
+            </div>
             <form onSubmit={handleFileUpload}>
               <div className="form-group">
                 <label>Fichier CSV</label>
@@ -618,6 +738,25 @@ const handleFinalProcess = async () => {
         {activeTab === 'url' && (
           <div className="processing-section">
             <h2><LinkIcon size={24} /> Traitement par URL</h2>
+            
+            <div className="doc-section">
+              <h4>📋 Guide d'utilisation</h4>
+              <div className="steps-guide">
+                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
+                <div className="step-item"><span className="step-number">2</span> L'URL du dossier source est configuree dans les parametres de la banque</div>
+                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Scanner et traiter" pour analyser le dossier</div>
+                <div className="step-item"><span className="step-number">4</span> Les fichiers CSV trouves seront traites automatiquement</div>
+                <div className="step-item"><span className="step-number">5</span> Les fichiers traites seront deplaces vers le dossier d'archive</div>
+              </div>
+              
+              <h4>🔗 Configuration</h4>
+              <div className="format-info">
+                <p><strong>URL Source :</strong> Chemin vers le dossier contenant les fichiers CSV a traiter</p>
+                <p><strong>URL Destination :</strong> Chemin vers le dossier de sortie des fichiers valides</p>
+                <p><strong>URL Archive :</strong> Chemin vers le dossier d'archivage des fichiers traites</p>
+                <p><strong>Note :</strong> Ces URLs sont configurees dans la page "Banques" pour chaque etablissement</p>
+              </div>
+            </div>
             <div className="form-group">
               <label>URL de base</label>
               <input
@@ -643,6 +782,36 @@ const handleFinalProcess = async () => {
         {activeTab === 'manual' && (
           <div className="processing-section manual-entry-section">
             <h2><PenLine size={24} /> Saisie Manuelle</h2>
+            
+            <div className="doc-section">
+              <h4>📋 Guide d'utilisation</h4>
+              <div className="steps-guide">
+                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
+                <div className="step-item"><span className="step-number">2</span> Remplissez le formulaire avec les informations de la carte</div>
+                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Ajouter" pour ajouter l'entree a la liste</div>
+                <div className="step-item"><span className="step-number">4</span> Repetez pour ajouter plusieurs cartes</div>
+                <div className="step-item"><span className="step-number">5</span> Cliquez sur "Traiter et Generer CSV/XML" pour finaliser</div>
+              </div>
+              
+              <h4>📝 Description des champs</h4>
+              <div className="format-info">
+                <table className="format-table">
+                  <thead>
+                    <tr><th>Champ</th><th>Description</th><th>Obligatoire</th><th>Format</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Langue</td><td>Langue de communication SMS</td><td>Non</td><td>fr, en, ar</td></tr>
+                    <tr><td>Prenom</td><td>Prenom du porteur</td><td>Non</td><td>Texte</td></tr>
+                    <tr><td>Nom</td><td>Nom du porteur</td><td>Non</td><td>Texte</td></tr>
+                    <tr><td>PAN</td><td>Numero de carte bancaire</td><td><strong>Oui</strong></td><td>13-19 chiffres</td></tr>
+                    <tr><td>Expiration</td><td>Date d'expiration carte</td><td><strong>Oui</strong></td><td>MM/YY</td></tr>
+                    <tr><td>Telephone</td><td>Numero pour recevoir OTP</td><td><strong>Oui</strong></td><td>+216XXXXXXXX</td></tr>
+                    <tr><td>Comportement</td><td>Mode d'authentification</td><td>Non</td><td>OTP SMS</td></tr>
+                    <tr><td>Action</td><td>Type d'operation</td><td>Non</td><td>update, add, delete</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <p className="section-description">
               Saisissez manuellement les donnees d'un enregistrement. Le systeme verifiera automatiquement 
               la conformite des donnees et les doublons avant de generer les fichiers CSV et XML.
@@ -850,7 +1019,35 @@ const handleFinalProcess = async () => {
       {activeTab === 'api' && (
           <div className="api-section">
             <div className="section-card">
-              <h3><Globe size={20} /> Configuration API</h3>
+              <h3><Globe size={20} /> Configuration API Externe</h3>
+              
+              <div className="doc-section">
+                <h4>📋 Guide d'utilisation</h4>
+                <div className="steps-guide">
+                  <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
+                  <div className="step-item"><span className="step-number">2</span> Entrez l'URL de l'API externe a consommer</div>
+                  <div className="step-item"><span className="step-number">3</span> Configurez la methode HTTP (GET/POST)</div>
+                  <div className="step-item"><span className="step-number">4</span> Ajoutez l'authentification si necessaire</div>
+                  <div className="step-item"><span className="step-number">5</span> Specifiez le chemin des donnees dans la reponse JSON</div>
+                  <div className="step-item"><span className="step-number">6</span> Cliquez sur "Appeler l'API" pour recuperer les donnees</div>
+                </div>
+                
+                <h4>🔧 Configuration</h4>
+                <div className="format-info">
+                  <table className="format-table">
+                    <thead>
+                      <tr><th>Parametre</th><th>Description</th><th>Exemple</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>URL</td><td>Endpoint de l'API</td><td>https://api.banque.com/cards</td></tr>
+                      <tr><td>Methode</td><td>GET, POST, PUT</td><td>GET</td></tr>
+                      <tr><td>Auth</td><td>Type d'authentification</td><td>Bearer Token, API Key</td></tr>
+                      <tr><td>Chemin</td><td>Chemin JSON des donnees</td><td>data.records</td></tr>
+                    </tbody>
+                  </table>
+                  <p><strong>Mapping automatique :</strong> Les champs pan, phone, firstName, lastName, expiry sont mappes automatiquement depuis la reponse JSON.</p>
+                </div>
+              </div>
               
               <div className="form-group">
                 <label>URL de l'API *</label>
@@ -994,7 +1191,181 @@ const handleFinalProcess = async () => {
           </div>
         )}
 
-      {result && activeTab !== 'manual' && activeTab !== 'api' && (
+      {activeTab === 'api-internal' && (
+        <div className="api-internal-section">
+          <div className="section-card">
+            <h3><FileText size={20} /> Documentation API</h3>
+            <p>Votre API est accessible à l'adresse : <code>http://localhost:8000/api/v1</code></p>
+            
+            <div className="api-docs">
+              <h4>Endpoints disponibles :</h4>
+              <div className="endpoint-list">
+                <div className="endpoint">
+                  <span className="method get">GET</span>
+                  <span className="path">/api/v1/banks</span>
+                  <span className="desc">Liste des banques</span>
+                </div>
+                <div className="endpoint">
+                  <span className="method post">POST</span>
+                  <span className="path">/api/v1/cards/validate</span>
+                  <span className="desc">Valider des cartes</span>
+                </div>
+                <div className="endpoint">
+                  <span className="method post">POST</span>
+                  <span className="path">/api/v1/cards/register</span>
+                  <span className="desc">Enregistrer des cartes + XML</span>
+                </div>
+                <div className="endpoint">
+                  <span className="method get">GET</span>
+                  <span className="path">/api/v1/status/:id</span>
+                  <span className="desc">Statut d'un traitement</span>
+                </div>
+                <div className="endpoint">
+                  <span className="method get">GET</span>
+                  <span className="path">/api/v1/docs</span>
+                  <span className="desc">Documentation JSON</span>
+                </div>
+              </div>
+
+              <h4>Exemple d'appel :</h4>
+              <pre className="code-block">{`curl -X POST http://localhost:8000/api/v1/cards/register \
+  -H "X-API-Key: votre_cle_api" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bankCode": "BT",
+    "cards": [
+      {
+        "pan": "4111111111111111",
+        "phone": "+21612345678",
+        "expiry": "12/25",
+        "firstName": "Mohamed",
+        "lastName": "Ben Ali"
+      }
+    ]
+  }'`}</pre>
+            </div>
+          </div>
+
+          <div className="section-card">
+            <div className="card-header">
+              <h3><CheckCircle size={20} /> Cles API</h3>
+              <button className="btn btn-primary btn-sm" onClick={() => { setShowNewKeyModal(true); fetchApiKeys(); }}>
+                <Plus size={16} /> Nouvelle Cle
+              </button>
+            </div>
+
+            {apiKeyStats && (
+              <div className="api-stats-mini">
+                <span><strong>{apiKeyStats.active_keys || 0}</strong> cles actives</span>
+                <span><strong>{apiKeyStats.calls_today || 0}</strong> appels aujourd'hui</span>
+                <span><strong>{apiKeyStats.total_api_calls || 0}</strong> appels total</span>
+              </div>
+            )}
+
+            <div className="api-keys-list">
+              {apiKeys.length === 0 ? (
+                <p className="no-data">Aucune cle API. Cliquez sur "Nouvelle Cle" pour en creer une.</p>
+              ) : (
+                apiKeys.map(key => (
+                  <div key={key.id} className={'api-key-item ' + (key.is_active ? 'active' : 'inactive')}>
+                    <div className="api-key-info">
+                      <span className="api-key-name">{key.name}</span>
+                      <span className="api-key-institution">{key.institution || 'N/A'}</span>
+                      <code className="api-key-value">{key.api_key.substring(0, 20)}...</code>
+                      <button className="btn-icon" onClick={() => copyToClipboard(key.api_key)} title="Copier">
+                        <FileText size={14} />
+                      </button>
+                    </div>
+                    <div className="api-key-meta">
+                      <span className={'status-badge ' + (key.is_active ? 'success' : 'error')}>
+                        {key.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      <span>{key.calls_today || 0} appels/jour</span>
+                      <button className="btn-icon" onClick={() => handleToggleApiKey(key.id, key.is_active)}>
+                        {key.is_active ? <X size={14} /> : <Check size={14} />}
+                      </button>
+                      <button className="btn-icon btn-danger" onClick={() => handleDeleteApiKey(key.id)}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {showNewKeyModal && (
+            <div className="modal-overlay" onClick={() => setShowNewKeyModal(false)}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <h3>Creer une nouvelle cle API</h3>
+                
+                {newlyCreatedKey ? (
+                  <div className="new-key-display">
+                    <p><strong>Votre nouvelle cle API :</strong></p>
+                    <code className="full-api-key">{newlyCreatedKey}</code>
+                    <button className="btn btn-primary" onClick={() => copyToClipboard(newlyCreatedKey)}>
+                      Copier la cle
+                    </button>
+                    <p className="warning-text">
+                      <AlertTriangle size={16} /> Conservez cette cle en securite. Elle ne sera plus affichee.
+                    </p>
+                    <button className="btn btn-secondary" onClick={() => { setShowNewKeyModal(false); setNewlyCreatedKey(null); }}>
+                      Fermer
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="form-group">
+                      <label>Nom *</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: API Production Client X"
+                        value={apiKeyForm.name}
+                        onChange={(e) => setApiKeyForm({...apiKeyForm, name: e.target.value})}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Institution</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Banque XYZ"
+                        value={apiKeyForm.institution}
+                        onChange={(e) => setApiKeyForm({...apiKeyForm, institution: e.target.value})}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Banque associee</label>
+                      <select
+                        value={apiKeyForm.bankId}
+                        onChange={(e) => setApiKeyForm({...apiKeyForm, bankId: e.target.value})}
+                      >
+                        <option value="">Toutes les banques</option>
+                        {banks.map(bank => (
+                          <option key={bank.id} value={bank.id}>{bank.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Date d'expiration</label>
+                      <input
+                        type="date"
+                        value={apiKeyForm.expiresAt}
+                        onChange={(e) => setApiKeyForm({...apiKeyForm, expiresAt: e.target.value})}
+                      />
+                    </div>
+                    <div className="modal-actions">
+                      <button className="btn btn-secondary" onClick={() => setShowNewKeyModal(false)}>Annuler</button>
+                      <button className="btn btn-primary" onClick={handleCreateApiKey}>Creer la cle</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {result && activeTab !== 'manual' && activeTab !== 'api' && activeTab !== 'api-internal' && (
         <div className="result-section">
           <div className={`result-header ${errors.length === 0 ? 'success' : 'error'}`}>
             {errors.length === 0 ? <CheckCircle size={32} /> : <AlertTriangle size={32} />}
