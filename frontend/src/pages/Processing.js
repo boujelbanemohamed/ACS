@@ -658,48 +658,6 @@ const handleFinalProcess = async () => {
         {activeTab === 'upload' && (
           <div className="processing-section">
             <h2><Upload size={24} /> Upload Manuel de Fichier CSV</h2>
-            
-            <div className="doc-section">
-              <h4>📋 Guide d'utilisation</h4>
-              <div className="steps-guide">
-                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee dans la liste deroulante ci-dessus</div>
-                <div className="step-item"><span className="step-number">2</span> Cliquez sur "Choisir un fichier" et selectionnez votre fichier CSV</div>
-                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Uploader et traiter" pour lancer le traitement</div>
-                <div className="step-item"><span className="step-number">4</span> Corrigez les erreurs eventuelles et validez</div>
-                <div className="step-item"><span className="step-number">5</span> Le fichier XML sera genere automatiquement</div>
-              </div>
-              
-              <h4>📄 Format du fichier CSV requis</h4>
-              <div className="format-info">
-                <p><strong>Encodage :</strong> UTF-8 | <strong>Separateur :</strong> Point-virgule (;) | <strong>Extension :</strong> .csv</p>
-                <table className="format-table">
-                  <thead>
-                    <tr>
-                      <th>Colonne</th>
-                      <th>Description</th>
-                      <th>Obligatoire</th>
-                      <th>Exemple</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td>language</td><td>Code langue (fr, en, ar)</td><td>Non</td><td>fr</td></tr>
-                    <tr><td>first_name</td><td>Prenom du porteur</td><td>Non</td><td>Mohamed</td></tr>
-                    <tr><td>last_name</td><td>Nom du porteur</td><td>Non</td><td>Ben Ali</td></tr>
-                    <tr><td>pan</td><td>Numero de carte (13-19 chiffres)</td><td><strong>Oui</strong></td><td>4111111111111111</td></tr>
-                    <tr><td>expiry</td><td>Date d'expiration (MM/YY)</td><td><strong>Oui</strong></td><td>12/25</td></tr>
-                    <tr><td>phone</td><td>Telephone avec indicatif</td><td><strong>Oui</strong></td><td>+21612345678</td></tr>
-                    <tr><td>behaviour</td><td>Comportement OTP</td><td>Non</td><td>otp</td></tr>
-                    <tr><td>action</td><td>Action (update, add, delete)</td><td>Non</td><td>update</td></tr>
-                  </tbody>
-                </table>
-                <div className="example-csv">
-                  <strong>Exemple de fichier :</strong>
-                  <pre>language;first_name;last_name;pan;expiry;phone;behaviour;action{`
-fr;Mohamed;Ben Ali;4111111111111111;12/25;+21612345678;otp;update
-fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
-                </div>
-              </div>
-            </div>
             <form onSubmit={handleFileUpload}>
               <div className="form-group">
                 <label>Fichier CSV</label>
@@ -731,6 +689,43 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
                 <RefreshCw size={18} /> Reinitialiser
               </button>
             </form>
+            
+            <div className="doc-section">
+              <h4>📋 Guide d'utilisation</h4>
+              <div className="steps-guide">
+                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee dans la liste deroulante ci-dessus</div>
+                <div className="step-item"><span className="step-number">2</span> Cliquez sur "Choisir un fichier" et selectionnez votre fichier CSV</div>
+                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Uploader et traiter" pour lancer le traitement</div>
+                <div className="step-item"><span className="step-number">4</span> Corrigez les erreurs eventuelles et validez</div>
+                <div className="step-item"><span className="step-number">5</span> Le fichier XML sera genere automatiquement</div>
+              </div>
+              
+              <h4>📄 Format du fichier CSV requis</h4>
+              <div className="format-info">
+                <p><strong>Encodage :</strong> UTF-8 | <strong>Separateur :</strong> Point-virgule (;) | <strong>Extension :</strong> .csv</p>
+                <table className="format-table">
+                  <thead>
+                    <tr><th>Colonne</th><th>Description</th><th>Obligatoire</th><th>Exemple</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>language</td><td>Code langue (fr, en, ar)</td><td>Non</td><td>fr</td></tr>
+                    <tr><td>first_name</td><td>Prenom du porteur</td><td>Non</td><td>Mohamed</td></tr>
+                    <tr><td>last_name</td><td>Nom du porteur</td><td>Non</td><td>Ben Ali</td></tr>
+                    <tr><td>pan</td><td>Numero de carte (13-19 chiffres)</td><td><strong>Oui</strong></td><td>4111111111111111</td></tr>
+                    <tr><td>expiry</td><td>Date d'expiration (MM/YY)</td><td><strong>Oui</strong></td><td>12/25</td></tr>
+                    <tr><td>phone</td><td>Telephone avec indicatif</td><td><strong>Oui</strong></td><td>+21612345678</td></tr>
+                    <tr><td>behaviour</td><td>Comportement OTP</td><td>Non</td><td>otp</td></tr>
+                    <tr><td>action</td><td>Action (update, add, delete)</td><td>Non</td><td>update</td></tr>
+                  </tbody>
+                </table>
+                <div className="example-csv">
+                  <strong>Exemple de fichier :</strong>
+                  <pre>{`language;first_name;last_name;pan;expiry;phone;behaviour;action
+fr;Mohamed;Ben Ali;4111111111111111;12/25;+21612345678;otp;update
+fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -738,25 +733,6 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
         {activeTab === 'url' && (
           <div className="processing-section">
             <h2><LinkIcon size={24} /> Traitement par URL</h2>
-            
-            <div className="doc-section">
-              <h4>📋 Guide d'utilisation</h4>
-              <div className="steps-guide">
-                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
-                <div className="step-item"><span className="step-number">2</span> L'URL du dossier source est configuree dans les parametres de la banque</div>
-                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Scanner et traiter" pour analyser le dossier</div>
-                <div className="step-item"><span className="step-number">4</span> Les fichiers CSV trouves seront traites automatiquement</div>
-                <div className="step-item"><span className="step-number">5</span> Les fichiers traites seront deplaces vers le dossier d'archive</div>
-              </div>
-              
-              <h4>🔗 Configuration</h4>
-              <div className="format-info">
-                <p><strong>URL Source :</strong> Chemin vers le dossier contenant les fichiers CSV a traiter</p>
-                <p><strong>URL Destination :</strong> Chemin vers le dossier de sortie des fichiers valides</p>
-                <p><strong>URL Archive :</strong> Chemin vers le dossier d'archivage des fichiers traites</p>
-                <p><strong>Note :</strong> Ces URLs sont configurees dans la page "Banques" pour chaque etablissement</p>
-              </div>
-            </div>
             <div className="form-group">
               <label>URL de base</label>
               <input
@@ -775,6 +751,25 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
               {processing ? <RefreshCw size={20} className="spin" /> : <PlayCircle size={20} />}
               {processing ? 'Traitement en cours...' : 'Lancer le traitement'}
             </button>
+            
+            <div className="doc-section">
+              <h4>📋 Guide d'utilisation</h4>
+              <div className="steps-guide">
+                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
+                <div className="step-item"><span className="step-number">2</span> L'URL du dossier source est configuree dans les parametres de la banque</div>
+                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Lancer le traitement" pour analyser le dossier</div>
+                <div className="step-item"><span className="step-number">4</span> Les fichiers CSV trouves seront traites automatiquement</div>
+                <div className="step-item"><span className="step-number">5</span> Les fichiers traites seront deplaces vers le dossier d'archive</div>
+              </div>
+              
+              <h4>🔗 Configuration des URLs</h4>
+              <div className="format-info">
+                <p><strong>URL Source :</strong> Chemin vers le dossier contenant les fichiers CSV a traiter</p>
+                <p><strong>URL Destination :</strong> Chemin vers le dossier de sortie des fichiers valides</p>
+                <p><strong>URL Archive :</strong> Chemin vers le dossier d'archivage des fichiers traites</p>
+                <p><strong>Note :</strong> Ces URLs sont configurees dans la page "Banques" pour chaque etablissement</p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -782,36 +777,6 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
         {activeTab === 'manual' && (
           <div className="processing-section manual-entry-section">
             <h2><PenLine size={24} /> Saisie Manuelle</h2>
-            
-            <div className="doc-section">
-              <h4>📋 Guide d'utilisation</h4>
-              <div className="steps-guide">
-                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
-                <div className="step-item"><span className="step-number">2</span> Remplissez le formulaire avec les informations de la carte</div>
-                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Ajouter" pour ajouter l'entree a la liste</div>
-                <div className="step-item"><span className="step-number">4</span> Repetez pour ajouter plusieurs cartes</div>
-                <div className="step-item"><span className="step-number">5</span> Cliquez sur "Traiter et Generer CSV/XML" pour finaliser</div>
-              </div>
-              
-              <h4>📝 Description des champs</h4>
-              <div className="format-info">
-                <table className="format-table">
-                  <thead>
-                    <tr><th>Champ</th><th>Description</th><th>Obligatoire</th><th>Format</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr><td>Langue</td><td>Langue de communication SMS</td><td>Non</td><td>fr, en, ar</td></tr>
-                    <tr><td>Prenom</td><td>Prenom du porteur</td><td>Non</td><td>Texte</td></tr>
-                    <tr><td>Nom</td><td>Nom du porteur</td><td>Non</td><td>Texte</td></tr>
-                    <tr><td>PAN</td><td>Numero de carte bancaire</td><td><strong>Oui</strong></td><td>13-19 chiffres</td></tr>
-                    <tr><td>Expiration</td><td>Date d'expiration carte</td><td><strong>Oui</strong></td><td>MM/YY</td></tr>
-                    <tr><td>Telephone</td><td>Numero pour recevoir OTP</td><td><strong>Oui</strong></td><td>+216XXXXXXXX</td></tr>
-                    <tr><td>Comportement</td><td>Mode d'authentification</td><td>Non</td><td>OTP SMS</td></tr>
-                    <tr><td>Action</td><td>Type d'operation</td><td>Non</td><td>update, add, delete</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
             <p className="section-description">
               Saisissez manuellement les donnees d'un enregistrement. Le systeme verifiera automatiquement 
               la conformite des donnees et les doublons avant de generer les fichiers CSV et XML.
@@ -1011,6 +976,36 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
                 </table>
               </div>
             )}
+            
+            <div className="doc-section">
+              <h4>📋 Guide d'utilisation</h4>
+              <div className="steps-guide">
+                <div className="step-item"><span className="step-number">1</span> Selectionnez la banque concernee</div>
+                <div className="step-item"><span className="step-number">2</span> Remplissez le formulaire avec les informations de la carte</div>
+                <div className="step-item"><span className="step-number">3</span> Cliquez sur "Ajouter" pour ajouter l'entree a la liste</div>
+                <div className="step-item"><span className="step-number">4</span> Repetez pour ajouter plusieurs cartes</div>
+                <div className="step-item"><span className="step-number">5</span> Cliquez sur "Traiter et Generer CSV/XML" pour finaliser</div>
+              </div>
+              
+              <h4>📝 Description des champs</h4>
+              <div className="format-info">
+                <table className="format-table">
+                  <thead>
+                    <tr><th>Champ</th><th>Description</th><th>Obligatoire</th><th>Format</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Langue</td><td>Langue de communication SMS</td><td>Non</td><td>fr, en, ar</td></tr>
+                    <tr><td>Prenom</td><td>Prenom du porteur</td><td>Non</td><td>Texte</td></tr>
+                    <tr><td>Nom</td><td>Nom du porteur</td><td>Non</td><td>Texte</td></tr>
+                    <tr><td>PAN</td><td>Numero de carte bancaire</td><td><strong>Oui</strong></td><td>13-19 chiffres</td></tr>
+                    <tr><td>Expiration</td><td>Date d'expiration carte</td><td><strong>Oui</strong></td><td>MM/YY</td></tr>
+                    <tr><td>Telephone</td><td>Numero pour recevoir OTP</td><td><strong>Oui</strong></td><td>+216XXXXXXXX</td></tr>
+                    <tr><td>Comportement</td><td>Mode d'authentification</td><td>Non</td><td>OTP SMS</td></tr>
+                    <tr><td>Action</td><td>Type d'operation</td><td>Non</td><td>update, add, delete</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>
