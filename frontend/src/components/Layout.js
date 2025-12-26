@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon } from 'lucide-react';
 import './Layout.css';
 
 const Layout = () => {
@@ -40,6 +40,11 @@ const Layout = () => {
           <NavLink to="/records" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <Database size={20} />
             <span>Enregistrements</span>
+          </NavLink>
+
+          <NavLink to="/history" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <HistoryIcon size={20} />
+            <span>Historique</span>
           </NavLink>
 
           <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>

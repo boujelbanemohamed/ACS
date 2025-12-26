@@ -11,6 +11,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const recordsRoutes = require('./routes/records');
 const settingsRoutes = require('./routes/settings');
 const xmlLogsRoutes = require('./routes/xmlLogs');
+const historyRoutes = require('./routes/history');
 const FileScanner = require('./services/fileScanner');
 
 const app = express();
@@ -38,6 +39,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/records', recordsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/xml-logs', xmlLogsRoutes);
+app.use('/api/history', historyRoutes);
 
 // Cron and scanning routes
 app.get('/api/scanner/status', async (req, res) => {

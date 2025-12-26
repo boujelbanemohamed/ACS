@@ -1,10 +1,11 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 
 const router = express.Router();
 
-// Login simplifié sans bcrypt
+// Login avec bcrypt
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -28,8 +29,9 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    // Comparaison simple
-    if (password !== user.password) {
+    // Comparaison avec bcrypt
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
       return res.status(401).json({
         success: false,
         message: 'Identifiants invalides'
@@ -49,7 +51,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Connexion réussie',
+      message: 'Connexion reussie',
       data: {
         token,
         user: {
