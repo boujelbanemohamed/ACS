@@ -11,41 +11,36 @@ const Dashboard = () => {
   const [stats, setStats] = useState({
     totalBanks: 0,
     totalRecords: 0,
-    totalFiles: 0,
-    successfulFiles: 0,
-    failedFiles: 0,
-    validRows: 0,
-    invalidRows: 0
+    todayFiles: 0,
+    pendingErrors: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
   const [bankStatistics, setBankStatistics] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [user]);
 
   const fetchDashboardData = async () => {
     try {
-      const response = await api.get('/dashboard/stats');
+      const bankParam = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
+      const response = await api.get('/dashboard' + bankParam);
       
       if (response.data.success) {
-        const { overview, recentActivity, bankStatistics } = response.data.data;
+        const data = response.data.data;
         
         setStats({
-          totalBanks: parseInt(overview.total_banks) || 0,
-          totalRecords: parseInt(overview.total_records) || 0,
-          totalFiles: parseInt(overview.total_files) || 0,
-          successfulFiles: parseInt(overview.successful_files) || 0,
-          failedFiles: parseInt(overview.failed_files) || 0,
-          filesWithErrors: parseInt(overview.files_with_errors) || 0,
-          validRows: parseInt(overview.total_valid_rows) || 0,
-          invalidRows: parseInt(overview.total_invalid_rows) || 0,
-          duplicateRows: parseInt(overview.total_duplicate_rows) || 0
+          totalBanks: parseInt(data.totalBanks) || 0,
+          totalRecords: parseInt(data.totalRecords) || 0,
+          todayFiles: parseInt(data.todayFiles) || 0,
+          pendingErrors: parseInt(data.pendingErrors) || 0
         });
         
-        setRecentActivity(recentActivity || []);
-        setBankStatistics(bankStatistics || []);
+        setRecentActivity(data.recentActivity || []);
+        setBankStatistics(data.bankStats || []);
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -66,26 +61,26 @@ const Dashboard = () => {
     {
       title: 'Enregistrements',
       value: stats.totalRecords,
-      subtitle: `${stats.validRows} lignes valides`,
+      subtitle: 'Total des enregistrements',
       icon: Database,
       color: 'green',
       path: '/records'
     },
     {
-      title: 'Fichiers Traités',
-      value: stats.totalFiles,
-      subtitle: `${stats.successfulFiles} réussis`,
+      title: "Fichiers Aujourd'hui",
+      value: stats.todayFiles,
+      subtitle: 'Fichiers traites ce jour',
       icon: CheckCircle,
       color: 'purple',
       path: '/processing'
     },
     {
-      title: 'Erreurs',
-      value: stats.failedFiles + stats.filesWithErrors,
-      subtitle: `${stats.invalidRows} lignes invalides`,
+      title: 'Erreurs en attente',
+      value: stats.pendingErrors,
+      subtitle: 'Erreurs a corriger',
       icon: AlertTriangle,
-      color: stats.failedFiles > 0 ? 'red' : 'orange',
-      path: '/cron'
+      color: stats.pendingErrors > 0 ? 'red' : 'green',
+      path: '/records'
     }
   ];
 
