@@ -581,3 +581,87 @@
     transform: rotate(90deg);
   }
 }
+
+
+/* Documentation Section */
+.bank-documentation {
+  margin-top: 40px;
+  background: white;
+  border-radius: 12px;
+  padding: 30px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.bank-documentation h2 {
+  font-size: 20px;
+  color: #1f2937;
+  margin-bottom: 25px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.doc-section {
+  margin-bottom: 30px;
+}
+
+.doc-section h3 {
+  font-size: 16px;
+  color: #374151;
+  margin-bottom: 15px;
+}
+
+.folder-structure {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 20px;
+  overflow-x: auto;
+}
+
+.folder-structure code {
+  color: #e2e8f0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre;
+  display: block;
+}
+
+.xml-example {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 20px;
+  overflow-x: auto;
+}
+
+.xml-example pre {
+  margin: 0;
+}
+
+.xml-example code {
+  color: #e2e8f0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+  display: block;
+}
+
+.doc-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.doc-section ul li {
+  padding: 10px 15px;
+  background: #f9fafb;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+  color: #374151;
+  font-size: 14px;
+}
+
+.doc-section ul li:last-child {
+  margin-bottom: 0;
+}

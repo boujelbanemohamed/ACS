@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Download, Search, Filter, Trash2, FileText, FileCode, CheckCircle, XCircle, Clock, RefreshCw, X, Eye } from 'lucide-react';
+import { Download, Search, Filter, Trash2, FileText, FileCode, CheckCircle, XCircle, Clock, RefreshCw, X, Eye, Upload, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import './Records.css';
 
@@ -45,6 +45,11 @@ const Records = () => {
     loading: false,
     error: null
   });
+  const [enrollmentFile, setEnrollmentFile] = useState(null);
+  const [enrollmentLoading, setEnrollmentLoading] = useState(false);
+  const [enrollmentResult, setEnrollmentResult] = useState(null);
+  const [enrollmentLogs, setEnrollmentLogs] = useState([]);
+  const [enrollmentStats, setEnrollmentStats] = useState(null);
 
   useEffect(() => {
     fetchBanks();
@@ -76,6 +81,50 @@ const Records = () => {
       }
     } catch (error) {
       console.error('Error fetching banks:', error);
+    }
+  };
+
+  const fetchEnrollmentData = async () => {
+    try {
+      const bankParam = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
+      const [logsRes, statsRes] = await Promise.all([
+        api.get('/enrollment/logs' + bankParam),
+        api.get('/enrollment/stats' + bankParam)
+      ]);
+      setEnrollmentLogs(logsRes.data.data || []);
+      setEnrollmentStats(statsRes.data.data);
+    } catch (error) {
+      console.error('Error fetching enrollment data:', error);
+    }
+  };
+
+  const handleEnrollmentUpload = async () => {
+    if (!enrollmentFile) return;
+    
+    setEnrollmentLoading(true);
+    setEnrollmentResult(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', enrollmentFile);
+      
+      const response = await api.post('/enrollment/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setEnrollmentResult(response.data);
+      if (response.data.success) {
+        fetchRecords();
+        fetchEnrollmentData();
+        setEnrollmentFile(null);
+      }
+    } catch (error) {
+      setEnrollmentResult({
+        success: false,
+        message: error.response?.data?.message || 'Erreur lors du traitement'
+      });
+    } finally {
+      setEnrollmentLoading(false);
     }
   };
 
@@ -308,6 +357,15 @@ const Records = () => {
           <span>Fichiers XML</span>
           <span className="tab-count">{xmlStats.total_xml || 0}</span>
         </button>
+        {user?.role === 'super_admin' && (
+          <button 
+            className={'tab-btn ' + (activeTab === 'enrollment' ? 'active' : '')}
+            onClick={() => { setActiveTab('enrollment'); fetchEnrollmentData(); }}
+          >
+            <Upload size={20} />
+            <span>Rapport Enrolement</span>
+          </button>
+        )}
       </div>
 
       {/* XML Stats Cards */}
@@ -417,6 +475,7 @@ const Records = () => {
               <table className="records-table">
                 <thead>
                   <tr>
+                    <th onClick={() => handleSort('id')}>ID</th>
                     <th onClick={() => handleSort('bank_name')}>Banque</th>
                     <th onClick={() => handleSort('first_name')}>Prenom</th>
                     <th onClick={() => handleSort('last_name')}>Nom</th>
@@ -428,15 +487,17 @@ const Records = () => {
                     <th>Action</th>
                     <th>Fichier</th>
                     <th onClick={() => handleSort('processed_at')}>Date</th>
+                    <th>Enrolement</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {records.length === 0 ? (
-                    <tr><td colSpan="12" className="no-data">Aucun enregistrement trouve</td></tr>
+                    <tr><td colSpan="14" className="no-data">Aucun enregistrement trouve</td></tr>
                   ) : (
                     records.map((record) => (
                       <tr key={record.id}>
+                        <td className="id-cell">{record.id}</td>
                         <td><span className="bank-badge">{record.bank_code}</span></td>
                         <td>{record.first_name}</td>
                         <td>{record.last_name}</td>
@@ -457,6 +518,19 @@ const Records = () => {
                           </button>
                         </td>
                         <td className="date-cell">{new Date(record.processed_at).toLocaleString('fr-FR')}</td>
+                        <td>
+                          <div className={'enrollment-status ' + (record.enrollment_status || 'pending')}>
+                            {record.enrollment_status === 'success' && <CheckCircle size={14} />}
+                            {record.enrollment_status === 'error' && <XCircle size={14} />}
+                            {(!record.enrollment_status || record.enrollment_status === 'pending') && <Clock size={14} />}
+                            <span>{record.enrollment_status === 'success' ? 'OK' : record.enrollment_status === 'error' ? 'Erreur' : 'En attente'}</span>
+                            {record.enrollment_error_description && (
+                              <span className="enrollment-error" title={record.enrollment_error_description}>
+                                ({record.enrollment_error_code})
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td>
                           <button className="btn-icon btn-danger" onClick={() => handleDelete(record.id)} title="Supprimer">
                             <Trash2 size={16} />
@@ -535,6 +609,108 @@ const Records = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Onglet Rapport Enrolement */}
+          {activeTab === 'enrollment' && user?.role === 'super_admin' && (
+            <div className="enrollment-section">
+              <div className="enrollment-upload-card">
+                <h3><Upload size={20} /> Importer un rapport d enrolement</h3>
+                <p>Selectionnez un fichier XML de rapport d enrolement pour mettre a jour les statuts.</p>
+                
+                <div className="upload-zone">
+                  <input
+                    type="file"
+                    accept=".xml"
+                    onChange={(e) => setEnrollmentFile(e.target.files[0])}
+                    id="enrollment-file"
+                  />
+                  <label htmlFor="enrollment-file" className="upload-label">
+                    <FileCode size={32} />
+                    <span>{enrollmentFile ? enrollmentFile.name : 'Choisir un fichier XML'}</span>
+                  </label>
+                </div>
+                
+                <button 
+                  className="btn btn-primary"
+                  onClick={handleEnrollmentUpload}
+                  disabled={!enrollmentFile || enrollmentLoading}
+                >
+                  {enrollmentLoading ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}
+                  {enrollmentLoading ? 'Traitement...' : 'Importer et traiter'}
+                </button>
+                
+                {enrollmentResult && (
+                  <div className={'enrollment-result ' + (enrollmentResult.success ? 'success' : 'error')}>
+                    {enrollmentResult.success ? <CheckCircle size={20} /> : <XCircle size={20} />}
+                    <div>
+                      <p><strong>{enrollmentResult.message}</strong></p>
+                      {enrollmentResult.success && (
+                        <p>Total: {enrollmentResult.totalRecords} | Succes: {enrollmentResult.successCount} | Erreurs: {enrollmentResult.errorCount} | Mis a jour: {enrollmentResult.updatedRecords}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {enrollmentStats && (
+                <div className="enrollment-stats-grid">
+                  <div className="enrollment-stat-card success">
+                    <CheckCircle size={24} />
+                    <div>
+                      <span className="stat-value">{enrollmentStats.enrolled_success || 0}</span>
+                      <span className="stat-label">Enroles OK</span>
+                    </div>
+                  </div>
+                  <div className="enrollment-stat-card error">
+                    <XCircle size={24} />
+                    <div>
+                      <span className="stat-value">{enrollmentStats.enrolled_error || 0}</span>
+                      <span className="stat-label">Enrolements echoues</span>
+                    </div>
+                  </div>
+                  <div className="enrollment-stat-card pending">
+                    <Clock size={24} />
+                    <div>
+                      <span className="stat-value">{enrollmentStats.pending || 0}</span>
+                      <span className="stat-label">En attente</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div className="enrollment-logs">
+                <h3>Historique des imports</h3>
+                <table className="records-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Banque</th>
+                      <th>Fichier</th>
+                      <th>Total</th>
+                      <th>Succes</th>
+                      <th>Erreurs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {enrollmentLogs.length === 0 ? (
+                      <tr><td colSpan="6" className="no-data">Aucun import effectue</td></tr>
+                    ) : (
+                      enrollmentLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td>{new Date(log.processed_at).toLocaleString('fr-FR')}</td>
+                          <td><span className="bank-badge">{log.bank_code || 'Toutes'}</span></td>
+                          <td>{log.file_name}</td>
+                          <td>{log.total_records}</td>
+                          <td className="success-cell">{log.success_count}</td>
+                          <td className="error-cell">{log.error_count}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

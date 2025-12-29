@@ -73,7 +73,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 // Create bank (admin only)
 router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
-    const { code, name, source_url, destination_url, old_url, xml_output_url, is_active } = req.body;
+    const { code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active } = req.body;
 
     // Validate required fields including xml_output_url
     if (!code || !name || !source_url || !destination_url || !old_url || !xml_output_url) {
@@ -84,8 +84,8 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
     }
 
     const query = `
-      INSERT INTO banks (code, name, source_url, destination_url, old_url, xml_output_url, is_active)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO banks (code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
 
@@ -124,7 +124,7 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
 // Update bank (admin only)
 router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
-    const { code, name, source_url, destination_url, old_url, xml_output_url, is_active } = req.body;
+    const { code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active } = req.body;
 
     // Validate required fields
     if (!xml_output_url) {

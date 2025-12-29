@@ -21,6 +21,7 @@ const Banks = () => {
     destination_url: '',
     old_url: '',
     xml_output_url: '',
+    enrollment_report_url: '',
     is_active: true
   });
 
@@ -54,6 +55,7 @@ const Banks = () => {
       destination_url: bank.destination_url || '',
       old_url: bank.old_url || '',
       xml_output_url: bank.xml_output_url || '',
+      enrollment_report_url: bank.enrollment_report_url || '',
       is_active: bank.is_active
     });
     setShowModal(true);
@@ -94,6 +96,7 @@ const Banks = () => {
       destination_url: '',
       old_url: '',
       xml_output_url: '',
+      enrollment_report_url: '',
       is_active: true
     });
   };
@@ -180,17 +183,15 @@ const Banks = () => {
           <div className="doc-section">
             <h3>Format du fichier XML genere</h3>
             <div className="xml-example">
-              <code>
-{`<?xml version="1.0" encoding="UTF-8"?>
-<CardList>
-  <Card>
-    <PAN>4111111111111111</PAN>
-    <ExpiryDate>12/25</ExpiryDate>
-    <PhoneNumber>+21612345678</PhoneNumber>
-    ...
-  </Card>
-</CardList>`}
-              </code>
+              <pre><code>{`<?xml version="1.0" encoding="ISO-8859-15"?>
+<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">
+  <add id="1" cardNumber="4111111111111111" profileId="ATB" cardStatus="ACTIVE">
+    <oneTimePasswordSMS phoneNumber="+21612345678"></oneTimePasswordSMS>
+  </add>
+  <setAuthMethod id="2" cardNumber="4111111111111111" profileId="ATB">
+    <oneTimePasswordSMS phoneNumber="+21612345678"></oneTimePasswordSMS>
+  </setAuthMethod>
+</cardRegistryRecords>`}</code></pre>
             </div>
           </div>
 
@@ -349,6 +350,16 @@ const Banks = () => {
                   onChange={(e) => setFormData({...formData, xml_output_url: e.target.value})}
                   required
                   placeholder="https://serveur/ACS/ATB/xml"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>URL Rapport Enrolement</label>
+                <input
+                  type="text"
+                  value={formData.enrollment_report_url}
+                  onChange={(e) => setFormData({...formData, enrollment_report_url: e.target.value})}
+                  placeholder="https://serveur/ACS/ATB/enrollment"
                 />
               </div>
 
