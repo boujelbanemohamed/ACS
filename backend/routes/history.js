@@ -147,7 +147,9 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 // Get history stats
 router.get('/stats', authMiddleware, async (req, res) => {
   try {
-    const statsQuery = `
+    const { bankId } = req.query;
+    
+    let statsQuery = `
       SELECT 
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE source_type = 'upload') as upload_count,
@@ -161,6 +163,11 @@ router.get('/stats', authMiddleware, async (req, res) => {
         SUM(invalid_rows) as total_invalid_rows
       FROM file_logs
     `;
+    
+    // Filtrer par banque si bankId fourni
+    if (bankId) {
+      statsQuery += ' WHERE bank_id = ' + parseInt(bankId);
+    }
     
     const result = await db.query(statsQuery);
 

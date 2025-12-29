@@ -87,16 +87,23 @@ router.get('/', authMiddleware, async (req, res) => {
 // Get XML statistics
 router.get('/stats/summary', authMiddleware, async (req, res) => {
   try {
-    const query = `
+    const { bankId } = req.query;
+    
+    let query = `
       SELECT 
         COUNT(*) as total_xml,
-        COUNT(CASE WHEN status = 'success' THEN 1 END) as success_count,
-        COUNT(CASE WHEN status = 'error' THEN 1 END) as error_count,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_count,
-        COALESCE(SUM(records_count), 0) as total_records,
-        COALESCE(SUM(xml_entries_count), 0) as total_entries
-      FROM xml_logs
+        COUNT(CASE WHEN xl.status = 'success' THEN 1 END) as success_count,
+        COUNT(CASE WHEN xl.status = 'error' THEN 1 END) as error_count,
+        COUNT(CASE WHEN xl.status = 'pending' THEN 1 END) as pending_count,
+        COALESCE(SUM(xl.records_count), 0) as total_records,
+        COALESCE(SUM(xl.xml_entries_count), 0) as total_entries
+      FROM xml_logs xl
+      JOIN file_logs fl ON xl.file_log_id = fl.id
     `;
+    
+    if (bankId) {
+      query += ' WHERE fl.bank_id = ' + parseInt(bankId);
+    }
     
     const result = await db.query(query);
 

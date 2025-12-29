@@ -61,8 +61,19 @@ const Records = () => {
 
   const fetchBanks = async () => {
     try {
-      const response = await api.get('/banks');
-      setBanks(response.data.data);
+      let url = '/banks';
+      if (user?.role === 'bank' && user?.bank_id) {
+        url += '?bankId=' + user.bank_id;
+      }
+      const response = await api.get(url);
+      const banksData = response.data.data || [];
+      setBanks(banksData);
+      
+      // Auto-sélectionner la banque pour les utilisateurs banque
+      if (user?.role === 'bank' && user?.bank_id) {
+        setFilters(prev => ({ ...prev, bankId: user.bank_id.toString() }));
+        setXmlFilters(prev => ({ ...prev, bankId: user.bank_id.toString() }));
+      }
     } catch (error) {
       console.error('Error fetching banks:', error);
     }
@@ -71,8 +82,10 @@ const Records = () => {
   const fetchRecords = async () => {
     setLoading(true);
     try {
+      const bankIdToUse = user?.role === 'bank' && user?.bank_id ? user.bank_id.toString() : filters.bankId;
       const params = {
         ...filters,
+        bankId: bankIdToUse,
         limit: pagination.limit,
         offset: pagination.offset
       };
@@ -98,6 +111,10 @@ const Records = () => {
         limit: xmlPagination.limit,
         offset: xmlPagination.offset
       };
+      // Forcer le bankId pour les utilisateurs banque
+      if (user?.role === 'bank' && user?.bank_id) {
+        params.bankId = user.bank_id.toString();
+      }
       const response = await api.get('/xml-logs', { params });
       setXmlLogs(response.data.data || []);
       setXmlPagination(prev => ({
@@ -114,7 +131,12 @@ const Records = () => {
 
   const fetchXmlStats = async () => {
     try {
-      const response = await api.get('/xml-logs/stats/summary');
+      let url = '/xml-logs/stats/summary';
+      // Filtrer par banque pour les utilisateurs banque
+      if (user?.role === 'bank' && user?.bank_id) {
+        url += '?bankId=' + user.bank_id;
+      }
+      const response = await api.get(url);
       setXmlStats(response.data.data || {});
     } catch (error) {
       console.error('Error fetching XML stats:', error);
@@ -335,11 +357,20 @@ const Records = () => {
                 setXmlFilters({ ...xmlFilters, bankId: e.target.value });
               }
             }}
+            disabled={user?.role === 'bank'}
           >
-            <option value="">Toutes les banques</option>
-            {banks.map((bank) => (
-              <option key={bank.id} value={bank.id}>{bank.name}</option>
-            ))}
+            {user?.role === 'bank' ? (
+              banks.map((bank) => (
+                <option key={bank.id} value={bank.id}>{bank.name}</option>
+              ))
+            ) : (
+              <>
+                <option value="">Toutes les banques</option>
+                {banks.map((bank) => (
+                  <option key={bank.id} value={bank.id}>{bank.name}</option>
+                ))}
+              </>
+            )}
           </select>
         </div>
 
