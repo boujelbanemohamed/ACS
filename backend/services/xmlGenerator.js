@@ -1,45 +1,62 @@
 const fs = require('fs').promises;
 const path = require('path');
+const db = require('../config/database');
 
 class XMLGenerator {
-  
-  // Convertir le PAN du format scientifique vers le format complet
+  // Convertir le PAN en format requis
   convertPAN(pan) {
-    if (!pan) return '';
-    
-    // Si c'est déjà un nombre complet
-    if (typeof pan === 'string' && !pan.includes('E') && !pan.includes(',')) {
-      return pan.replace(/\D/g, '');
-    }
-    
-    // Convertir la notation scientifique (format français avec virgule)
-    let panStr = String(pan).replace(',', '.');
-    
-    if (panStr.includes('E') || panStr.includes('e')) {
-      const num = parseFloat(panStr);
-      return Math.round(num).toString();
-    }
-    
-    return panStr.replace(/\D/g, '');
+    if (!pan) return null;
+    // Garder uniquement les chiffres
+    const cleanPan = pan.toString().replace(/[^0-9]/g, '');
+    return cleanPan.length >= 13 && cleanPan.length <= 19 ? cleanPan : null;
   }
-  
+
   // Formater le numéro de téléphone
   formatPhone(phone) {
-    if (!phone) return '';
+    if (!phone) return null;
+    let cleanPhone = phone.toString().replace(/[^0-9+]/g, '');
     
-    let phoneStr = String(phone).replace(/\D/g, '');
-    
-    // Ajouter le + si pas présent
-    if (!phoneStr.startsWith('+')) {
-      phoneStr = '+' + phoneStr;
+    // Ajouter +216 si nécessaire
+    if (cleanPhone.startsWith('00216')) {
+      cleanPhone = '+216' + cleanPhone.substring(5);
+    } else if (cleanPhone.startsWith('216')) {
+      cleanPhone = '+' + cleanPhone;
+    } else if (!cleanPhone.startsWith('+')) {
+      if (cleanPhone.length === 8) {
+        cleanPhone = '+216' + cleanPhone;
+      }
     }
     
-    return phoneStr;
+    return cleanPhone;
   }
-  
+
+  // Obtenir le prochain ID unique depuis la base de données
+  async getNextId(count) {
+    try {
+      // Utiliser une transaction pour garantir l'unicité
+      const result = await db.query(
+        'UPDATE xml_id_sequence SET last_id = last_id + $1, updated_at = CURRENT_TIMESTAMP RETURNING last_id',
+        [count]
+      );
+      
+      // Retourner l'ID de départ (last_id - count + 1)
+      const lastId = parseInt(result.rows[0].last_id);
+      return lastId - count + 1;
+    } catch (error) {
+      console.error('Error getting next XML ID:', error);
+      // Fallback: utiliser timestamp + random pour garantir l'unicité
+      return Date.now() * 1000 + Math.floor(Math.random() * 1000);
+    }
+  }
+
   // Générer le XML à partir des enregistrements
-  generateXML(records, bankCode) {
-    let id = 1;
+  async generateXML(records, bankCode) {
+    // Calculer le nombre total d'IDs nécessaires (2 par record: add + setAuthMethod)
+    const totalIdsNeeded = records.length * 2;
+    
+    // Obtenir le prochain ID unique depuis la base de données
+    let id = await this.getNextId(totalIdsNeeded);
+    
     let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
     xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
     
@@ -70,25 +87,24 @@ class XMLGenerator {
     
     return xmlContent;
   }
-  
+
   // Générer le nom du fichier XML
   generateFileName(bankCode) {
     const now = new Date();
     const timestamp = now.getFullYear().toString() +
-      String(now.getMonth() + 1).padStart(2, '0') +
-      String(now.getDate()).padStart(2, '0') +
-      String(now.getHours()).padStart(2, '0') +
-      String(now.getMinutes()).padStart(2, '0') +
-      String(now.getSeconds()).padStart(2, '0') +
-      String(now.getMilliseconds()).padStart(3, '0');
+      (now.getMonth() + 1).toString().padStart(2, '0') +
+      now.getDate().toString().padStart(2, '0') +
+      now.getHours().toString().padStart(2, '0') +
+      now.getMinutes().toString().padStart(2, '0') +
+      now.getSeconds().toString().padStart(2, '0');
     
     return `ACS_CARDS_${bankCode}_${timestamp}.xml`;
   }
-  
+
   // Sauvegarder le fichier XML
   async saveXML(xmlContent, outputPath, fileName) {
     try {
-      // Créer le dossier si nécessaire
+      // Créer le répertoire si nécessaire
       await fs.mkdir(outputPath, { recursive: true });
       
       const filePath = path.join(outputPath, fileName);
@@ -101,31 +117,27 @@ class XMLGenerator {
       throw error;
     }
   }
-  
-  // Processus complet de génération
+
   async processAndGenerateXML(records, bank) {
     try {
-      const xmlContent = this.generateXML(records, bank.code);
+      const xmlContent = await this.generateXML(records, bank.code);
       const fileName = this.generateFileName(bank.code);
       
       // Utiliser xml_output_url ou créer un sous-dossier xml_output
       const xmlOutputPath = bank.xml_output_url || 
-        path.join(path.dirname(bank.destination_url), 'xml_output');
+        path.join(path.dirname(bank.destination_url || '/tmp'), 'xml_output');
       
       const filePath = await this.saveXML(xmlContent, xmlOutputPath, fileName);
       
       return {
         success: true,
-        fileName,
         filePath,
-        recordsCount: records.length,
+        fileName,
         xmlEntriesCount: records.length * 2 // add + setAuthMethod pour chaque enregistrement
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error.message
-      };
+      console.error('Error processing XML:', error);
+      throw error;
     }
   }
 }

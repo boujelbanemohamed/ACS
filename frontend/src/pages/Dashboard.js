@@ -75,9 +75,9 @@ const Dashboard = () => {
       path: '/processing'
     },
     {
-      title: 'Erreurs en attente',
+      title: 'Lignes en erreur',
       value: stats.pendingErrors,
-      subtitle: 'Erreurs a corriger',
+      subtitle: 'Lignes a corriger',
       icon: AlertTriangle,
       color: stats.pendingErrors > 0 ? 'red' : 'green',
       path: '/records'

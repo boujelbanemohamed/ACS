@@ -268,7 +268,7 @@ const History = () => {
             <div className="stat-icon"><XCircle size={24} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.error_count || 0}</span>
-              <span className="stat-label">Erreurs</span>
+              <span className="stat-label">Fichiers en erreur</span>
             </div>
           </div>
         </div>
