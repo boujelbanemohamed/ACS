@@ -131,12 +131,7 @@ const Processing = () => {
     fetchBanks();
   }, []);
 
-  // Auto-select bank for bank users
-  useEffect(() => {
-    if (user?.role === 'bank' && user?.bank_id && banks.length > 0) {
-      setSelectedBank(user.bank_id.toString());
-    }
-  }, [user, banks]);
+  
 
   useEffect(() => {
     if (result) {
@@ -218,8 +213,21 @@ const Processing = () => {
 
   const fetchBanks = async () => {
     try {
-      const response = await banksAPI.getAll();
-      setBanks(response.data.data.filter(b => b.is_active));
+      let response;
+      if (user?.role === 'bank' && user?.bank_id) {
+        // Utilisateur banque: ne récupère que sa banque
+        response = await api.get('/banks?bankId=' + user.bank_id);
+      } else {
+        // Admin: récupère toutes les banques
+        response = await banksAPI.getAll();
+      }
+      const banksData = (response.data.data || []).filter(b => b.is_active);
+      setBanks(banksData);
+      
+      // Auto-sélectionner si utilisateur banque
+      if (user?.role === 'bank' && user?.bank_id && banksData.length > 0) {
+        setSelectedBank(user.bank_id.toString());
+      }
     } catch (error) {
       console.error('Error fetching banks:', error);
     }

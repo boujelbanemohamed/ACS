@@ -9,6 +9,7 @@ const router = express.Router();
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { bankId } = req.query;
+    
     let query = `
       SELECT 
         b.*,
@@ -17,9 +18,14 @@ router.get('/', authMiddleware, async (req, res) => {
       FROM banks b
       LEFT JOIN processed_records pr ON b.id = pr.bank_id
       LEFT JOIN file_logs fl ON b.id = fl.bank_id
-      GROUP BY b.id
-      ORDER BY b.name
     `;
+    
+    // Filtrer par bankId si fourni
+    if (bankId) {
+      query += ' WHERE b.id = ' + parseInt(bankId);
+    }
+    
+    query += ' GROUP BY b.id ORDER BY b.name';
     
     const result = await db.query(query);
 

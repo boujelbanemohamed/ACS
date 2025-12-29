@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { banksAPI } from '../services/api';
-import { Plus, Edit2, Trash2, Building2, FolderTree, FolderInput, Folder, FolderOutput, FileCode } from 'lucide-react';
+import { Building2, Plus, Edit2, Trash2, Eye, Check, X, RefreshCw, ExternalLink, FileText, ArrowRight } from 'lucide-react';
+import api from '../services/api';
 import './Banks.css';
 
 const Banks = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'super_admin';
+  
   const [banks, setBanks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [viewingBank, setViewingBank] = useState(null);
   const [editingBank, setEditingBank] = useState(null);
   const [formData, setFormData] = useState({
     code: '',
@@ -18,9 +21,8 @@ const Banks = () => {
     destination_url: '',
     old_url: '',
     xml_output_url: '',
-    is_active: true,
+    is_active: true
   });
-  const [formErrors, setFormErrors] = useState({});
 
   useEffect(() => {
     fetchBanks();
@@ -28,8 +30,9 @@ const Banks = () => {
 
   const fetchBanks = async () => {
     try {
-      const response = await banksAPI.getAll();
-      setBanks(response.data.data);
+      const bankParam = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
+      const response = await api.get('/banks' + bankParam);
+      setBanks(response.data.data || []);
     } catch (error) {
       console.error('Error fetching banks:', error);
     } finally {
@@ -37,64 +40,53 @@ const Banks = () => {
     }
   };
 
-  const validateForm = () => {
-    const errors = {};
-    if (!formData.code.trim()) errors.code = 'Le code est obligatoire';
-    if (!formData.name.trim()) errors.name = 'Le nom est obligatoire';
-    if (!formData.source_url.trim()) errors.source_url = 'URL Source est obligatoire';
-    if (!formData.destination_url.trim()) errors.destination_url = 'URL Destination est obligatoire';
-    if (!formData.old_url.trim()) errors.old_url = 'URL Archives est obligatoire';
-    if (!formData.xml_output_url.trim()) errors.xml_output_url = 'XML Output est obligatoire';
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validateForm()) return;
-    
-    try {
-      if (editingBank) {
-        await banksAPI.update(editingBank.id, formData);
-      } else {
-        await banksAPI.create(formData);
-      }
-      setShowModal(false);
-      setEditingBank(null);
-      resetForm();
-      fetchBanks();
-    } catch (error) {
-      alert(error.response?.data?.message || 'Erreur lors de la sauvegarde');
-    }
+  const handleView = (bank) => {
+    setViewingBank(bank);
+    setShowViewModal(true);
   };
 
   const handleEdit = (bank) => {
     setEditingBank(bank);
     setFormData({
-      code: bank.code || '',
-      name: bank.name || '',
+      code: bank.code,
+      name: bank.name,
       source_url: bank.source_url || '',
       destination_url: bank.destination_url || '',
       old_url: bank.old_url || '',
       xml_output_url: bank.xml_output_url || '',
-      is_active: bank.is_active,
+      is_active: bank.is_active
     });
-    setFormErrors({});
     setShowModal(true);
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Etes-vous sur de vouloir supprimer cette banque ?')) {
-      try {
-        await banksAPI.delete(id);
-        fetchBanks();
-      } catch (error) {
-        alert(error.response?.data?.message || 'Erreur lors de la suppression');
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingBank) {
+        await api.put('/banks/' + editingBank.id, formData);
+      } else {
+        await api.post('/banks', formData);
       }
+      fetchBanks();
+      closeModal();
+    } catch (error) {
+      alert('Erreur: ' + (error.response?.data?.message || error.message));
     }
   };
 
-  const resetForm = () => {
+  const handleDelete = async (id) => {
+    if (!window.confirm('Supprimer cette banque ?')) return;
+    try {
+      await api.delete('/banks/' + id);
+      fetchBanks();
+    } catch (error) {
+      alert('Erreur: ' + error.message);
+    }
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingBank(null);
     setFormData({
       code: '',
       name: '',
@@ -102,315 +94,281 @@ const Banks = () => {
       destination_url: '',
       old_url: '',
       xml_output_url: '',
-      is_active: true,
+      is_active: true
     });
-    setFormErrors({});
   };
 
-  const handleOpenModal = () => {
-    resetForm();
-    setEditingBank(null);
-    setShowModal(true);
-  };
-
-  if (loading) return <div className="loading">Chargement...</div>;
+  if (loading) {
+    return <div className="loading"><RefreshCw size={32} className="spin" /> Chargement...</div>;
+  }
 
   return (
     <div className="banks-page">
       <div className="page-header">
-        <h1>Liste des Banques</h1>
-        <button className="btn btn-primary" onClick={handleOpenModal}>
-          <Plus size={20} /> Ajouter une banque
-        </button>
+        <h1><Building2 size={28} /> {isAdmin ? 'Gestion des Banques' : 'Ma Banque'}</h1>
+        {isAdmin && (
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={18} /> Nouvelle Banque
+          </button>
+        )}
       </div>
 
       <div className="banks-grid">
-        {banks.map((bank) => (
-          <div key={bank.id} className="bank-card">
+        {banks.map(bank => (
+          <div key={bank.id} className={'bank-card ' + (bank.is_active ? 'active' : 'inactive')}>
             <div className="bank-header">
               <div className="bank-icon">
                 <Building2 size={32} />
               </div>
-              <div>
+              <div className="bank-info">
                 <h3>{bank.name}</h3>
                 <span className="bank-code">{bank.code}</span>
               </div>
-              {bank.is_active && <span className="badge badge-success">Active</span>}
+              <span className={'status-badge ' + (bank.is_active ? 'active' : 'inactive')}>
+                {bank.is_active ? 'Active' : 'Inactive'}
+              </span>
             </div>
 
-            <div className="bank-stats-small">
-              <div className="stat-item">
-                <span className="stat-label">Fichiers</span>
-                <span className="stat-value">{bank.total_files_processed || 0}</span>
-              </div>
-              <div className="stat-item">
-                <span className="stat-label">Enregistrements</span>
+            <div className="bank-stats">
+              <div className="stat">
                 <span className="stat-value">{bank.total_records || 0}</span>
+                <span className="stat-label">Enregistrements</span>
               </div>
-            </div>
-
-            <div className="bank-urls">
-              <div className="url-item">
-                <strong>Source:</strong> <span>{bank.source_url}</span>
-              </div>
-              <div className="url-item">
-                <strong>Destination:</strong> <span>{bank.destination_url}</span>
-              </div>
-              <div className="url-item">
-                <strong>Archives:</strong> <span>{bank.old_url}</span>
-              </div>
-              <div className={`url-item ${bank.xml_output_url ? 'xml-url' : 'xml-url-missing'}`}>
-                <strong>XML Output:</strong> <span>{bank.xml_output_url || 'Non defini'}</span>
+              <div className="stat">
+                <span className="stat-value">{bank.total_files_processed || 0}</span>
+                <span className="stat-label">Fichiers</span>
               </div>
             </div>
 
             <div className="bank-actions">
-              <button className="btn btn-sm btn-secondary" onClick={() => handleEdit(bank)}>
-                <Edit2 size={16} /> Modifier
+              <button className="btn btn-secondary" onClick={() => handleView(bank)}>
+                <Eye size={16} /> Voir
               </button>
-              <button className="btn btn-sm btn-danger" onClick={() => handleDelete(bank.id)}>
-                <Trash2 size={16} /> Supprimer
-              </button>
+              {isAdmin && (
+                <>
+                  <button className="btn btn-secondary" onClick={() => handleEdit(bank)}>
+                    <Edit2 size={16} /> Modifier
+                  </button>
+                  <button className="btn btn-danger" onClick={() => handleDelete(bank.id)}>
+                    <Trash2 size={16} />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Section Structure des dossiers */}
-      <div className="folder-structure-section">
-        <div className="section-header">
-          <FolderTree size={24} />
-          <h2>Structure typique des dossiers</h2>
-        </div>
-        
-        <div className="folder-structure-content">
-          <div className="folder-explanation">
-            <p>Voici comment organiser vos dossiers pour chaque banque. L'application utilise cette structure pour traiter automatiquement les fichiers CSV et generer les fichiers XML.</p>
-          </div>
-
-          <div className="folder-tree">
-            <div className="tree-container">
-              <pre>{`/data/banks/
-├── STB/
-│   ├── input/          <- URL Source (fichiers CSV a traiter)
-│   ├── output/         <- URL Destination (fichiers CSV traites)
-│   ├── archives/       <- URL Archives (historique)
-│   └── xml_output/     <- XML Output (fichiers XML generes)
-├── BNA/
-│   ├── input/
-│   ├── output/
-│   ├── archives/
-│   └── xml_output/
-└── BIAT/
-    ├── input/
-    ├── output/
-    ├── archives/
-    └── xml_output/`}</pre>
+      {/* Documentation - visible uniquement pour admin */}
+      {isAdmin && (
+        <div className="bank-documentation">
+          <h2>Documentation</h2>
+          
+          <div className="doc-section">
+            <h3>Structure typique des dossiers</h3>
+            <div className="folder-structure">
+              <code>
+                /ACS/[CODE_BANQUE]/<br/>
+                ├── source/      (fichiers CSV a traiter)<br/>
+                ├── destination/ (fichiers traites)<br/>
+                ├── archive/     (anciens fichiers)<br/>
+                └── xml/         (fichiers XML generes)
+              </code>
             </div>
           </div>
 
-          <div className="folder-flow">
-            <h3>Flux de traitement des fichiers</h3>
-            <div className="flow-steps">
-              <div className="flow-step">
-                <div className="step-icon source">
-                  <FolderInput size={24} />
-                </div>
-                <div className="step-content">
-                  <h4>1. Depot CSV</h4>
-                  <p>Le fichier CSV est depose dans le dossier input (URL Source)</p>
-                </div>
-              </div>
-              
-              <div className="flow-arrow">→</div>
-              
-              <div className="flow-step">
-                <div className="step-icon process">
-                  <Folder size={24} />
-                </div>
-                <div className="step-content">
-                  <h4>2. Traitement</h4>
-                  <p>L'application detecte, lit et valide le fichier CSV</p>
-                </div>
-              </div>
-              
-              <div className="flow-arrow">→</div>
-              
-              <div className="flow-step">
-                <div className="step-icon destination">
-                  <FolderOutput size={24} />
-                </div>
-                <div className="step-content">
-                  <h4>3. Sortie CSV</h4>
-                  <p>CSV valide deplace vers output et copie dans archives</p>
-                </div>
-              </div>
-
-              <div className="flow-arrow">→</div>
-              
-              <div className="flow-step">
-                <div className="step-icon xml">
-                  <FileCode size={24} />
-                </div>
-                <div className="step-content">
-                  <h4>4. Generation XML</h4>
-                  <p>Fichier XML genere dans xml_output</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="xml-format-info">
+          <div className="doc-section">
             <h3>Format du fichier XML genere</h3>
             <div className="xml-example">
-              <pre>{`<?xml version="1.0" encoding="ISO-8859-15"?>
-<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">
-  <add id="1" cardNumber="4741560171719668" profileId="STB" cardStatus="ACTIVE">
-    <oneTimePasswordSMS phoneNumber="+21624080852"></oneTimePasswordSMS>
-  </add>
-  <setAuthMethod id="2" cardNumber="4741560171719668" profileId="STB">
-    <oneTimePasswordSMS phoneNumber="+21624080852"></oneTimePasswordSMS>
-  </setAuthMethod>
-</cardRegistryRecords>`}</pre>
-            </div>
-            <div className="xml-mapping">
-              <h4>Correspondance CSV vers XML</h4>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Champ CSV</th>
-                    <th>Attribut XML</th>
-                    <th>Transformation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><code>pan</code></td>
-                    <td><code>cardNumber</code></td>
-                    <td>Conversion notation scientifique vers nombre complet</td>
-                  </tr>
-                  <tr>
-                    <td><code>phone</code></td>
-                    <td><code>phoneNumber</code></td>
-                    <td>Ajout du prefixe +</td>
-                  </tr>
-                  <tr>
-                    <td>Code banque</td>
-                    <td><code>profileId</code></td>
-                    <td>Code de la banque (STB, BNA, etc.)</td>
-                  </tr>
-                </tbody>
-              </table>
+              <code>
+{`<?xml version="1.0" encoding="UTF-8"?>
+<CardList>
+  <Card>
+    <PAN>4111111111111111</PAN>
+    <ExpiryDate>12/25</ExpiryDate>
+    <PhoneNumber>+21612345678</PhoneNumber>
+    ...
+  </Card>
+</CardList>`}
+              </code>
             </div>
           </div>
 
-          <div className="folder-notes">
+          <div className="doc-section">
             <h3>Points importants</h3>
             <ul>
-              <li>Les dossiers doivent exister sur le serveur avant de configurer la banque</li>
-              <li>L'application doit avoir les droits de lecture/ecriture sur ces dossiers</li>
-              <li>Le scan automatique verifie periodiquement l'URL Source de chaque banque active</li>
-              <li>Utilisez des chemins absolus (ex: /data/banks/STB/input)</li>
-              <li>Le fichier XML est genere automatiquement apres le traitement reussi du CSV</li>
-              <li>Le profileId dans le XML correspond au code de la banque</li>
+              <li>Les fichiers CSV doivent utiliser le point-virgule (;) comme separateur</li>
+              <li>L encodage doit etre UTF-8</li>
+              <li>Le numero de telephone doit commencer par +216</li>
+              <li>Le PAN doit contenir entre 13 et 19 chiffres</li>
             </ul>
           </div>
         </div>
-      </div>
+      )}
 
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingBank ? 'Modifier la banque' : 'Ajouter une banque'}</h2>
+      {/* Modal Vue - pour utilisateurs banque */}
+      {showViewModal && viewingBank && (
+        <div className="modal-overlay" onClick={() => setShowViewModal(false)}>
+          <div className="modal-content modal-view" onClick={(e) => e.stopPropagation()}>
+            <h2><Building2 size={24} /> {viewingBank.name}</h2>
+            
+            <div className="view-section">
+              <h3>Informations generales</h3>
+              <div className="info-grid">
+                <div className="info-item">
+                  <label>Code</label>
+                  <span>{viewingBank.code}</span>
+                </div>
+                <div className="info-item">
+                  <label>Nom</label>
+                  <span>{viewingBank.name}</span>
+                </div>
+                <div className="info-item">
+                  <label>Statut</label>
+                  <span className={'status-badge ' + (viewingBank.is_active ? 'active' : 'inactive')}>
+                    {viewingBank.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="view-section">
+              <h3>Flux de traitement</h3>
+              <div className="flow-diagram">
+                <div className="flow-step">
+                  <div className="flow-icon"><FileText size={24} /></div>
+                  <div className="flow-label">Fichier CSV</div>
+                  <div className="flow-desc">Upload ou scan automatique</div>
+                </div>
+                <ArrowRight size={24} className="flow-arrow" />
+                <div className="flow-step">
+                  <div className="flow-icon"><Check size={24} /></div>
+                  <div className="flow-label">Validation</div>
+                  <div className="flow-desc">Verification des donnees</div>
+                </div>
+                <ArrowRight size={24} className="flow-arrow" />
+                <div className="flow-step">
+                  <div className="flow-icon"><FileText size={24} /></div>
+                  <div className="flow-label">Generation XML</div>
+                  <div className="flow-desc">Fichier ACS</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="view-section">
+              <h3>Statistiques</h3>
+              <div className="info-grid">
+                <div className="info-item">
+                  <label>Total enregistrements</label>
+                  <span>{viewingBank.total_records || 0}</span>
+                </div>
+                <div className="info-item">
+                  <label>Fichiers traites</label>
+                  <span>{viewingBank.total_files_processed || 0}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowViewModal(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edition - admin seulement */}
+      {showModal && isAdmin && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>{editingBank ? 'Modifier la banque' : 'Nouvelle banque'}</h2>
             <form onSubmit={handleSubmit}>
-              <div className={`form-group ${formErrors.code ? 'has-error' : ''}`}>
-                <label>Code <span className="required">*</span></label>
-                <input
-                  type="text"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                  placeholder="STB"
-                />
-                {formErrors.code && <span className="error-text">{formErrors.code}</span>}
-                <small>Identifiant court unique - sera utilise comme profileId dans le XML</small>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Code *</label>
+                  <input
+                    type="text"
+                    value={formData.code}
+                    onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                    required
+                    maxLength={10}
+                    placeholder="Ex: ATB"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Nom *</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    required
+                    placeholder="Arab Tunisian Bank"
+                  />
+                </div>
               </div>
-              
-              <div className={`form-group ${formErrors.name ? 'has-error' : ''}`}>
-                <label>Nom <span className="required">*</span></label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Societe Tunisienne de Banque"
-                />
-                {formErrors.name && <span className="error-text">{formErrors.name}</span>}
-              </div>
-              
-              <div className={`form-group ${formErrors.source_url ? 'has-error' : ''}`}>
-                <label>URL Source (CSV Input) <span className="required">*</span></label>
+
+              <div className="form-group">
+                <label>URL Source *</label>
                 <input
                   type="text"
                   value={formData.source_url}
-                  onChange={(e) => setFormData({ ...formData, source_url: e.target.value })}
-                  placeholder="/data/banks/STB/input"
+                  onChange={(e) => setFormData({...formData, source_url: e.target.value})}
+                  required
+                  placeholder="https://serveur/ACS/ATB/source"
                 />
-                {formErrors.source_url && <span className="error-text">{formErrors.source_url}</span>}
-                <small>Dossier ou deposer les fichiers CSV a traiter</small>
               </div>
-              
-              <div className={`form-group ${formErrors.destination_url ? 'has-error' : ''}`}>
-                <label>URL Destination (CSV Output) <span className="required">*</span></label>
+
+              <div className="form-group">
+                <label>URL Destination *</label>
                 <input
                   type="text"
                   value={formData.destination_url}
-                  onChange={(e) => setFormData({ ...formData, destination_url: e.target.value })}
-                  placeholder="/data/banks/STB/output"
+                  onChange={(e) => setFormData({...formData, destination_url: e.target.value})}
+                  required
+                  placeholder="https://serveur/ACS/ATB/destination"
                 />
-                {formErrors.destination_url && <span className="error-text">{formErrors.destination_url}</span>}
-                <small>Dossier ou seront deplaces les fichiers CSV traites</small>
               </div>
-              
-              <div className={`form-group ${formErrors.old_url ? 'has-error' : ''}`}>
-                <label>URL Archives <span className="required">*</span></label>
+
+              <div className="form-group">
+                <label>URL Archive *</label>
                 <input
                   type="text"
                   value={formData.old_url}
-                  onChange={(e) => setFormData({ ...formData, old_url: e.target.value })}
-                  placeholder="/data/banks/STB/archives"
+                  onChange={(e) => setFormData({...formData, old_url: e.target.value})}
+                  required
+                  placeholder="https://serveur/ACS/ATB/archive"
                 />
-                {formErrors.old_url && <span className="error-text">{formErrors.old_url}</span>}
-                <small>Dossier pour l'archivage des fichiers</small>
               </div>
-              
-              <div className={`form-group ${formErrors.xml_output_url ? 'has-error' : ''}`}>
-                <label>XML Output <span className="required">*</span></label>
+
+              <div className="form-group">
+                <label>URL Sortie XML *</label>
                 <input
                   type="text"
                   value={formData.xml_output_url}
-                  onChange={(e) => setFormData({ ...formData, xml_output_url: e.target.value })}
-                  placeholder="/data/banks/STB/xml_output"
+                  onChange={(e) => setFormData({...formData, xml_output_url: e.target.value})}
+                  required
+                  placeholder="https://serveur/ACS/ATB/xml"
                 />
-                {formErrors.xml_output_url && <span className="error-text">{formErrors.xml_output_url}</span>}
-                <small>Dossier ou seront generes les fichiers XML (obligatoire)</small>
               </div>
-              
-              <div className="form-group checkbox-group">
-                <label>
+
+              <div className="form-group">
+                <label className="checkbox-label">
                   <input
                     type="checkbox"
                     checked={formData.is_active}
-                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                    onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
                   />
                   Banque active
                 </label>
               </div>
-              
+
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
+                <button type="button" className="btn btn-secondary" onClick={closeModal}>
                   Annuler
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  {editingBank ? 'Mettre a jour' : 'Creer'}
+                  {editingBank ? 'Modifier' : 'Creer'}
                 </button>
               </div>
             </form>
