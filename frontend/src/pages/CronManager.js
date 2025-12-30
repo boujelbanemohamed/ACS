@@ -421,10 +421,38 @@ const CronManager = () => {
                   <tr key={log.id}>
                     <td>{new Date(log.scan_time).toLocaleString('fr-FR')}</td>
                     <td>{log.banks_scanned}</td>
-                    <td>{log.files_found}</td>
-                    <td>{log.files_processed}</td>
-                    <td>{log.enrollment_files_found || 0}</td>
-                    <td>{log.enrollment_files_processed || 0}</td>
+                    <td>
+                      <div className="scan-stat">
+                        <span className="stat-number">{log.files_found}</span>
+                        <span className={'stat-status ' + (log.files_found >= 0 ? 'success' : 'error')}>
+                          {log.files_found > 0 ? 'Fichiers detectes' : 'Aucun fichier'}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="scan-stat">
+                        <span className="stat-number">{log.files_processed}</span>
+                        <span className={'stat-status ' + (log.files_found === 0 || log.files_processed === log.files_found ? 'success' : 'warning')}>
+                          {log.files_found === 0 ? 'RAS' : log.files_processed === log.files_found ? 'Tous traites' : 'Partiellement traite'}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="scan-stat">
+                        <span className="stat-number">{log.enrollment_files_found || 0}</span>
+                        <span className={'stat-status ' + ((log.enrollment_files_found || 0) >= 0 ? 'success' : 'error')}>
+                          {(log.enrollment_files_found || 0) > 0 ? 'Rapports detectes' : 'Aucun rapport'}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="scan-stat">
+                        <span className="stat-number">{log.enrollment_files_processed || 0}</span>
+                        <span className={'stat-status ' + ((log.enrollment_files_found || 0) === 0 || (log.enrollment_files_processed || 0) === (log.enrollment_files_found || 0) ? 'success' : 'warning')}>
+                          {(log.enrollment_files_found || 0) === 0 ? 'RAS' : (log.enrollment_files_processed || 0) === (log.enrollment_files_found || 0) ? 'Tous traites' : 'Partiellement traite'}
+                        </span>
+                      </div>
+                    </td>
                     <td>
                       {log.errors_count > 0 ? (
                         <span className="error-count">{log.errors_count}</span>
