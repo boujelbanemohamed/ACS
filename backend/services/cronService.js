@@ -111,7 +111,8 @@ class CronService {
       filesProcessed: 0,
       enrollmentFilesFound: 0,
       enrollmentFilesProcessed: 0,
-      errors: []
+      errors: [],
+      bankDetails: []
     };
 
     try {
@@ -155,8 +156,8 @@ class CronService {
   async logScan(result) {
     try {
       await db.query(`
-        INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail, bank_details)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       `, [
         result.startTime,
         result.banksScanned,
@@ -165,7 +166,8 @@ class CronService {
         result.enrollmentFilesFound || 0,
         result.enrollmentFilesProcessed || 0,
         result.errors.length,
-        JSON.stringify(result.errors)
+        JSON.stringify(result.errors),
+        JSON.stringify(result.bankDetails || [])
       ]);
     } catch (error) {
       console.error('Error logging scan:', error);

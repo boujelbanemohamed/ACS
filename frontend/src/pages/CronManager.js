@@ -17,6 +17,9 @@ const CronManager = () => {
   const [triggering, setTriggering] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [scanLogs, setScanLogs] = useState([]);
+  const [selectedLog, setSelectedLog] = useState(null);
+  const [showLogDetail, setShowLogDetail] = useState(false);
 
   const presetSchedules = [
     { value: '*/1 * * * *', label: 'Toutes les minutes' },
@@ -412,6 +415,7 @@ const CronManager = () => {
                   <th>CSV Traités</th>
                   <th>Enrolement Trouvés</th>
                   <th>Enrolement Traités</th>
+                  <th>Actions</th>
                   <th>Erreurs</th>
                   <th>Statut</th>
                 </tr>
@@ -454,6 +458,14 @@ const CronManager = () => {
                       </div>
                     </td>
                     <td>
+                      <button 
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => { setSelectedLog(log); setShowLogDetail(true); }}
+                      >
+                        Voir details
+                      </button>
+                    </td>
+                    <td>
                       {log.errors_count > 0 ? (
                         <span className="error-count">{log.errors_count}</span>
                       ) : (
@@ -474,6 +486,96 @@ const CronManager = () => {
           </div>
         )}
       </div>
+
+      {/* Modal Détails du Scan */}
+      {showLogDetail && selectedLog && (
+        <div className="modal-overlay" onClick={() => setShowLogDetail(false)}>
+          <div className="scan-detail-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Détails du Scan - {new Date(selectedLog.scan_time).toLocaleString('fr-FR')}</h2>
+              <button className="btn-close" onClick={() => setShowLogDetail(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="scan-summary">
+                <div className="summary-item">
+                  <span className="label">Banques scannées</span>
+                  <span className="value">{selectedLog.banks_scanned}</span>
+                </div>
+                <div className="summary-item success">
+                  <span className="label">CSV traités</span>
+                  <span className="value">{selectedLog.files_processed}/{selectedLog.files_found}</span>
+                </div>
+                <div className="summary-item info">
+                  <span className="label">Enrôlement traités</span>
+                  <span className="value">{selectedLog.enrollment_files_processed || 0}/{selectedLog.enrollment_files_found || 0}</span>
+                </div>
+              </div>
+
+              <h3>Détails par banque</h3>
+              {selectedLog.bank_details && JSON.parse(selectedLog.bank_details).length > 0 ? (
+                <div className="bank-details-list">
+                  {JSON.parse(selectedLog.bank_details).map((bank, idx) => (
+                    <div key={idx} className="bank-detail-card">
+                      <div className="bank-header">
+                        <span className="bank-name">{bank.bankName}</span>
+                        <span className="bank-code">{bank.bankCode}</span>
+                      </div>
+                      <div className="bank-paths">
+                        <div className="path-item">
+                          <span className="path-label">CSV Trouvés</span>
+                          <span className="path-count">{bank.csvFound}</span>
+                          <span className="path-url">{bank.sourceUrl || 'Non configuré'}</span>
+                        </div>
+                        <div className="path-item">
+                          <span className="path-label">CSV Traités</span>
+                          <span className="path-count">{bank.csvProcessed}</span>
+                          <span className="path-url">{bank.destinationUrl || 'Non configuré'}</span>
+                        </div>
+                        <div className="path-item">
+                          <span className="path-label">CSV Archivés</span>
+                          <span className="path-count">-</span>
+                          <span className="path-url">{bank.oldUrl || 'Non configuré'}</span>
+                        </div>
+                        <div className="path-item">
+                          <span className="path-label">XML Générés</span>
+                          <span className="path-count">{bank.xmlGenerated || 0}</span>
+                          <span className="path-url">{bank.xmlOutputUrl || 'Non configuré'}</span>
+                        </div>
+                        <div className="path-item">
+                          <span className="path-label">Enrôlement Trouvés</span>
+                          <span className="path-count">{bank.enrollmentFound}</span>
+                          <span className="path-url">{bank.enrollmentReportUrl || 'Non configuré'}</span>
+                        </div>
+                        <div className="path-item">
+                          <span className="path-label">Enrôlement Traités</span>
+                          <span className="path-count">{bank.enrollmentProcessed}</span>
+                          <span className="path-url">-</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="no-details">Aucun détail disponible pour ce scan</p>
+              )}
+
+              {selectedLog.errors_count > 0 && selectedLog.errors_detail && (
+                <div className="errors-section">
+                  <h3>Erreurs ({selectedLog.errors_count})</h3>
+                  <div className="errors-list">
+                    {JSON.parse(selectedLog.errors_detail).map((err, idx) => (
+                      <div key={idx} className="error-item">
+                        <span className="error-bank">{err.bank || 'Système'}</span>
+                        <span className="error-msg">{err.error}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

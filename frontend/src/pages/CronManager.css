@@ -543,3 +543,229 @@
   background: #fee2e2;
   color: #991b1b;
 }
+
+
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Scan Detail Modal */
+.scan-detail-modal {
+  background: white;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 900px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.scan-detail-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.scan-detail-modal .modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #1f2937;
+}
+
+.scan-detail-modal .btn-close {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #6b7280;
+  line-height: 1;
+}
+
+.scan-detail-modal .btn-close:hover {
+  color: #1f2937;
+}
+
+.scan-detail-modal .modal-body {
+  padding: 24px;
+  overflow-y: auto;
+}
+
+/* Scan Summary */
+.scan-summary {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.scan-summary .summary-item {
+  flex: 1;
+  background: #f3f4f6;
+  padding: 16px;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.scan-summary .summary-item.success {
+  background: #d1fae5;
+}
+
+.scan-summary .summary-item.info {
+  background: #dbeafe;
+}
+
+.scan-summary .summary-item .label {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.scan-summary .summary-item .value {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Bank Details */
+.scan-detail-modal h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #374151;
+}
+
+.bank-details-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bank-detail-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.bank-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #667eea;
+  color: white;
+}
+
+.bank-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.bank-code {
+  background: rgba(255,255,255,0.2);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.bank-paths {
+  padding: 12px 16px;
+}
+
+.path-item {
+  display: grid;
+  grid-template-columns: 150px 60px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 13px;
+}
+
+.path-item:last-child {
+  border-bottom: none;
+}
+
+.path-label {
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.path-count {
+  font-weight: 700;
+  color: #1f2937;
+  text-align: center;
+  background: #e5e7eb;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.path-url {
+  color: #3b82f6;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-details {
+  color: #9ca3af;
+  text-align: center;
+  padding: 24px;
+}
+
+/* Errors Section */
+.errors-section {
+  margin-top: 24px;
+  background: #fee2e2;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.errors-section h3 {
+  color: #991b1b;
+}
+
+.errors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.error-item {
+  display: flex;
+  gap: 12px;
+  background: white;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.error-bank {
+  font-weight: 600;
+  color: #991b1b;
+  min-width: 100px;
+}
+
+.error-msg {
+  color: #7f1d1d;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
