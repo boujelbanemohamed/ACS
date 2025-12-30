@@ -408,8 +408,10 @@ const CronManager = () => {
                 <tr>
                   <th>Date & Heure</th>
                   <th>Banques</th>
-                  <th>Fichiers Trouvés</th>
-                  <th>Fichiers Traités</th>
+                  <th>CSV Trouvés</th>
+                  <th>CSV Traités</th>
+                  <th>Enrolement Trouvés</th>
+                  <th>Enrolement Traités</th>
                   <th>Erreurs</th>
                   <th>Statut</th>
                 </tr>
@@ -421,6 +423,8 @@ const CronManager = () => {
                     <td>{log.banks_scanned}</td>
                     <td>{log.files_found}</td>
                     <td>{log.files_processed}</td>
+                    <td>{log.enrollment_files_found || 0}</td>
+                    <td>{log.enrollment_files_processed || 0}</td>
                     <td>
                       {log.errors_count > 0 ? (
                         <span className="error-count">{log.errors_count}</span>

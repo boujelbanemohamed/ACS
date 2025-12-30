@@ -1,6 +1,9 @@
 const cron = require('node-cron');
 const db = require('../config/database');
 const bankScanner = require('./bankScanner');
+const enrollmentService = require('./enrollmentService');
+const fs = require('fs').promises;
+const path = require('path');
 
 class CronService {
   constructor() {
@@ -106,6 +109,8 @@ class CronService {
       banksScanned: 0,
       filesFound: 0,
       filesProcessed: 0,
+      enrollmentFilesFound: 0,
+      enrollmentFilesProcessed: 0,
       errors: []
     };
 
@@ -150,19 +155,106 @@ class CronService {
   async logScan(result) {
     try {
       await db.query(`
-        INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, errors_count, errors_detail)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [
         result.startTime,
         result.banksScanned,
         result.filesFound,
         result.filesProcessed,
+        result.enrollmentFilesFound || 0,
+        result.enrollmentFilesProcessed || 0,
         result.errors.length,
         JSON.stringify(result.errors)
       ]);
     } catch (error) {
       console.error('Error logging scan:', error);
     }
+  }
+
+  async scanEnrollmentReports(bank) {
+    const result = {
+      filesFound: 0,
+      filesProcessed: 0,
+      errors: []
+    };
+
+    // Vérifier si la banque a une URL de rapport d'enrôlement configurée
+    if (!bank.enrollment_report_url) {
+      return result;
+    }
+
+    try {
+      // Vérifier si le dossier existe
+      const dirPath = bank.enrollment_report_url;
+      
+      try {
+        await fs.access(dirPath);
+      } catch {
+        // Le dossier n'existe pas, on le crée
+        await fs.mkdir(dirPath, { recursive: true });
+        return result;
+      }
+
+      // Lire les fichiers du dossier
+      const files = await fs.readdir(dirPath);
+      const xmlFiles = files.filter(f => f.toLowerCase().endsWith('.xml') && f.includes('_out'));
+      
+      result.filesFound = xmlFiles.length;
+
+      for (const fileName of xmlFiles) {
+        const filePath = path.join(dirPath, fileName);
+        
+        try {
+          // Vérifier si ce fichier a déjà été traité
+          const existingLog = await db.query(
+            'SELECT id FROM enrollment_logs WHERE file_name = $1 AND bank_id = $2',
+            [fileName, bank.id]
+          );
+          
+          if (existingLog.rows.length > 0) {
+            // Fichier déjà traité, on passe
+            continue;
+          }
+          
+          // Traiter le fichier
+          console.log('Processing enrollment report: ' + fileName + ' for bank ' + bank.name);
+          
+          const processResult = await enrollmentService.processEnrollmentReport(filePath, bank.id, fileName);
+          
+          if (processResult.success) {
+            result.filesProcessed++;
+            
+            // Déplacer le fichier vers un dossier "processed"
+            const processedDir = path.join(dirPath, 'processed');
+            await fs.mkdir(processedDir, { recursive: true });
+            
+            const newPath = path.join(processedDir, fileName);
+            await fs.rename(filePath, newPath);
+            
+            console.log('Enrollment report processed: ' + fileName + ' - ' + processResult.message);
+          } else {
+            result.errors.push({
+              file: fileName,
+              error: processResult.message
+            });
+          }
+        } catch (fileError) {
+          console.error('Error processing enrollment file ' + fileName + ':', fileError);
+          result.errors.push({
+            file: fileName,
+            error: fileError.message
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error scanning enrollment directory for bank ' + bank.name + ':', error);
+      result.errors.push({
+        error: error.message
+      });
+    }
+
+    return result;
   }
 
   getStatus() {
