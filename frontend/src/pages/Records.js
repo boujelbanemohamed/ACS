@@ -46,6 +46,8 @@ const Records = () => {
     error: null
   });
   const [enrollmentFile, setEnrollmentFile] = useState(null);
+  const [enrollmentLogDetail, setEnrollmentLogDetail] = useState(null);
+  const [showLogDetailModal, setShowLogDetailModal] = useState(false);
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
   const [enrollmentResult, setEnrollmentResult] = useState(null);
   const [enrollmentLogs, setEnrollmentLogs] = useState([]);
@@ -96,6 +98,21 @@ const Records = () => {
     } catch (error) {
       console.error('Error fetching enrollment data:', error);
     }
+  };
+
+  const viewEnrollmentLogDetail = (log) => {
+    setEnrollmentLogDetail(log);
+    setShowLogDetailModal(true);
+  };
+
+  const downloadNotFoundIds = (ids, fileName) => {
+    const csvContent = 'ID XML Non Trouve\n' + ids.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName || 'ids_non_trouves.csv';
+    a.click();
   };
 
   const handleEnrollmentUpload = async () => {
@@ -632,14 +649,24 @@ const Records = () => {
                   </label>
                 </div>
                 
-                <button 
-                  className="btn btn-primary"
-                  onClick={handleEnrollmentUpload}
-                  disabled={!enrollmentFile || enrollmentLoading}
-                >
-                  {enrollmentLoading ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}
-                  {enrollmentLoading ? 'Traitement...' : 'Importer et traiter'}
-                </button>
+                <div className="upload-buttons">
+                  <button 
+                    className="btn btn-primary"
+                    onClick={handleEnrollmentUpload}
+                    disabled={!enrollmentFile || enrollmentLoading}
+                  >
+                    {enrollmentLoading ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}
+                    {enrollmentLoading ? 'Traitement...' : 'Importer et traiter'}
+                  </button>
+                  {(enrollmentFile || enrollmentResult) && (
+                    <button 
+                      className="btn btn-secondary"
+                      onClick={() => { setEnrollmentFile(null); setEnrollmentResult(null); }}
+                    >
+                      <RefreshCw size={18} /> Reinitialiser
+                    </button>
+                  )}
+                </div>
                 
                 {enrollmentResult && (
                   <div className={'enrollment-result ' + (enrollmentResult.success ? 'success' : 'error')}>
@@ -647,7 +674,47 @@ const Records = () => {
                     <div>
                       <p><strong>{enrollmentResult.message}</strong></p>
                       {enrollmentResult.success && (
-                        <p>Total: {enrollmentResult.totalRecords} | Succes: {enrollmentResult.successCount} | Erreurs: {enrollmentResult.errorCount} | Mis a jour: {enrollmentResult.updatedRecords}</p>
+                        <>
+                          <p>Total: {enrollmentResult.totalRecords} | Succes: {enrollmentResult.successCount} | Erreurs: {enrollmentResult.errorCount} | Mis a jour: {enrollmentResult.updatedRecords}</p>
+                          
+                          {enrollmentResult.errorDetails && enrollmentResult.errorDetails.length > 0 && (
+                            <div className="error-details-section">
+                              <p><strong>Details des erreurs ({enrollmentResult.errorDetails.length}):</strong></p>
+                              <div className="error-details-list">
+                                {enrollmentResult.errorDetails.map((err, idx) => (
+                                  <div key={idx} className="error-detail-item">
+                                    <span className="error-id">ID {err.xmlId}</span>
+                                    <span className="error-code">{err.errorCode}</span>
+                                    <span className="error-desc">{err.errorDescription}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {enrollmentResult.notFoundIds && enrollmentResult.notFoundIds.length > 0 && (
+                            <div className="not-found-ids">
+                              <p><strong>IDs non trouves dans l application ({enrollmentResult.notFoundIds.length}):</strong></p>
+                              <div className="ids-list">
+                                {enrollmentResult.notFoundIds.slice(0, 50).join(', ')}
+                                {enrollmentResult.notFoundIds.length > 50 && ' ... et ' + (enrollmentResult.notFoundIds.length - 50) + ' autres'}
+                              </div>
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => {
+                                  const csvContent = 'ID XML Non Trouve\n' + enrollmentResult.notFoundIds.join('\n');
+                                  const blob = new Blob([csvContent], { type: 'text/csv' });
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = 'ids_non_trouves.csv';
+                                  a.click();
+                                }}
+                              >
+                                <Download size={14} /> Telecharger CSV
+                              </button>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -691,11 +758,13 @@ const Records = () => {
                       <th>Total</th>
                       <th>Succes</th>
                       <th>Erreurs</th>
+                      <th>Non trouves</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {enrollmentLogs.length === 0 ? (
-                      <tr><td colSpan="6" className="no-data">Aucun import effectue</td></tr>
+                      <tr><td colSpan="8" className="no-data">Aucun import effectue</td></tr>
                     ) : (
                       enrollmentLogs.map((log) => (
                         <tr key={log.id}>
@@ -705,6 +774,12 @@ const Records = () => {
                           <td>{log.total_records}</td>
                           <td className="success-cell">{log.success_count}</td>
                           <td className="error-cell">{log.error_count}</td>
+                          <td className="warning-cell">{log.not_found_ids ? JSON.parse(log.not_found_ids).length : 0}</td>
+                          <td>
+                            <button className="btn btn-secondary btn-sm" onClick={() => viewEnrollmentLogDetail(log)}>
+                              <Eye size={14} /> Voir
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -724,6 +799,102 @@ const Records = () => {
             </button>
           </div>
         </>
+      )}
+
+      {/* Enrollment Log Detail Modal */}
+      {showLogDetailModal && enrollmentLogDetail && (
+        <div className="modal-overlay" onClick={() => setShowLogDetailModal(false)}>
+          <div className="enrollment-detail-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Rapport d'Import - {enrollmentLogDetail.file_name}</h2>
+              <button className="btn-icon" onClick={() => setShowLogDetailModal(false)}>
+                <X size={24} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="detail-grid">
+                <div className="detail-item">
+                  <span className="detail-label">Date</span>
+                  <span className="detail-value">{new Date(enrollmentLogDetail.processed_at).toLocaleString('fr-FR')}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Banque</span>
+                  <span className="detail-value">{enrollmentLogDetail.bank_name || 'Toutes les banques'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Total enregistrements</span>
+                  <span className="detail-value">{enrollmentLogDetail.total_records}</span>
+                </div>
+                <div className="detail-item success">
+                  <span className="detail-label">Succes</span>
+                  <span className="detail-value">{enrollmentLogDetail.success_count}</span>
+                </div>
+                <div className="detail-item error">
+                  <span className="detail-label">Erreurs</span>
+                  <span className="detail-value">{enrollmentLogDetail.error_count}</span>
+                </div>
+                <div className="detail-item warning">
+                  <span className="detail-label">IDs non trouves</span>
+                  <span className="detail-value">{enrollmentLogDetail.not_found_ids ? JSON.parse(enrollmentLogDetail.not_found_ids).length : 0}</span>
+                </div>
+              </div>
+              
+              {/* Section Erreurs */}
+              {enrollmentLogDetail.error_details && JSON.parse(enrollmentLogDetail.error_details).length > 0 && (
+                <div className="error-section">
+                  <h3>Details des erreurs ({JSON.parse(enrollmentLogDetail.error_details).length})</h3>
+                  <div className="error-details-list-modal">
+                    {JSON.parse(enrollmentLogDetail.error_details).map((err, idx) => (
+                      <div key={idx} className="error-detail-item">
+                        <span className="error-id">ID {err.xmlId}</span>
+                        <span className="error-code">{err.errorCode}</span>
+                        <span className="error-desc">{err.errorDescription}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      const errors = JSON.parse(enrollmentLogDetail.error_details);
+                      const csvContent = 'ID XML,Code Erreur,Description\n' + errors.map(e => e.xmlId + ',' + e.errorCode + ',' + (e.errorDescription || '')).join('\n');
+                      const blob = new Blob([csvContent], { type: 'text/csv' });
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'erreurs_enrolement_' + enrollmentLogDetail.id + '.csv';
+                      a.click();
+                    }}
+                  >
+                    <Download size={14} /> Telecharger erreurs CSV
+                  </button>
+                </div>
+              )}
+              
+              {/* Section IDs non trouves */}
+              {enrollmentLogDetail.not_found_ids && JSON.parse(enrollmentLogDetail.not_found_ids).length > 0 && (
+                <div className="not-found-section">
+                  <h3>IDs XML non trouves ({JSON.parse(enrollmentLogDetail.not_found_ids).length})</h3>
+                  <p className="not-found-desc">Ces IDs sont presents dans le fichier d'enrolement mais n'ont pas ete trouves dans la base de donnees.</p>
+                  <div className="ids-list-large">
+                    {JSON.parse(enrollmentLogDetail.not_found_ids).join(', ')}
+                  </div>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => downloadNotFoundIds(JSON.parse(enrollmentLogDetail.not_found_ids), 'ids_non_trouves_' + enrollmentLogDetail.id + '.csv')}
+                  >
+                    <Download size={14} /> Telecharger CSV
+                  </button>
+                </div>
+              )}
+              
+              {/* Section Succes */}
+              <div className="success-section">
+                <h3>Enrolements reussis ({enrollmentLogDetail.success_count})</h3>
+                <p className="success-desc">Ces enregistrements ont ete enroles avec succes.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* File Preview Modal */}

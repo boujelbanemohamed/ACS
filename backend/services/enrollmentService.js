@@ -8,14 +8,12 @@ class EnrollmentService {
   parseEnrollmentXML(xmlContent) {
     const results = [];
     
-    // Format: <cardRegistryRecordProcessingResult id="1" status="OK"/>
-    // ou: <cardRegistryRecordProcessingResult id="1" status="BAD_DATA" description="Card is already in registry"/>
     const recordRegex = /<cardRegistryRecordProcessingResult\s+id="(\d+)"\s+status="([^"]+)"(?:\s+description="([^"]*)")?\s*\/>/g;
     
     let match;
     while ((match = recordRegex.exec(xmlContent)) !== null) {
       const xmlId = parseInt(match[1]);
-      const status = match[2]; // "OK" ou "BAD_DATA"
+      const status = match[2];
       const description = match[3] || null;
       
       results.push({
@@ -29,7 +27,7 @@ class EnrollmentService {
     return results;
   }
   
-  // Traiter un fichier uploade (contenu en memoire)
+  // Traiter un fichier uploade
   async processEnrollmentReportFromContent(xmlContent, bankId, fileName) {
     try {
       const results = this.parseEnrollmentXML(xmlContent);
@@ -44,6 +42,8 @@ class EnrollmentService {
       let successCount = 0;
       let errorCount = 0;
       let updatedRecords = 0;
+      const notFoundIds = [];
+      const errorDetails = [];
       const details = [];
       
       for (const result of results) {
@@ -51,9 +51,14 @@ class EnrollmentService {
           successCount++;
         } else {
           errorCount++;
+          errorDetails.push({
+            xmlId: result.xmlId,
+            errorCode: result.errorCode,
+            errorDescription: result.errorDescription
+          });
         }
         
-        // Mettre a jour par enrollment_xml_id
+        // Essayer de matcher par enrollment_xml_id OU par id directement
         const updateQuery = `
           UPDATE processed_records 
           SET 
@@ -61,10 +66,9 @@ class EnrollmentService {
             enrollment_error_code = $2,
             enrollment_error_description = $3,
             enrollment_date = CURRENT_TIMESTAMP
-          WHERE enrollment_xml_id = $4
+          WHERE (enrollment_xml_id = $4 OR id = $4)
           AND ($5::integer IS NULL OR bank_id = $5)
-          AND enrollment_status = 'pending'
-          RETURNING id, pan
+          RETURNING id, pan, enrollment_xml_id
         `;
         
         const updateResult = await db.query(updateQuery, [
@@ -75,7 +79,11 @@ class EnrollmentService {
           bankId
         ]);
         
-        updatedRecords += updateResult.rowCount;
+        if (updateResult.rowCount > 0) {
+          updatedRecords += updateResult.rowCount;
+        } else {
+          notFoundIds.push(result.xmlId);
+        }
         
         details.push({
           xmlId: result.xmlId,
@@ -86,20 +94,27 @@ class EnrollmentService {
         });
       }
       
-      // Enregistrer le log d enrolement
-      await db.query(`
-        INSERT INTO enrollment_logs (bank_id, file_name, file_path, total_records, success_count, error_count, status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'processed')
-      `, [bankId, fileName, 'upload', results.length, successCount, errorCount]);
+      // Enregistrer le log avec les details
+      const logResult = await db.query(`
+        INSERT INTO enrollment_logs (bank_id, file_name, file_path, total_records, success_count, error_count, status, not_found_ids, error_details)
+        VALUES ($1, $2, $3, $4, $5, $6, 'processed', $7, $8)
+        RETURNING id
+      `, [bankId, fileName, 'upload', results.length, successCount, errorCount, JSON.stringify(notFoundIds), JSON.stringify(errorDetails)]);
+      
+      const logId = logResult.rows[0].id;
       
       return {
         success: true,
+        logId,
         totalRecords: results.length,
         successCount,
         errorCount,
         updatedRecords,
+        notFoundIds,
+        notFoundCount: notFoundIds.length,
+        errorDetails,
         details,
-        message: 'Rapport traite: ' + results.length + ' enregistrements (' + successCount + ' succes, ' + errorCount + ' erreurs), ' + updatedRecords + ' lignes mises a jour'
+        message: 'Rapport traite: ' + results.length + ' enregistrements (' + successCount + ' succes, ' + errorCount + ' erreurs), ' + updatedRecords + ' lignes mises a jour' + (notFoundIds.length > 0 ? ', ' + notFoundIds.length + ' IDs non trouves' : '')
       };
       
     } catch (error) {
@@ -125,7 +140,7 @@ class EnrollmentService {
     }
   }
   
-  // Obtenir les statistiques d enrolement
+  // Obtenir les statistiques
   async getEnrollmentStats(bankId = null) {
     try {
       let query = `
@@ -151,7 +166,7 @@ class EnrollmentService {
     }
   }
   
-  // Obtenir les logs d enrolement
+  // Obtenir les logs
   async getEnrollmentLogs(bankId = null, limit = 50, offset = 0) {
     try {
       let query = `

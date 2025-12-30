@@ -790,3 +790,290 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+
+/* ID Column */
+.id-cell {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+
+/* Not Found IDs */
+.not-found-ids {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fef3c7;
+  border-radius: 8px;
+  border: 1px solid #f59e0b;
+}
+
+.not-found-ids p {
+  margin: 0 0 8px 0;
+  color: #92400e;
+}
+
+.ids-list {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  color: #78350f;
+  background: #fffbeb;
+  padding: 8px;
+  border-radius: 4px;
+  max-height: 100px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+
+/* Enrollment Detail Modal */
+.enrollment-detail-modal {
+  background: white;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.enrollment-detail-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.enrollment-detail-modal .modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #1f2937;
+}
+
+.enrollment-detail-modal .modal-body {
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.detail-item {
+  background: #f9fafb;
+  padding: 16px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.detail-item.success {
+  background: #d1fae5;
+}
+
+.detail-item.error {
+  background: #fee2e2;
+}
+
+.detail-item.warning {
+  background: #fef3c7;
+}
+
+.detail-label {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.detail-value {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.detail-item.success .detail-value {
+  color: #065f46;
+}
+
+.detail-item.error .detail-value {
+  color: #991b1b;
+}
+
+.detail-item.warning .detail-value {
+  color: #92400e;
+}
+
+.not-found-section {
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.not-found-section h3 {
+  margin: 0 0 8px 0;
+  color: #92400e;
+  font-size: 16px;
+}
+
+.not-found-desc {
+  color: #78350f;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.ids-list-large {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  color: #78350f;
+  background: white;
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+  word-break: break-all;
+  line-height: 1.8;
+}
+
+.download-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.warning-cell {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .detail-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+
+/* Error Details Section */
+.error-details-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fee2e2;
+  border-radius: 8px;
+  border: 1px solid #ef4444;
+}
+
+.error-details-section > p {
+  margin: 0 0 8px 0;
+  color: #991b1b;
+}
+
+.error-details-list {
+  max-height: 150px;
+  overflow-y: auto;
+  background: white;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.error-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #fee2e2;
+  font-size: 13px;
+}
+
+.error-detail-item:last-child {
+  border-bottom: none;
+}
+
+.error-id {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-weight: 600;
+  color: #1f2937;
+  min-width: 60px;
+}
+
+.error-code {
+  background: #fecaca;
+  color: #991b1b;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.error-desc {
+  color: #7f1d1d;
+  flex: 1;
+}
+
+
+/* Upload Buttons */
+.upload-buttons {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Error Section in Modal */
+.error-section {
+  background: #fee2e2;
+  border: 1px solid #ef4444;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.error-section h3 {
+  margin: 0 0 12px 0;
+  color: #991b1b;
+  font-size: 16px;
+}
+
+.error-details-list-modal {
+  max-height: 200px;
+  overflow-y: auto;
+  background: white;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 12px;
+}
+
+/* Success Section in Modal */
+.success-section {
+  background: #d1fae5;
+  border: 1px solid #10b981;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.success-section h3 {
+  margin: 0 0 8px 0;
+  color: #065f46;
+  font-size: 16px;
+}
+
+.success-desc {
+  color: #047857;
+  font-size: 13px;
+  margin: 0;
+}
