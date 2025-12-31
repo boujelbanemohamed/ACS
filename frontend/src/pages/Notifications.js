@@ -46,7 +46,17 @@ const Notifications = () => {
       ]);
       
       if (smtpRes.data.data) {
-        setSmtpConfig({ ...smtpConfig, ...smtpRes.data.data, password: '' });
+        setSmtpConfig(prev => ({
+          ...prev,
+          host: smtpRes.data.data.host || '',
+          port: smtpRes.data.data.port || 587,
+          secure: smtpRes.data.data.secure || false,
+          username: smtpRes.data.data.username || '',
+          from_email: smtpRes.data.data.from_email || '',
+          from_name: smtpRes.data.data.from_name || 'ACS Banking System',
+          enabled: smtpRes.data.data.enabled || false,
+          password: ''
+        }));
       }
       setBanks(banksRes.data.data || []);
       setLogs(logsRes.data.data || []);
