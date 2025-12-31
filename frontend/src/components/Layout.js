@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User , Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Layout.css';
 
@@ -70,6 +70,12 @@ const Layout = () => {
                 <Clock size={20} />
                 <span>Scan Automatique</span>
               </NavLink>
+              {user?.role === 'super_admin' && (
+                <NavLink to="/notifications" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                  <Mail size={20} />
+                  <span>Notifications</span>
+                </NavLink>
+              )}
             </>
           )}
         </nav>

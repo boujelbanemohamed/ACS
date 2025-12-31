@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Banks from './pages/Banks';
 import Processing from './pages/Processing';
 import CronManager from './pages/CronManager';
+import Notifications from './pages/Notifications';
 import Records from './pages/Records';
 import History from './pages/History';
 import Users from './pages/Users';
@@ -44,6 +45,7 @@ function App() {
             <Route path="history" element={<History />} />
             <Route path="users" element={<Users />} />
             <Route path="profile" element={<Profile />} />
+            <Route path="notifications" element={<Notifications />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

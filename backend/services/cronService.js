@@ -2,16 +2,20 @@ const cron = require('node-cron');
 const db = require('../config/database');
 const bankScanner = require('./bankScanner');
 const enrollmentService = require('./enrollmentService');
+const emailService = require('./emailService');
 const fs = require('fs').promises;
 const path = require('path');
 
 class CronService {
   constructor() {
     this.currentTask = null;
+    this.dailyReportTask = null;
     this.isScanning = false;
     this.lastScanTime = null;
     this.currentSchedule = process.env.CRON_SCHEDULE || '*/5 * * * *';
+    this.dailyReportSchedule = '0 8 * * *'; // Tous les jours a 8h
     this.enabled = true;
+    this.dailyReportEnabled = true;
   }
 
   async init() {
@@ -31,6 +35,7 @@ class CronService {
     }
 
     this.startScheduledTask();
+    this.startDailyReportTask();
   }
 
   startScheduledTask() {
