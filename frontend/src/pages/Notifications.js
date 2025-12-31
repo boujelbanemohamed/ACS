@@ -26,6 +26,7 @@ const Notifications = () => {
   const [testing, setTesting] = useState(false);
   const [sending, setSending] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -344,6 +345,9 @@ const Notifications = () => {
             <button className="btn btn-secondary" onClick={handleSendAllReports} disabled={sending}>
               <Send size={16} /> Envoyer a toutes les banques
             </button>
+            <button className="btn btn-secondary" onClick={() => setShowPreview(true)}>
+              <Mail size={16} /> Apercu du template
+            </button>
           </div>
         </div>
       </div>
@@ -389,6 +393,65 @@ const Notifications = () => {
           </table>
         </div>
       </div>
+      {/* Modal Aperçu Template */}
+      {showPreview && (
+        <div className="modal-overlay" onClick={() => setShowPreview(false)}>
+          <div className="email-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Aperçu du Template Email</h2>
+              <button className="btn-close" onClick={() => setShowPreview(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="email-template-preview">
+                <div className="email-header-preview">
+                  <h1>Rapport Quotidien ACS</h1>
+                  <p>{banks.find(b => b.id === selectedBank)?.name || 'Nom de la Banque'} - {new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                </div>
+                <div className="email-content-preview">
+                  <div className="email-section">
+                    <h3>Fichiers CSV Traités</h3>
+                    <div className="email-stats-grid">
+                      <div className="email-stat info">
+                        <span className="value">5</span>
+                        <span className="label">Fichiers traités</span>
+                      </div>
+                      <div className="email-stat">
+                        <span className="value">150</span>
+                        <span className="label">Lignes valides</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="email-section">
+                    <h3>Statut Enrôlement</h3>
+                    <div className="email-stats-grid">
+                      <div className="email-stat success">
+                        <span className="value">120</span>
+                        <span className="label">Enrôlements OK</span>
+                      </div>
+                      <div className="email-stat error">
+                        <span className="value">10</span>
+                        <span className="label">Enrôlements échoués</span>
+                      </div>
+                      <div className="email-stat warning">
+                        <span className="value">20</span>
+                        <span className="label">En attente</span>
+                      </div>
+                      <div className="email-stat info">
+                        <span className="value">3</span>
+                        <span className="label">Fichiers XML générés</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="email-footer-preview">
+                  <p>Ce rapport a été généré automatiquement par le système ACS Banking.</p>
+                  <p>Ne pas répondre à cet email.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
