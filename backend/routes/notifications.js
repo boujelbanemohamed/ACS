@@ -4,6 +4,9 @@ const db = require('../config/database');
 const emailService = require('../services/emailService');
 const { authMiddleware } = require('../middleware/auth');
 
+// Import cronService
+const cronService = require('../services/cronService');
+
 const superAdminOnly = (req, res, next) => {
   if (req.user.role !== 'super_admin') {
     return res.status(403).json({ success: false, message: 'Acces refuse' });
@@ -146,5 +149,81 @@ router.get('/logs', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 });
+
+// GET /api/notifications/cron-config - Obtenir la config du cron
+router.get('/cron-config', authMiddleware, superAdminOnly, async (req, res) => {
+  try {
+    // cronService already imported
+    res.json({
+      success: true,
+      data: {
+        schedule: cronService.dailyReportSchedule || '0 8 * * *',
+        enabled: cronService.dailyReportEnabled !== false,
+        nextRun: getNextCronRun(cronService.dailyReportSchedule || '0 8 * * *')
+      }
+    });
+  } catch (error) {
+    console.error('Error getting cron config:', error);
+    res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/notifications/cron-config - Mettre a jour la config du cron
+router.put('/cron-config', authMiddleware, superAdminOnly, async (req, res) => {
+  try {
+    const { schedule, enabled } = req.body;
+    // cronService already imported
+    
+    // Valider le format cron
+    if (schedule && !isValidCron(schedule)) {
+      return res.status(400).json({ success: false, message: 'Format cron invalide' });
+    }
+    
+    if (schedule) {
+      cronService.dailyReportSchedule = schedule;
+    }
+    cronService.dailyReportEnabled = enabled !== false;
+    
+    // Redemarrer le cron avec la nouvelle config
+    cronService.startDailyReportTask();
+    
+    res.json({
+      success: true,
+      message: 'Configuration du cron mise a jour',
+      data: {
+        schedule: cronService.dailyReportSchedule,
+        enabled: cronService.dailyReportEnabled,
+        nextRun: getNextCronRun(cronService.dailyReportSchedule)
+      }
+    });
+  } catch (error) {
+    console.error('Error updating cron config:', error);
+    res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+});
+
+// Fonction pour valider le format cron
+function isValidCron(cronExpression) {
+  const parts = cronExpression.split(' ');
+  if (parts.length !== 5) return false;
+  return true;
+}
+
+// Fonction pour calculer la prochaine execution
+function getNextCronRun(cronExpression) {
+  try {
+    const parts = cronExpression.split(' ');
+    const [minute, hour] = parts;
+    const now = new Date();
+    const next = new Date();
+    next.setHours(parseInt(hour), parseInt(minute), 0, 0);
+    if (next <= now) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next.toISOString();
+  } catch (e) {
+    return null;
+  }
+}
 
 module.exports = router;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
-import { Mail, Settings, Send, Plus, Trash2, ToggleLeft, ToggleRight, TestTube, RefreshCw, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Mail, Settings, Send, Plus, Trash2, ToggleLeft, ToggleRight, TestTube, RefreshCw, CheckCircle, XCircle, Clock, Calendar } from 'lucide-react';
 import './Notifications.css';
 
 const Notifications = () => {
@@ -27,6 +27,14 @@ const Notifications = () => {
   const [sending, setSending] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [cronConfig, setCronConfig] = useState({
+    schedule: '0 8 * * *',
+    enabled: true,
+    nextRun: null
+  });
+  const [cronHour, setCronHour] = useState('08');
+  const [cronMinute, setCronMinute] = useState('00');
+  const [savingCron, setSavingCron] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -40,10 +48,11 @@ const Notifications = () => {
 
   const fetchData = async () => {
     try {
-      const [smtpRes, banksRes, logsRes] = await Promise.all([
+      const [smtpRes, banksRes, logsRes, cronRes] = await Promise.all([
         api.get('/notifications/smtp'),
         api.get('/banks'),
-        api.get('/notifications/logs?limit=20')
+        api.get('/notifications/logs?limit=20'),
+        api.get('/notifications/cron-config').catch(() => ({ data: { data: null } }))
       ]);
       
       if (smtpRes.data.data) {
@@ -61,6 +70,13 @@ const Notifications = () => {
       }
       setBanks(banksRes.data.data || []);
       setLogs(logsRes.data.data || []);
+      
+      if (cronRes.data.data) {
+        setCronConfig(cronRes.data.data);
+        const parts = (cronRes.data.data.schedule || '0 8 * * *').split(' ');
+        setCronMinute(parts[0].padStart(2, '0'));
+        setCronHour(parts[1].padStart(2, '0'));
+      }
       
       if (banksRes.data.data && banksRes.data.data.length > 0) {
         setSelectedBank(banksRes.data.data[0].id);
@@ -171,6 +187,42 @@ const Notifications = () => {
       alert('Erreur: ' + (error.response?.data?.message || error.message));
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleSaveCronConfig = async () => {
+    setSavingCron(true);
+    try {
+      const schedule = cronMinute + ' ' + cronHour + ' * * *';
+      const res = await api.put('/notifications/cron-config', {
+        schedule,
+        enabled: cronConfig.enabled
+      });
+      if (res.data.success) {
+        setCronConfig(res.data.data);
+        alert('Configuration du cron sauvegardee!');
+      }
+    } catch (error) {
+      alert('Erreur: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setSavingCron(false);
+    }
+  };
+
+  const handleToggleCron = async () => {
+    setSavingCron(true);
+    try {
+      const res = await api.put('/notifications/cron-config', {
+        schedule: cronMinute + ' ' + cronHour + ' * * *',
+        enabled: !cronConfig.enabled
+      });
+      if (res.data.success) {
+        setCronConfig(res.data.data);
+      }
+    } catch (error) {
+      alert('Erreur: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setSavingCron(false);
     }
   };
 
@@ -349,6 +401,48 @@ const Notifications = () => {
               <Mail size={16} /> Apercu du template
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="cron-section">
+        <div className="section-header">
+          <h2><Calendar size={20} /> Envoi Automatique</h2>
+          <div className="cron-toggle">
+            <span className={cronConfig.enabled ? 'status-active' : 'status-inactive'}>
+              {cronConfig.enabled ? 'Actif' : 'Inactif'}
+            </span>
+            <button onClick={handleToggleCron} disabled={savingCron} className="toggle-btn">
+              {cronConfig.enabled ? <ToggleRight size={24} className="active" /> : <ToggleLeft size={24} />}
+            </button>
+          </div>
+        </div>
+        <div className="cron-config-form">
+          <div className="cron-time-picker">
+            <label>Heure d'envoi quotidien :</label>
+            <div className="time-inputs">
+              <select value={cronHour} onChange={(e) => setCronHour(e.target.value)}>
+                {Array.from({length: 24}, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                  <option key={h} value={h}>{h}</option>
+                ))}
+              </select>
+              <span>:</span>
+              <select value={cronMinute} onChange={(e) => setCronMinute(e.target.value)}>
+                {['00', '15', '30', '45'].map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="cron-info">
+            <p><Clock size={14} /> Les rapports seront envoyes tous les jours a <strong>{cronHour}:{cronMinute}</strong></p>
+            {cronConfig.nextRun && (
+              <p className="next-run">Prochaine execution : {new Date(cronConfig.nextRun).toLocaleString('fr-FR')}</p>
+            )}
+          </div>
+          <button className="btn btn-primary" onClick={handleSaveCronConfig} disabled={savingCron}>
+            {savingCron ? <RefreshCw size={16} className="spin" /> : <Settings size={16} />}
+            Sauvegarder la planification
+          </button>
         </div>
       </div>
 

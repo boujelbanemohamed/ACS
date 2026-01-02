@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const db = require('../config/database');
-const bankScanner = require('./bankScanner');
+const fileScanner = require('./fileScanner');
 const enrollmentService = require('./enrollmentService');
 const emailService = require('./emailService');
 const fs = require('fs').promises;
@@ -129,7 +129,7 @@ class CronService {
 
       for (const bank of banks) {
         try {
-          const result = await bankScanner.scanBankDirectory(bank);
+          const result = await fileScanner.scanBankDirectory(bank);
           scanResult.filesFound += result.filesFound;
           scanResult.filesProcessed += result.filesProcessed;
           if (result.errors && result.errors.length > 0) {
@@ -262,6 +262,36 @@ class CronService {
     }
 
     return result;
+  }
+
+  startDailyReportTask() {
+    if (this.dailyReportTask) {
+      this.dailyReportTask.stop();
+      this.dailyReportTask = null;
+    }
+
+    if (!this.dailyReportEnabled) {
+      console.log('Daily report cron is disabled');
+      return;
+    }
+
+    console.log('Starting daily report cron with schedule: ' + this.dailyReportSchedule);
+    
+    this.dailyReportTask = cron.schedule(this.dailyReportSchedule, async () => {
+      console.log('Sending daily reports to all banks...');
+      try {
+        const emailService = require('./emailService');
+        const result = await emailService.sendAllDailyReports(new Date());
+        console.log('Daily reports sent:', result);
+      } catch (error) {
+        console.error('Error sending daily reports:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: process.env.TIMEZONE || 'Africa/Tunis'
+    });
+
+    console.log('Daily report cron started successfully');
   }
 
   getStatus() {
