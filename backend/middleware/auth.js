@@ -23,7 +23,7 @@ const authMiddleware = async (req, res, next) => {
     if (userResult.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        message: 'Utilisateur non trouve'
+        message: 'Utilisateur non trouvé'
       });
     }
 
@@ -32,7 +32,7 @@ const authMiddleware = async (req, res, next) => {
     if (!user.is_active) {
       return res.status(401).json({
         success: false,
-        message: 'Compte desactive'
+        message: 'Compte désactivé'
       });
     }
 
@@ -48,9 +48,10 @@ const authMiddleware = async (req, res, next) => {
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
-        message: 'Token expire'
+        message: 'Token expiré'
       });
     }
+    console.error('Auth middleware error:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur d\'authentification'

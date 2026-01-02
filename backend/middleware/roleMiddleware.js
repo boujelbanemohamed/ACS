@@ -1,16 +1,16 @@
-const db = require('../config/database');
-
-// Middleware pour vérifier le rôle
 const checkRole = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Non authentifie' });
+      return res.status(401).json({
+        success: false,
+        message: 'Non authentifié'
+      });
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Acces refuse. Role requis: ' + allowedRoles.join(' ou ')
+      return res.status(403).json({
+        success: false,
+        message: 'Accès non autorisé pour ce rôle'
       });
     }
 
@@ -18,66 +18,71 @@ const checkRole = (...allowedRoles) => {
   };
 };
 
-// Middleware pour filtrer par banque (pour les utilisateurs de type "bank")
-const filterByBank = async (req, res, next) => {
-  if (req.user.role === 'super_admin') {
-    // Super admin voit tout
-    req.bankFilter = null;
-    next();
-  } else if (req.user.role === 'bank') {
-    // Utilisateur banque ne voit que sa banque
-    if (!req.user.bank_id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Aucune banque associee a votre compte'
-      });
-    }
-    req.bankFilter = req.user.bank_id;
-    next();
-  } else {
-    return res.status(403).json({ success: false, message: 'Role non reconnu' });
+const checkBankAccess = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Non authentifié'
+    });
   }
-};
 
-// Middleware pour vérifier l'accès à une banque spécifique
-const checkBankAccess = async (req, res, next) => {
-  const bankId = req.params.bankId || req.body.bankId || req.query.bankId;
+  if (req.user.role === 'super_admin') {
+    return next();
+  }
+
+  const requestedBankId = req.params.bankId || req.body.bank_id || req.query.bank_id;
   
+  if (requestedBankId && req.user.bank_id !== parseInt(requestedBankId)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Accès non autorisé à cette banque'
+    });
+  }
+
+  next();
+};
+
+const isSuperAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Non authentifié'
+    });
+  }
+
+  if (req.user.role !== 'super_admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Accès réservé aux super administrateurs'
+    });
+  }
+
+  next();
+};
+
+const filterByBank = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Non authentifié'
+    });
+  }
+
   if (req.user.role === 'super_admin') {
-    next();
-  } else if (req.user.role === 'bank') {
-    if (parseInt(bankId) !== req.user.bank_id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Vous n\'avez pas acces a cette banque'
-      });
-    }
-    next();
-  } else {
-    return res.status(403).json({ success: false, message: 'Acces refuse' });
+    return next();
   }
+
+  if (req.user.role === 'bank' && req.user.bank_id) {
+    req.query.bank_id = req.user.bank_id;
+    req.bankFilter = req.user.bank_id;
+  }
+
+  next();
 };
 
-// Logger les actions dans audit_logs
-const auditLog = async (userId, action, entityType, entityId, oldValues, newValues, req) => {
-  try {
-    await db.query(
-      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_values, new_values, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        userId,
-        action,
-        entityType,
-        entityId,
-        oldValues ? JSON.stringify(oldValues) : null,
-        newValues ? JSON.stringify(newValues) : null,
-        req?.ip || req?.connection?.remoteAddress,
-        req?.headers?.['user-agent']
-      ]
-    );
-  } catch (error) {
-    console.error('Audit log error:', error);
-  }
+module.exports = {
+  checkRole,
+  checkBankAccess,
+  isSuperAdmin,
+  filterByBank
 };
-
-module.exports = { checkRole, filterByBank, checkBankAccess, auditLog };
