@@ -18,6 +18,14 @@ const usersRoutes = require('./routes/users');
 const enrollmentRoutes = require('./routes/enrollment');
 const notificationsRoutes = require('./routes/notifications');
 const FileScanner = require('./services/fileScanner');
+const rateLimit = require('express-rate-limit');
+
+// Vérification JWT_SECRET en production
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your_jwt_secret_change_in_production' || process.env.JWT_SECRET === 'your_super_secret_jwt_key')) {
+  console.error('ERREUR CRITIQUE: JWT_SECRET non configuré ou utilise une valeur par défaut en production!');
+  console.error('Définissez une variable JWT_SECRET sécurisée avant de démarrer en production.');
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -29,6 +37,26 @@ const fileScanner = new FileScanner();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Rate limiting global
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500, // max 500 requêtes par IP par 15 min
+  message: { success: false, message: 'Trop de requêtes, veuillez réessayer plus tard.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
+// Rate limiting strict pour login (protection brute force)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // max 5 tentatives de login par IP par 15 min
+  message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/auth/login', authLimiter);
 
 // Request logging middleware
 app.use((req, res, next) => {

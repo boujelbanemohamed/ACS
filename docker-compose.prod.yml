@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: banking_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-banking_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-banking_db}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - banking_network_prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-banking_user} -d ${DB_NAME:-banking_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: banking_backend_prod
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-banking_db}
+      DB_USER: ${DB_USER:-banking_user}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRE: ${JWT_EXPIRE:-8h}
+      TZ: ${TZ:-Africa/Tunis}
+      CRON_SCHEDULE: ${CRON_SCHEDULE:-*/5 * * * *}
+    ports:
+      - "8000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - banking_network_prod
+    volumes:
+      - banking_data:/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: banking_frontend_prod
+    restart: always
+    environment:
+      REACT_APP_API_URL: ${API_URL:-http://localhost:8000/api}
+    ports:
+      - "8088:3000"
+    depends_on:
+      - backend
+    networks:
+      - banking_network_prod
+
+volumes:
+  postgres_data_prod:
+  banking_data:
+
+networks:
+  banking_network_prod:
+    driver: bridge

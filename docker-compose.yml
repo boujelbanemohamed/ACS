@@ -34,7 +34,7 @@ services:
       DB_NAME: banking_db
       DB_USER: banking_user
       DB_PASSWORD: banking_password
-      JWT_SECRET: your_jwt_secret_change_in_production
+      JWT_SECRET: dev_secret_key_not_for_production_use_only_12345678901234567890
     ports:
       - "8000:5000"
     depends_on:
