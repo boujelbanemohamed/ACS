@@ -3,19 +3,14 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 
+const { authSchemas, validate } = require('../utils/validators');
+
 const router = express.Router();
 
 // Login avec bcrypt
-router.post('/login', async (req, res) => {
+router.post('/login', validate(authSchemas.login), async (req, res) => {
   try {
     const { username, password } = req.body;
-
-    if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Nom d\'utilisateur et mot de passe requis'
-      });
-    }
 
     const query = 'SELECT u.*, b.name as bank_name, b.code as bank_code FROM users u LEFT JOIN banks b ON u.bank_id = b.id WHERE u.username = $1';
     const result = await db.query(query, [username]);

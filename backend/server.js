@@ -19,6 +19,10 @@ const enrollmentRoutes = require('./routes/enrollment');
 const notificationsRoutes = require('./routes/notifications');
 const FileScanner = require('./services/fileScanner');
 const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const compression = require('compression');
+const morgan = require('morgan');
+const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 // Vérification JWT_SECRET en production
 if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your_jwt_secret_change_in_production' || process.env.JWT_SECRET === 'your_super_secret_jwt_key')) {
@@ -35,6 +39,22 @@ const fileScanner = new FileScanner();
 
 // Middleware
 app.use(cors());
+
+// Sécurité HTTP headers
+app.use(helmet({
+  contentSecurityPolicy: false, // Désactivé pour permettre le frontend
+  crossOriginEmbedderPolicy: false
+}));
+
+// Compression des réponses
+app.use(compression());
+
+// Logging des requêtes (format différent selon l'environnement)
+if (process.env.NODE_ENV === 'production') {
+  app.use(morgan('combined'));
+} else {
+  app.use(morgan('dev'));
+}
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -58,11 +78,7 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth/login', authLimiter);
 
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
+
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -175,31 +191,10 @@ app.get('/api/health', async (req, res) => {
 });
 
 // 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route non trouvee'
-  });
-});
+app.use(notFoundHandler);
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  
-  if (err.name === 'MulterError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Erreur de telechargement de fichier',
-      error: err.message
-    });
-  }
-
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Erreur serveur interne',
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
-});
+// Error handler global
+app.use(errorHandler);
 
 // Automated file checking (runs every 5 minutes by default)
 const scheduleAutomatedProcessing = () => {
