@@ -244,7 +244,6 @@ router.get('/file-content/byname', authMiddleware, async (req, res) => {
   }
 });
 
-module.exports = router;
 // Get file content by file_log_id
 router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
   try {
@@ -312,3 +311,5 @@ router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
     });
   }
 });
+
+module.exports = router;

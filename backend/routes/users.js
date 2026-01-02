@@ -2,9 +2,27 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
-const { checkRole, auditLog } = require('../middleware/roleMiddleware');
+const { checkRole } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
+
+// Fonction d'audit log (enregistre les actions utilisateurs)
+const auditLog = async (userId, action, tableName, recordId, oldData, newData, req) => {
+  try {
+    // Log simple en console pour le moment
+    console.log('[AUDIT]', {
+      userId,
+      action,
+      tableName,
+      recordId,
+      timestamp: new Date().toISOString(),
+      ip: req?.ip || 'unknown'
+    });
+    // TODO: Implémenter la persistance en base de données si nécessaire
+  } catch (error) {
+    console.error('Audit log error:', error);
+  }
+};
 
 // GET - Liste des utilisateurs (super_admin seulement)
 router.get('/', authMiddleware, checkRole('super_admin'), async (req, res) => {

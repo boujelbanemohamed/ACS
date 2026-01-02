@@ -96,6 +96,7 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       destination_url,
       old_url,
       xml_output_url,
+      enrollment_report_url || null,
       is_active !== undefined ? is_active : true
     ]);
 
