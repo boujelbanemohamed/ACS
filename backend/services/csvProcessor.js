@@ -3,7 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const db = require('../config/database');
+const recordHistoryService = require('./recordHistoryService');
 const CSVValidator = require('../utils/csvValidator');
+const { validateRowForHistory } = require('../utils/validationHelper');
 
 class CSVProcessor {
   constructor() {
@@ -270,6 +272,58 @@ class CSVProcessor {
     
     const result = await db.query(query, [bankId, pan]);
     return result.rows.length > 0;
+  }
+
+  /**
+   * Log row attempt to history
+   */
+  async logRowHistory(bankId, row, fileLogId, fileName, sourceType, userId, username, ipAddress, status, processedRecordId = null, xmlId = null) {
+    try {
+      const validation = validateRowForHistory(row);
+      
+      await recordHistoryService.logAttempt({
+        bankId,
+        pan: row.pan || '',
+        fileLogId,
+        fileName,
+        sourceType,
+        userId,
+        username,
+        status,
+        ipAddress,
+        userAgent: null,
+        dataReceived: row,
+        validationResults: validation.results,
+        processedRecordId,
+        xmlId
+      });
+    } catch (error) {
+      console.error('Error logging row history:', error);
+      // Ne pas bloquer le traitement si l'historique échoue
+    }
+  }
+
+  /**
+   * Process and log all rows with history
+   */
+  async processRowsWithHistory(bankId, allRows, validRows, errors, fileLogId, fileName, sourceType, userId = null, username = null, ipAddress = null) {
+    for (const row of allRows) {
+      const rowErrors = errors.filter(e => e.rowNumber === row.rowNumber);
+      const isValid = rowErrors.length === 0 && validRows.some(v => v.pan === row.pan);
+      const status = isValid ? 'SUCCESS' : 'REJECTED';
+      
+      await this.logRowHistory(
+        bankId,
+        row,
+        fileLogId,
+        fileName,
+        sourceType,
+        userId,
+        username,
+        ipAddress,
+        status
+      );
+    }
   }
 
   /**

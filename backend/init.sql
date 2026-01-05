@@ -282,3 +282,94 @@ ON CONFLICT (code) DO NOTHING;
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO banking_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO banking_user;
+
+-- ============================================================================
+-- TABLES D'HISTORIQUE ET TRAÇABILITÉ DES ENREGISTREMENTS
+-- ============================================================================
+
+-- Table principale d'historique des tentatives par PAN
+CREATE TABLE IF NOT EXISTS record_history (
+    id SERIAL PRIMARY KEY,
+    bank_id INTEGER REFERENCES banks(id) ON DELETE CASCADE,
+    pan VARCHAR(20) NOT NULL,
+    attempt_number INTEGER DEFAULT 1,
+    file_log_id INTEGER REFERENCES file_logs(id) ON DELETE SET NULL,
+    file_name VARCHAR(255),
+    source_type VARCHAR(20) NOT NULL, -- 'cron', 'upload', 'manual', 'correction', 'api'
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username VARCHAR(100), -- Stocké pour garder trace même si user supprimé
+    status VARCHAR(20) NOT NULL, -- 'REJECTED', 'SUCCESS', 'PARTIAL'
+    ip_address VARCHAR(50),
+    user_agent TEXT,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Données reçues (snapshot complet)
+    data_received JSONB,
+    
+    -- Résumé des erreurs
+    total_errors INTEGER DEFAULT 0,
+    total_warnings INTEGER DEFAULT 0,
+    
+    -- Lien vers l'enregistrement final si succès
+    processed_record_id INTEGER REFERENCES processed_records(id) ON DELETE SET NULL,
+    xml_id INTEGER,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table de détail des validations par champ pour chaque tentative
+CREATE TABLE IF NOT EXISTS record_history_details (
+    id SERIAL PRIMARY KEY,
+    history_id INTEGER REFERENCES record_history(id) ON DELETE CASCADE,
+    field_name VARCHAR(50) NOT NULL, -- 'pan', 'phone', 'expiry', 'language', etc.
+    field_value TEXT, -- Valeur reçue
+    expected_format VARCHAR(255), -- Format attendu
+    is_valid BOOLEAN DEFAULT false,
+    error_type VARCHAR(50), -- 'FORMAT', 'EXPIRED', 'DUPLICATE', 'MISSING', 'INVALID'
+    error_message TEXT,
+    severity VARCHAR(20) DEFAULT 'error', -- 'error', 'warning'
+    
+    -- Pour les corrections: ancienne vs nouvelle valeur
+    previous_value TEXT,
+    is_corrected BOOLEAN DEFAULT false,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index pour performances
+CREATE INDEX IF NOT EXISTS idx_record_history_pan ON record_history(pan);
+CREATE INDEX IF NOT EXISTS idx_record_history_bank_pan ON record_history(bank_id, pan);
+CREATE INDEX IF NOT EXISTS idx_record_history_status ON record_history(status);
+CREATE INDEX IF NOT EXISTS idx_record_history_source ON record_history(source_type);
+CREATE INDEX IF NOT EXISTS idx_record_history_user ON record_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_record_history_date ON record_history(processed_at);
+CREATE INDEX IF NOT EXISTS idx_record_history_details_history ON record_history_details(history_id);
+CREATE INDEX IF NOT EXISTS idx_record_history_details_field ON record_history_details(field_name);
+
+-- Vue pour faciliter les requêtes d'historique
+CREATE OR REPLACE VIEW v_record_history_summary AS
+SELECT 
+    rh.id,
+    rh.bank_id,
+    b.code as bank_code,
+    b.name as bank_name,
+    rh.pan,
+    rh.attempt_number,
+    rh.file_name,
+    rh.source_type,
+    CASE 
+        WHEN rh.source_type = 'cron' THEN 'SYSTÈME (Scan Auto)'
+        WHEN rh.source_type = 'api' THEN 'API: ' || COALESCE(rh.username, 'Unknown')
+        ELSE COALESCE(rh.username, 'Unknown')
+    END as source_display,
+    rh.status,
+    rh.total_errors,
+    rh.total_warnings,
+    rh.ip_address,
+    rh.processed_at,
+    rh.xml_id,
+    (SELECT COUNT(*) FROM record_history rh2 WHERE rh2.bank_id = rh.bank_id AND rh2.pan = rh.pan) as total_attempts
+FROM record_history rh
+JOIN banks b ON rh.bank_id = b.id
+ORDER BY rh.processed_at DESC;
+
