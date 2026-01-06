@@ -1,0 +1,4 @@
+language;firstName;lastName;pan;expiry;phone;behaviour;action
+fr;Jean;Dupont;4532015112830366;202712;21624080852;otp;update
+fr;Marie;Martin;4539578763621486;202806;21655123456;otp;create
+en;Ahmed;Ben Ali;4916338506082832;202912;21698765432;sms;update
