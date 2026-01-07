@@ -313,3 +313,84 @@ router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+
+/**
+ * GET /api/records/file-preview/:fileLogId
+ * Prévisualiser un fichier (CSV ou XML) par son ID de file_log
+ */
+router.get('/file-preview/:fileLogId', authMiddleware, async (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  
+  try {
+    const { fileLogId } = req.params;
+    const { type } = req.query; // 'csv' ou 'xml'
+    
+    // Récupérer les infos du fichier
+    const fileLog = await db.query(
+      'SELECT fl.*, xl.xml_file_name, xl.xml_file_path FROM file_logs fl LEFT JOIN xml_logs xl ON fl.id = xl.file_log_id WHERE fl.id = $1',
+      [fileLogId]
+    );
+    
+    if (fileLog.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fichier non trouvé en base'
+      });
+    }
+    
+    const file = fileLog.rows[0];
+    let filePath, fileName;
+    
+    if (type === 'xml') {
+      fileName = file.xml_file_name;
+      filePath = path.join(file.xml_file_path || '', file.xml_file_name || '');
+    } else {
+      fileName = file.file_name;
+      filePath = file.original_path;
+    }
+    
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fichier non trouvé sur le disque: ' + filePath
+      });
+    }
+    
+    const content = fs.readFileSync(filePath, 'utf8');
+    
+    if (type === 'xml') {
+      res.json({
+        success: true,
+        data: content,
+        fileName: fileName,
+        type: 'xml'
+      });
+    } else {
+      // Parser le CSV
+      const lines = content.split('\n').filter(l => l.trim());
+      const headers = lines[0].split(';');
+      const rows = lines.slice(1).map(line => {
+        const values = line.split(';');
+        const row = {};
+        headers.forEach((h, i) => {
+          row[h.trim()] = values[i] ? values[i].trim() : '';
+        });
+        return row;
+      });
+      
+      res.json({
+        success: true,
+        data: rows,
+        fileName: fileName,
+        type: 'csv'
+      });
+    }
+  } catch (error) {
+    console.error('File preview error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la lecture du fichier: ' + error.message
+    });
+  }
+});

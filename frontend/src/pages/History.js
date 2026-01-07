@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Clock, Upload, Globe, Edit3, CheckCircle, XCircle, AlertTriangle, FileText, FileCode, Download, Eye, RefreshCw, Filter, ChevronDown, ChevronUp, ExternalLink, Archive } from 'lucide-react';
+import { Clock, Upload, Globe, Edit3, CheckCircle, XCircle, AlertTriangle, FileText, FileCode, Download, Eye, RefreshCw, Filter, ChevronDown, ChevronUp, ExternalLink, Archive, X } from 'lucide-react';
 import api from '../services/api';
 import './History.css';
 
@@ -18,6 +18,12 @@ const History = () => {
     dateFrom: '',
     dateTo: ''
   });
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewContent, setPreviewContent] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewFileName, setPreviewFileName] = useState('');
+  const [previewType, setPreviewType] = useState('csv');
+
   const [pagination, setPagination] = useState({
     limit: 20,
     offset: 0,
@@ -146,31 +152,63 @@ const History = () => {
     return <AlertTriangle size={18} className="step-icon warning" />;
   };
 
-  const handleViewFile = async (fileName, type) => {
+  const handleViewFile = async (fileLogId, fileName, type) => {
+    setPreviewLoading(true);
+    setShowPreviewModal(true);
+    setPreviewFileName(fileName);
+    setPreviewType(type);
+    setPreviewContent(null);
+    
     try {
-      const response = await api.get('/records/file-content/byname', {
-        params: { type, fileName }
+      const response = await api.get('/records/file-preview/' + fileLogId, {
+        params: { type }
       });
       
-      const content = response.data.data;
-      let blob;
+      const data = response.data.data;
       
       if (type === 'xml') {
-        blob = new Blob([content], { type: 'application/xml' });
+        setPreviewContent({ type: 'xml', content: data });
       } else {
-        const headers = Object.keys(content[0] || {});
-        let csv = headers.join(';') + '\n';
-        content.forEach(row => {
-          csv += headers.map(h => row[h] || '').join(';') + '\n';
-        });
-        blob = new Blob([csv], { type: 'text/csv' });
+        // CSV - formater en tableau
+        setPreviewContent({ type: 'csv', content: data });
       }
-      
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
     } catch (error) {
-      alert('Erreur lors de la visualisation du fichier');
+      console.error('Error viewing file:', error);
+      setPreviewContent({ type: 'error', content: 'Erreur lors de la visualisation du fichier: ' + (error.response?.data?.message || error.message) });
+    } finally {
+      setPreviewLoading(false);
     }
+  };
+  
+  const closePreviewModal = () => {
+    setShowPreviewModal(false);
+    setPreviewContent(null);
+    setPreviewFileName('');
+  };
+  
+  const downloadFromPreview = () => {
+    if (!previewContent) return;
+    
+    let blob;
+    if (previewType === 'xml') {
+      blob = new Blob([previewContent.content], { type: 'application/xml' });
+    } else {
+      const headers = Object.keys(previewContent.content[0] || {});
+      let csv = headers.join(';') + '\n';
+      previewContent.content.forEach(row => {
+        csv += headers.map(h => row[h] || '').join(';') + '\n';
+      });
+      blob = new Blob([csv], { type: 'text/csv' });
+    }
+    
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = previewFileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   const handleDownloadFile = async (fileName, type) => {
@@ -400,7 +438,7 @@ const History = () => {
                             <p><strong>Chemin:</strong> {item.original_path || 'N/A'}</p>
                             <p><strong>Lignes totales:</strong> {item.total_rows || 0}</p>
                             <div className="step-actions">
-                              <button className="btn btn-sm" onClick={() => handleViewFile(item.file_name, 'csv')}>
+                              <button className="btn btn-sm" onClick={() => handleViewFile(item.id, item.file_name, 'csv')}>
                                 <Eye size={14} /> Voir
                               </button>
                               <button className="btn btn-sm" onClick={() => handleDownloadFile(item.file_name, 'csv')}>
@@ -437,7 +475,7 @@ const History = () => {
                             <p><strong>Chemin:</strong> {item.destination_path || 'Non genere'}</p>
                             {item.destination_path && (
                               <div className="step-actions">
-                                <button className="btn btn-sm" onClick={() => handleViewFile(item.file_name, 'csv')}>
+                                <button className="btn btn-sm" onClick={() => handleViewFile(item.id, item.file_name, 'csv')}>
                                   <Eye size={14} /> Voir
                                 </button>
                                 <button className="btn btn-sm" onClick={() => handleDownloadFile(item.file_name, 'csv')}>
@@ -462,7 +500,7 @@ const History = () => {
                                 <p><strong>Statut:</strong> {getStatusBadge(item.xml_status)}</p>
                                 {item.xml_error && <p className="error-details">{item.xml_error}</p>}
                                 <div className="step-actions">
-                                  <button className="btn btn-sm" onClick={() => handleViewFile(item.xml_file_name, 'xml')}>
+                                  <button className="btn btn-sm" onClick={() => handleViewFile(item.id, item.xml_file_name, 'xml')}>
                                     <Eye size={14} /> Voir XML
                                   </button>
                                   <button className="btn btn-sm" onClick={() => handleDownloadFile(item.xml_file_name, 'xml')}>
@@ -504,6 +542,65 @@ const History = () => {
             </button>
           </div>
         </>
+      )}
+      {/* Modal Preview Fichier */}
+      {showPreviewModal && (
+        <div className="modal-overlay" onClick={closePreviewModal}>
+          <div className="modal-content preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>
+                {previewType === 'xml' ? <FileCode size={24} /> : <FileText size={24} />}
+                <span>{previewFileName}</span>
+              </h2>
+              <div className="modal-actions">
+                <button className="btn btn-primary" onClick={downloadFromPreview}>
+                  <Download size={16} /> Telecharger
+                </button>
+                <button className="btn-close" onClick={closePreviewModal}>
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="modal-body">
+              {previewLoading ? (
+                <div className="loading">
+                  <RefreshCw size={32} className="spin" /> Chargement...
+                </div>
+              ) : previewContent?.type === 'error' ? (
+                <div className="error-message">
+                  <XCircle size={48} />
+                  <p>{previewContent.content}</p>
+                </div>
+              ) : previewContent?.type === 'xml' ? (
+                <pre className="xml-preview">{previewContent.content}</pre>
+              ) : previewContent?.type === 'csv' && previewContent.content ? (
+                <div className="csv-preview">
+                  <table>
+                    <thead>
+                      <tr>
+                        {Object.keys(previewContent.content[0] || {}).map((header, idx) => (
+                          <th key={idx}>{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewContent.content.map((row, rowIdx) => (
+                        <tr key={rowIdx}>
+                          {Object.values(row).map((cell, cellIdx) => (
+                            <td key={cellIdx}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-preview">Aucun contenu a afficher</div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

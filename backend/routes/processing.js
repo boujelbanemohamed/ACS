@@ -13,7 +13,7 @@ const csvProcessor = new CSVProcessor();
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = '/tmp/uploads';
+    const uploadDir = '/data/uploads';
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -230,7 +230,7 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
     }
 
     // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
+    // fs.unlinkSync(req.file.path); // Conservé pour visualisation
 
     res.json({
 
@@ -250,7 +250,7 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
     
     // Clean up file if it exists
     if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+      // fs.unlinkSync(req.file.path); // Conservé pour visualisation
     }
 
     res.status(500).json({

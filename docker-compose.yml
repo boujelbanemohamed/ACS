@@ -42,6 +42,8 @@ services:
         condition: service_healthy
     networks:
       - banking_network
+    volumes:
+      - ./data:/data
 
   frontend:
     build:
