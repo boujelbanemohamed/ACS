@@ -665,3 +665,124 @@
 .doc-section ul li:last-child {
   margin-bottom: 0;
 }
+
+/* ============ CONFIGURATION CONNEXION SFTP/FTP ============ */
+
+.form-divider {
+  display: flex;
+  align-items: center;
+  margin: 24px 0 16px 0;
+  color: #6366f1;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.form-divider::before,
+.form-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.form-divider span {
+  padding: 0 12px;
+}
+
+.sftp-config {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+.form-row .form-group.small {
+  flex: 0 0 100px;
+}
+
+.sftp-config textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.test-connection-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.test-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.test-btn.loading {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.connection-status.success {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.connection-status.error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+  
+  .form-row .form-group.small {
+    flex: 1;
+  }
+  
+  .test-connection-section {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

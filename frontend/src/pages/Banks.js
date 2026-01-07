@@ -22,8 +22,17 @@ const Banks = () => {
     old_url: '',
     xml_output_url: '',
     enrollment_report_url: '',
-    is_active: true
+    is_active: true,
+    connection_type: 'local',
+    sftp_host: '',
+    sftp_port: 22,
+    sftp_username: '',
+    sftp_password: '',
+    sftp_private_key: '',
+    sftp_passphrase: ''
   });
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState(null);
 
   useEffect(() => {
     fetchBanks();
@@ -56,8 +65,16 @@ const Banks = () => {
       old_url: bank.old_url || '',
       xml_output_url: bank.xml_output_url || '',
       enrollment_report_url: bank.enrollment_report_url || '',
-      is_active: bank.is_active
+      is_active: bank.is_active,
+      connection_type: bank.connection_type || 'local',
+      sftp_host: bank.sftp_host || '',
+      sftp_port: bank.sftp_port || 22,
+      sftp_username: bank.sftp_username || '',
+      sftp_password: '',
+      sftp_private_key: '',
+      sftp_passphrase: ''
     });
+    setConnectionStatus(null);
     setShowModal(true);
   };
 
@@ -89,6 +106,7 @@ const Banks = () => {
   const closeModal = () => {
     setShowModal(false);
     setEditingBank(null);
+    setConnectionStatus(null);
     setFormData({
       code: '',
       name: '',
@@ -97,9 +115,40 @@ const Banks = () => {
       old_url: '',
       xml_output_url: '',
       enrollment_report_url: '',
-      is_active: true
+      is_active: true,
+      connection_type: 'local',
+      sftp_host: '',
+      sftp_port: 22,
+      sftp_username: '',
+      sftp_password: '',
+      sftp_private_key: '',
+      sftp_passphrase: ''
     });
   };
+  const testConnection = async () => {
+    if (!editingBank) return;
+    setTestingConnection(true);
+    setConnectionStatus(null);
+    try {
+      // D'abord sauvegarder les modifications
+      await api.put('/banks/' + editingBank.id, formData);
+      // Puis tester la connexion
+      const response = await api.post('/banks/' + editingBank.id + '/test-connection');
+      setConnectionStatus({
+        success: response.data.success,
+        message: response.data.message
+      });
+    } catch (error) {
+      setConnectionStatus({
+        success: false,
+        message: error.response?.data?.message || error.message
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+
 
   if (loading) {
     return <div className="loading"><RefreshCw size={32} className="spin" /> Chargement...</div>;
@@ -372,6 +421,113 @@ const Banks = () => {
                   />
                   Banque active
                 </label>
+
+                <div className="form-divider">
+                  <span>Configuration de connexion</span>
+                </div>
+
+                <div className="form-group">
+                  <label>Type de connexion *</label>
+                  <select
+                    value={formData.connection_type}
+                    onChange={(e) => setFormData({...formData, connection_type: e.target.value})}
+                  >
+                    <option value="local">Local (dossier serveur)</option>
+                    <option value="http">HTTP/HTTPS</option>
+                    <option value="sftp">SFTP (SSH)</option>
+                    <option value="ftp">FTP</option>
+                  </select>
+                </div>
+
+                {(formData.connection_type === 'sftp' || formData.connection_type === 'ftp') && (
+                  <div className="sftp-config">
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Hote (IP ou hostname) *</label>
+                        <input
+                          type="text"
+                          value={formData.sftp_host}
+                          onChange={(e) => setFormData({...formData, sftp_host: e.target.value})}
+                          placeholder="192.168.1.100 ou serveur.banque.tn"
+                        />
+                      </div>
+                      <div className="form-group small">
+                        <label>Port</label>
+                        <input
+                          type="number"
+                          value={formData.sftp_port}
+                          onChange={(e) => setFormData({...formData, sftp_port: parseInt(e.target.value) || 22})}
+                          placeholder={formData.connection_type === 'sftp' ? '22' : '21'}
+                        />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Nom utilisateur *</label>
+                        <input
+                          type="text"
+                          value={formData.sftp_username}
+                          onChange={(e) => setFormData({...formData, sftp_username: e.target.value})}
+                          placeholder="username"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Mot de passe</label>
+                        <input
+                          type="password"
+                          value={formData.sftp_password}
+                          onChange={(e) => setFormData({...formData, sftp_password: e.target.value})}
+                          placeholder="Laisser vide pour garder l'existant"
+                        />
+                      </div>
+                    </div>
+                    {formData.connection_type === 'sftp' && (
+                      <>
+                        <div className="form-group">
+                          <label>Cle privee SSH (optionnel)</label>
+                          <textarea
+                            value={formData.sftp_private_key}
+                            onChange={(e) => setFormData({...formData, sftp_private_key: e.target.value})}
+                            placeholder="-----BEGIN RSA PRIVATE KEY-----..."
+                            rows={4}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Passphrase de la cle (optionnel)</label>
+                          <input
+                            type="password"
+                            value={formData.sftp_passphrase}
+                            onChange={(e) => setFormData({...formData, sftp_passphrase: e.target.value})}
+                            placeholder="Passphrase"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {editingBank && (
+                  <div className="test-connection-section">
+                    <button
+                      type="button"
+                      className={'btn btn-secondary test-btn ' + (testingConnection ? 'loading' : '')}
+                      onClick={testConnection}
+                      disabled={testingConnection}
+                    >
+                      {testingConnection ? (
+                        <><RefreshCw size={16} className="spin" /> Test en cours...</>
+                      ) : (
+                        <><ExternalLink size={16} /> Tester la connexion</>
+                      )}
+                    </button>
+                    {connectionStatus && (
+                      <div className={'connection-status ' + (connectionStatus.success ? 'success' : 'error')}>
+                        {connectionStatus.success ? <Check size={16} /> : <X size={16} />}
+                        {connectionStatus.message}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="modal-actions">

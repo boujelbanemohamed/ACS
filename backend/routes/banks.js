@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../config/database');
+const connectionService = require('../services/connectionService');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleMiddleware');
 
@@ -125,48 +126,77 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
 // Update bank (admin only)
 router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
-    const { code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active } = req.body;
-
-    // Validate required fields
-    if (!xml_output_url) {
-      return res.status(400).json({
-        success: false,
-        message: 'Le champ xml_output_url est obligatoire'
-      });
-    }
-
-    const query = `
-      UPDATE banks 
-      SET 
-        code = COALESCE($1, code),
-        name = COALESCE($2, name),
-        source_url = COALESCE($3, source_url),
-        destination_url = COALESCE($4, destination_url),
-        old_url = COALESCE($5, old_url),
-        xml_output_url = $6,
-        is_active = COALESCE($7, is_active),
-        updated_at = NOW()
-      WHERE id = $8
-      RETURNING *
-    `;
-
-    const result = await db.query(query, [
-      code ? code.toUpperCase() : null,
-      name,
-      source_url,
-      destination_url,
-      old_url,
-      xml_output_url,
+    const { id } = req.params;
+    const { 
+      code, 
+      name, 
+      source_url, 
+      destination_url, 
+      old_url, 
+      xml_output_url, 
+      enrollment_report_url, 
       is_active,
-      req.params.id
-    ]);
+      connection_type,
+      sftp_host,
+      sftp_port,
+      sftp_username,
+      sftp_password,
+      sftp_private_key,
+      sftp_passphrase
+    } = req.body;
 
-    if (result.rows.length === 0) {
+    // Verifier si la banque existe
+    const existingBank = await db.query('SELECT * FROM banks WHERE id = $1', [id]);
+    if (existingBank.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Banque non trouvee'
       });
     }
+
+    // Verifier si le nouveau code n'est pas deja utilise par une autre banque
+    if (code) {
+      const codeCheck = await db.query(
+        'SELECT id FROM banks WHERE code = $1 AND id != $2',
+        [code, id]
+      );
+      if (codeCheck.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ce code banque est deja utilise'
+        });
+      }
+    }
+
+    const result = await db.query(
+      `UPDATE banks SET 
+        code = COALESCE($1, code),
+        name = COALESCE($2, name),
+        source_url = COALESCE($3, source_url),
+        destination_url = COALESCE($4, destination_url),
+        old_url = COALESCE($5, old_url),
+        xml_output_url = COALESCE($6, xml_output_url),
+        enrollment_report_url = COALESCE($7, enrollment_report_url),
+        is_active = COALESCE($8, is_active),
+        connection_type = COALESCE($9, connection_type),
+        sftp_host = $10,
+        sftp_port = COALESCE($11, sftp_port),
+        sftp_username = $12,
+        sftp_password = CASE WHEN $13::text = '' THEN sftp_password ELSE $13 END,
+        sftp_private_key = CASE WHEN $14::text = '' THEN sftp_private_key ELSE $14 END,
+        sftp_passphrase = CASE WHEN $15::text = '' THEN sftp_passphrase ELSE $15 END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $16
+      RETURNING id, code, name, source_url, destination_url, old_url, xml_output_url, 
+                enrollment_report_url, is_active, connection_type, sftp_host, sftp_port, 
+                sftp_username, created_at, updated_at`,
+      [
+        code, name, source_url, destination_url, old_url, xml_output_url,
+        enrollment_report_url, is_active, connection_type, sftp_host,
+        sftp_port || 22, sftp_username, sftp_password || '', 
+        sftp_private_key || '', sftp_passphrase || '', id
+      ]
+    );
 
     res.json({
       success: true,
@@ -177,78 +207,44 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
     console.error('Update bank error:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur lors de la mise a jour de la banque',
-      error: error.message
+      message: 'Erreur lors de la mise a jour de la banque'
     });
   }
 });
 
-// Delete bank (admin only)
-router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
+/**
+ * POST /api/banks/:id/test-connection
+ * Tester la connexion d'une banque
+ */
+router.post('/:id/test-connection', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
-    const query = 'DELETE FROM banks WHERE id = $1 RETURNING *';
-    const result = await db.query(query, [req.params.id]);
-
-    if (result.rows.length === 0) {
+    const { id } = req.params;
+    
+    const bankResult = await db.query('SELECT * FROM banks WHERE id = $1', [id]);
+    
+    if (bankResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Banque non trouvee'
       });
     }
-
+    
+    const bank = bankResult.rows[0];
+    const result = await connectionService.testConnection(bank);
+    
     res.json({
-      success: true,
-      message: 'Banque supprimee avec succes'
-    });
-  } catch (error) {
-    console.error('Delete bank error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la suppression de la banque',
-      error: error.message
-    });
-  }
-});
-
-// Get bank statistics
-router.get('/:id/stats', authMiddleware, async (req, res) => {
-  try {
-    const query = `
-      SELECT 
-        COUNT(DISTINCT pr.id) as total_records,
-        COUNT(DISTINCT CASE WHEN fl.status = 'success' THEN fl.id END) as successful_files,
-        COUNT(DISTINCT CASE WHEN fl.status = 'error' THEN fl.id END) as failed_files,
-        COUNT(DISTINCT CASE WHEN fl.status = 'validation_error' THEN fl.id END) as validation_errors,
-        COALESCE(SUM(fl.valid_rows), 0) as total_valid_rows,
-        COALESCE(SUM(fl.invalid_rows), 0) as total_invalid_rows,
-        COALESCE(SUM(fl.duplicate_rows), 0) as total_duplicate_rows
-      FROM banks b
-      LEFT JOIN processed_records pr ON b.id = pr.bank_id
-      LEFT JOIN file_logs fl ON b.id = fl.bank_id
-      WHERE b.id = $1
-      GROUP BY b.id
-    `;
-
-    const result = await db.query(query, [req.params.id]);
-
-    res.json({
-      success: true,
-      data: result.rows[0] || {
-        total_records: 0,
-        successful_files: 0,
-        failed_files: 0,
-        validation_errors: 0,
-        total_valid_rows: 0,
-        total_invalid_rows: 0,
-        total_duplicate_rows: 0
+      success: result.success,
+      message: result.message,
+      data: {
+        connectionType: result.type,
+        sourceUrl: bank.source_url
       }
     });
   } catch (error) {
-    console.error('Get bank stats error:', error);
+    console.error('Test connection error:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur lors de la recuperation des statistiques',
-      error: error.message
+      message: 'Erreur lors du test de connexion: ' + error.message
     });
   }
 });
