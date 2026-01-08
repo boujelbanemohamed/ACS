@@ -99,6 +99,18 @@ router.post('/process-url', authMiddleware, async (req, res) => {
       
       xmlContent += '</cardRegistryRecords>';
       
+      // Écrire le fichier XML sur le disque
+      const xmlFilePath = require('path').join(xmlOutputUrl, xmlFileName);
+      try {
+        if (!fs.existsSync(xmlOutputUrl)) {
+          fs.mkdirSync(xmlOutputUrl, { recursive: true });
+        }
+        fs.writeFileSync(xmlFilePath, xmlContent, 'utf8');
+        console.log('XML file written:', xmlFilePath);
+      } catch (xmlWriteError) {
+        console.error('Error writing XML file:', xmlWriteError);
+      }
+      
       // Log XML generation
       await db.query(
         'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
@@ -222,6 +234,21 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
       
       xmlContent += '</cardRegistryRecords>';
       
+
+      // Écrire le fichier XML sur le disque
+      const xmlFilePathToWrite = require('path').join(xmlOutputUrl, xmlFileName);
+      try {
+        const fsSync = require('fs');
+        if (!fsSync.existsSync(xmlOutputUrl)) {
+          fsSync.mkdirSync(xmlOutputUrl, { recursive: true });
+        }
+        fsSync.writeFileSync(xmlFilePathToWrite, xmlContent, 'utf8');
+        console.log('XML file written:', xmlFilePathToWrite);
+      } catch (xmlWriteError) {
+        console.error('Error writing XML file:', xmlWriteError);
+      }
+
+
       // Log XML generation
       await db.query(
         'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
@@ -648,6 +675,21 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
     });
     
     xmlContent += '</cardRegistryRecords>';
+
+
+      // Écrire le fichier XML sur le disque
+      const xmlFilePathToWrite = require('path').join(xmlOutputUrl, xmlFileName);
+      try {
+        const fsSync = require('fs');
+        if (!fsSync.existsSync(xmlOutputUrl)) {
+          fsSync.mkdirSync(xmlOutputUrl, { recursive: true });
+        }
+        fsSync.writeFileSync(xmlFilePathToWrite, xmlContent, 'utf8');
+        console.log('XML file written:', xmlFilePathToWrite);
+      } catch (xmlWriteError) {
+        console.error('Error writing XML file:', xmlWriteError);
+      }
+
 
     // Log XML generation
     await db.query(
