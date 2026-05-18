@@ -147,7 +147,6 @@ class CSVValidator {
       }
     }
 
-    // Validate expiry date (format: YYYYMM)
     if (!row.expiry || row.expiry.trim() === '') {
       errors.push({
         rowNumber,
@@ -156,28 +155,19 @@ class CSVValidator {
         error: 'Le champ expiry est requis',
         severity: 'error'
       });
-    } else if (!/^\d{6}$/.test(row.expiry)) {
+    } else if (!/^\d{2}\/\d{2}$/.test(row.expiry)) {
       errors.push({
         rowNumber,
         field: 'expiry',
         value: row.expiry,
-        error: 'Format expiry invalide. Format attendu: YYYYMM (ex: 202411)',
+        error: 'Format expiry invalide. Format attendu: MM/YY (ex: 12/28)',
         severity: 'error'
       });
     } else {
-      const year = parseInt(row.expiry.substring(0, 4));
-      const month = parseInt(row.expiry.substring(4, 6));
-      
-      if (year < 2024 || year > 2050) {
-        errors.push({
-          rowNumber,
-          field: 'expiry',
-          value: row.expiry,
-          error: 'Année d\'expiration invalide (doit être entre 2024 et 2050)',
-          severity: 'error'
-        });
-      }
-      
+      const parts = row.expiry.split('/');
+      const month = parseInt(parts[0], 10);
+      const year = parseInt(parts[1], 10) + 2000;
+
       if (month < 1 || month > 12) {
         errors.push({
           rowNumber,
@@ -188,7 +178,16 @@ class CSVValidator {
         });
       }
 
-      // Check if card is expired
+      if (year < 2024 || year > 2050) {
+        errors.push({
+          rowNumber,
+          field: 'expiry',
+          value: row.expiry,
+          error: 'Année d\'expiration invalide',
+          severity: 'error'
+        });
+      }
+
       const expiryDate = new Date(year, month - 1);
       const currentDate = new Date();
       if (expiryDate < currentDate) {

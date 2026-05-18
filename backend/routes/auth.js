@@ -52,7 +52,7 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
         role: user.role,
         bank_id: user.bank_id
       },
-      process.env.JWT_SECRET || 'your_super_secret_jwt_key',
+      process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE || '24h' }
     );
 

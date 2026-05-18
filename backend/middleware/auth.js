@@ -12,7 +12,13 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_super_secret_jwt_key');
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({
+        success: false,
+        message: 'Erreur de configuration serveur'
+      });
+    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Récupérer les infos utilisateur à jour depuis la DB
     const userResult = await db.query(

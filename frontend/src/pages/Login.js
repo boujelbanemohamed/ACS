@@ -91,10 +91,11 @@ const Login = () => {
           </button>
         </form>
 
-        <div className="login-footer">
-          <p>Identifiants par défaut :</p>
-          <p><strong>admin</strong> / <strong>Admin@123</strong></p>
-        </div>
+        {process.env.REACT_APP_SHOW_DEFAULT_CREDENTIALS === 'true' && (
+          <div className="login-footer">
+            <p>Environnement de démonstration</p>
+          </div>
+        )}
       </div>
     </div>
   );

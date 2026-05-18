@@ -10,6 +10,7 @@ import CronManager from './pages/CronManager';
 import Notifications from './pages/Notifications';
 import Records from './pages/Records';
 import History from './pages/History';
+import ApiTester from './pages/ApiTester';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
 import './App.css';
@@ -43,6 +44,7 @@ function App() {
             <Route path="cron" element={<CronManager />} />
             <Route path="records" element={<Records />} />
             <Route path="history" element={<History />} />
+            <Route path="api-tester" element={<ApiTester />} />
             <Route path="users" element={<Users />} />
             <Route path="profile" element={<Profile />} />
             <Route path="notifications" element={<Notifications />} />

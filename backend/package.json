@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "axios": "^1.6.2",
+    "basic-ftp": "^6.0.1",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
@@ -25,6 +26,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^7.0.12",
     "pg": "^8.11.3",
+    "ssh2-sftp-client": "^12.1.1",
     "winston": "^3.11.0"
   },
   "devDependencies": {

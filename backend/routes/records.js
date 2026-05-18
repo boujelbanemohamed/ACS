@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { filterByBank } = require('../middleware/roleMiddleware');
+const xmlGenerator = require('../services/xmlGenerator');
+const recordHistoryService = require('../services/recordHistoryService');
 
 const router = express.Router();
 
@@ -16,6 +18,8 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       sortBy = 'processed_at',
       sortOrder = 'DESC'
     } = req.query;
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
     let query = `
       SELECT 
@@ -48,7 +52,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     }
 
     query += ` ORDER BY pr.${sortBy} ${sortOrder} LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(limit, offset);
+    params.push(safeLimit, safeOffset);
 
     const result = await db.query(query, params);
 
@@ -74,8 +78,8 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       data: result.rows,
       pagination: {
         total: parseInt(countResult.rows[0].count),
-        limit: parseInt(limit),
-        offset: parseInt(offset)
+        limit: safeLimit,
+        offset: safeOffset
       }
     });
   } catch (error) {
@@ -129,22 +133,31 @@ router.get('/export/csv', authMiddleware, async (req, res) => {
     query += ` ORDER BY pr.processed_at DESC`;
     const result = await db.query(query, params);
 
+    const escapeCsvField = (field) => {
+      if (field == null) return '';
+      const str = String(field);
+      if (str.includes(';') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
     const headers = ['Bank', 'Language', 'First Name', 'Last Name', 'PAN', 'Expiry', 'Phone', 'Behaviour', 'Action', 'File', 'Processed At'];
     let csv = headers.join(';') + '\n';
     
     result.rows.forEach(row => {
       csv += [
-        row.bank_code,
-        row.language,
-        row.first_name,
-        row.last_name,
-        row.pan,
-        row.expiry,
-        row.phone,
-        row.behaviour,
-        row.action,
-        row.file_name,
-        new Date(row.processed_at).toISOString()
+        escapeCsvField(row.bank_code),
+        escapeCsvField(row.language),
+        escapeCsvField(row.first_name),
+        escapeCsvField(row.last_name),
+        escapeCsvField(row.pan),
+        escapeCsvField(row.expiry),
+        escapeCsvField(row.phone),
+        escapeCsvField(row.behaviour),
+        escapeCsvField(row.action),
+        escapeCsvField(row.file_name),
+        escapeCsvField(new Date(row.processed_at).toISOString())
       ].join(';') + '\n';
     });
 
@@ -162,7 +175,7 @@ router.get('/export/csv', authMiddleware, async (req, res) => {
 });
 
 // Get file content by file name
-router.get('/file-content/byname', authMiddleware, async (req, res) => {
+router.get('/file-content/byname', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { type, fileName } = req.query;
 
@@ -179,7 +192,7 @@ router.get('/file-content/byname', authMiddleware, async (req, res) => {
       searchFileName = fileName.replace('.xml', '.csv');
     }
 
-    const recordsQuery = `
+    let recordsQuery = `
       SELECT 
         pr.language, pr.first_name as "firstName", pr.last_name as "lastName",
         pr.pan, pr.expiry, pr.phone, pr.behaviour, pr.action,
@@ -187,10 +200,19 @@ router.get('/file-content/byname', authMiddleware, async (req, res) => {
       FROM processed_records pr
       JOIN banks b ON pr.bank_id = b.id
       WHERE pr.file_name = $1
-      ORDER BY pr.id
     `;
     
-    const result = await db.query(recordsQuery, [searchFileName]);
+    const queryParams = [searchFileName];
+    
+    // Bank-level access control
+    if (req.user.role === 'bank' && req.user.bank_id) {
+      recordsQuery += ` AND pr.bank_id = $2`;
+      queryParams.push(req.user.bank_id);
+    }
+    
+    recordsQuery += ` ORDER BY pr.id`;
+    
+    const result = await db.query(recordsQuery, queryParams);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -202,23 +224,8 @@ router.get('/file-content/byname', authMiddleware, async (req, res) => {
     const bankCode = result.rows[0].bank_code || 'UNKNOWN';
 
     if (type === 'xml') {
-      let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
-      xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
-      
-      let idCounter = 1;
-      result.rows.forEach(row => {
-        const phone = row.phone && row.phone.startsWith('+') ? row.phone : '+' + (row.phone || '');
-        xmlContent += '  <add id="' + idCounter + '" cardNumber="' + row.pan + '" profileId="' + bankCode + '" cardStatus="ACTIVE">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </add>\n';
-        idCounter++;
-        xmlContent += '  <setAuthMethod id="' + idCounter + '" cardNumber="' + row.pan + '" profileId="' + bankCode + '">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </setAuthMethod>\n';
-        idCounter++;
-      });
-      xmlContent += '</cardRegistryRecords>';
-
+      const preppedRows = result.rows.map(r => ({ ...r, pan: r.pan, phone: r.phone }));
+      const xmlContent = await xmlGenerator.generateXML(preppedRows, bankCode);
       res.json({ success: true, data: xmlContent });
     } else {
       const csvData = result.rows.map(row => ({
@@ -265,7 +272,6 @@ router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
     const result = await db.query(recordsQuery, [fileLogId]);
 
     if (type === 'xml') {
-      // Get bank info
       const bankQuery = `
         SELECT b.code FROM file_logs fl
         JOIN banks b ON fl.bank_id = b.id
@@ -273,25 +279,8 @@ router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
       `;
       const bankResult = await db.query(bankQuery, [fileLogId]);
       const bankCode = bankResult.rows[0]?.code || 'UNKNOWN';
-
-      // Generate XML content
-      let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
-      xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
-      
-      let idCounter = 1;
-      result.rows.forEach(row => {
-        const phone = row.phone && row.phone.startsWith('+') ? row.phone : '+' + row.phone;
-        xmlContent += '  <add id="' + idCounter + '" cardNumber="' + row.pan + '" profileId="' + bankCode + '" cardStatus="ACTIVE">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </add>\n';
-        idCounter++;
-        xmlContent += '  <setAuthMethod id="' + idCounter + '" cardNumber="' + row.pan + '" profileId="' + bankCode + '">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </setAuthMethod>\n';
-        idCounter++;
-      });
-      xmlContent += '</cardRegistryRecords>';
-
+      const preppedRows = result.rows.map(r => ({ ...r, pan: r.pan, phone: r.phone }));
+      const xmlContent = await xmlGenerator.generateXML(preppedRows, bankCode);
       res.json({
         success: true,
         data: xmlContent
@@ -307,6 +296,39 @@ router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la recuperation du contenu',
+      error: error.message
+    });
+  }
+});
+
+// Get full history for a record's PAN
+router.get('/history/:recordId', authMiddleware, async (req, res) => {
+  try {
+    const { recordId } = req.params;
+
+    const recordResult = await db.query(
+      'SELECT id, bank_id, pan FROM processed_records WHERE id = $1',
+      [recordId]
+    );
+
+    if (recordResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Enregistrement non trouvé' });
+    }
+
+    const record = recordResult.rows[0];
+
+    if (req.user.role === 'bank' && req.user.bank_id !== record.bank_id) {
+      return res.status(403).json({ success: false, message: 'Accès refusé' });
+    }
+
+    const history = await recordHistoryService.getHistoryByPan(record.bank_id, record.pan);
+
+    res.json({ success: true, data: history, record });
+  } catch (error) {
+    console.error('Get record history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération de l\'historique',
       error: error.message
     });
   }

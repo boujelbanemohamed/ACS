@@ -8,7 +8,7 @@ const Processing = () => {
   const { user } = useAuth();
   const [banks, setBanks] = useState([]);
   const [selectedBank, setSelectedBank] = useState('');
-  const [baseUrl, setBaseUrl] = useState('https://175.0.2.15/ACS');
+  const [baseUrl, setBaseUrl] = useState(process.env.REACT_APP_DEFAULT_BASE_URL || '');
   const [processing, setProcessing] = useState(false);
   const handleReset = () => {
     setValidRows([]);
@@ -609,6 +609,23 @@ const handleFinalProcess = async () => {
     showNotification('Fichier CSV telecharge');
   };
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await processingAPI.downloadTemplate();
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'template_import.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showNotification('Template CSV telecharge');
+    } catch (err) {
+      showNotification('Erreur lors du telechargement du template');
+    }
+  };
+
   return (
     <div className="processing-page">
       {/* Notification */}
@@ -705,6 +722,9 @@ const handleFinalProcess = async () => {
               <button type="button" className="btn btn-secondary" onClick={handleReset} style={{marginLeft: '10px'}}>
                 <RefreshCw size={18} /> Reinitialiser
               </button>
+              <button type="button" className="btn btn-outline" onClick={handleDownloadTemplate} style={{marginLeft: '10px'}}>
+                <Download size={18} /> Template CSV
+              </button>
             </form>
             
             <div className="doc-section">
@@ -756,7 +776,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://175.0.2.15/ACS"
+                placeholder="https://example.com/ACS"
               />
             </div>
 

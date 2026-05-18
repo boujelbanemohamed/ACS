@@ -269,7 +269,7 @@ ON CONFLICT (key) DO NOTHING;
 -- Insert default admin user (password: Admin@123)
 -- Hash genere avec bcrypt rounds=10
 INSERT INTO users (username, password, email, role, is_active) 
-VALUES ('admin', '$2a$10$Izv810YTXK/IfnU/XIqlweYv9.xe3UYG/UPktAU.nzIO2nE5aMDf2', 'admin@banking.com', 'super_admin', true)
+VALUES ('admin', '$2a$10$v57TI8GSY9ZdFccfJUYV8OUgb1sGwVt2q5HaycS8kR7l6XaOnxzzq', 'admin@banking.com', 'super_admin', true)
 ON CONFLICT (username) DO NOTHING;
 
 -- Insert sample banks

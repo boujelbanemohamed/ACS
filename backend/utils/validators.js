@@ -106,9 +106,9 @@ const processingSchemas = {
           .messages({
             'string.pattern.base': 'Le PAN doit contenir exactement 16 chiffres'
           }),
-        expiry: Joi.string().pattern(/^\d{6}$/).required()
+        expiry: Joi.string().pattern(/^\d{2}\/\d{2}$/).required()
           .messages({
-            'string.pattern.base': 'Format expiry invalide (YYYYMM)'
+            'string.pattern.base': 'Format expiry invalide (MM/YY)'
           }),
         phone: Joi.string().pattern(/^216\d{8}$/).required()
           .messages({

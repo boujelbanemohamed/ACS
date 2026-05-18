@@ -8,7 +8,7 @@ class EnrollmentService {
   parseEnrollmentXML(xmlContent) {
     const results = [];
     
-    const recordRegex = /<cardRegistryRecordProcessingResult\s+id="(\d+)"\s+status="([^"]+)"(?:\s+description="([^"]*)")?\s*\/>/g;
+    const recordRegex = /<cardRegistryRecordProcessingResult\s+id=['"](\d+)['"]\s+status=['"]([^'"]+)['"](?:\s+description=['"]([^'"]*)['"])?\s*\/?>/g;
     
     let match;
     while ((match = recordRegex.exec(xmlContent)) !== null) {

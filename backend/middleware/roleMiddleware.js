@@ -73,7 +73,7 @@ const filterByBank = (req, res, next) => {
   }
 
   if (req.user.role === 'bank' && req.user.bank_id) {
-    req.query.bank_id = req.user.bank_id;
+    req.query.bankId = req.user.bank_id;
     req.bankFilter = req.user.bank_id;
   }
 

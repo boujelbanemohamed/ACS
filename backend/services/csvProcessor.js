@@ -6,6 +6,7 @@ const db = require('../config/database');
 const recordHistoryService = require('./recordHistoryService');
 const CSVValidator = require('../utils/csvValidator');
 const { validateRowForHistory } = require('../utils/validationHelper');
+const sftpService = require('../utils/remoteFileService');
 
 class CSVProcessor {
   constructor() {
@@ -52,6 +53,7 @@ class CSVProcessor {
         valid_rows: stats.validRows,
         invalid_rows: stats.invalidRows,
         duplicate_rows: stats.duplicateRows,
+        updated_rows: stats.updatedRows,
         status: errors.length > 0 ? 'validation_error' : 'success'
       });
 
@@ -99,6 +101,7 @@ class CSVProcessor {
         valid_rows: stats.validRows,
         invalid_rows: stats.invalidRows,
         duplicate_rows: stats.duplicateRows,
+        updated_rows: stats.updatedRows,
         status: errors.length > 0 ? 'validation_error' : 'success'
       });
 
@@ -125,23 +128,36 @@ class CSVProcessor {
   }
 
   /**
-   * Download file from URL
+   * Download file from URL or copy from local path
    */
   async downloadFile(url, destPath) {
-    const response = await axios({
-      method: 'GET',
-      url: url,
-      responseType: 'stream',
-      timeout: 30000
-    });
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const response = await axios({
+        method: 'GET',
+        url: url,
+        responseType: 'stream',
+        timeout: 30000
+      });
 
-    const writer = fs.createWriteStream(destPath);
-    response.data.pipe(writer);
+      const writer = fs.createWriteStream(destPath);
+      response.data.pipe(writer);
 
-    return new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
+      return new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+    }
+
+    if (sftpService.isRemote(url)) {
+      await sftpService.copyToLocal(url, destPath);
+      return;
+    }
+
+    const cleanPath = url.replace('file://', '');
+    if (!fs.existsSync(cleanPath)) {
+      throw new Error(`File not found: ${cleanPath}`);
+    }
+    fs.cpSync(cleanPath, destPath);
   }
 
   /**
@@ -152,14 +168,15 @@ class CSVProcessor {
       const rows = [];
       const errors = [];
       const allRows = [];
-      const seenPans = new Set(); // Track PANs within current file
+      const seenPans = new Set();
       let rowNumber = 0;
       
       const stats = {
         totalRows: 0,
         validRows: 0,
         invalidRows: 0,
-        duplicateRows: 0
+        duplicateRows: 0,
+        updatedRows: 0
       };
 
       const pendingChecks = [];
@@ -167,7 +184,6 @@ class CSVProcessor {
       fs.createReadStream(filePath)
         .pipe(csv({ separator: ';' }))
         .on('headers', (headers) => {
-          // Validate header structure
           const headerValidation = this.validator.validateHeader(headers);
           if (!headerValidation.isValid) {
             headerValidation.errors.forEach(err => {
@@ -183,21 +199,17 @@ class CSVProcessor {
           rowNumber++;
           stats.totalRows++;
 
-          // Normalize row data
           const normalizedRow = this.normalizeRowData(row, rowNumber);
           allRows.push(normalizedRow);
 
-          // Skip empty rows
           if (Object.values(row).every(val => !val || val.trim() === '')) {
             return;
           }
 
-          // Validate row
           const validation = this.validator.validateRow(row, rowNumber);
           
           if (!validation.isValid) {
             stats.invalidRows++;
-            // Add row data to each error
             validation.errors.forEach(err => {
               errors.push({
                 ...err,
@@ -208,7 +220,6 @@ class CSVProcessor {
           } else {
             const pan = normalizedRow.pan;
             
-            // Check for duplicate PAN within current file
             if (seenPans.has(pan)) {
               stats.duplicateRows++;
               stats.invalidRows++;
@@ -221,31 +232,19 @@ class CSVProcessor {
                 rowData: { ...normalizedRow }
               });
             } else {
-              // Check for duplicate PAN in database
-              const checkPromise = this.checkDuplicatePAN(bankId, pan).then(isDuplicate => {
-                if (isDuplicate) {
-                  stats.duplicateRows++;
-                  stats.invalidRows++;
-                  errors.push({
-                    rowNumber: rowNumber,
-                    field: 'pan',
-                    value: pan,
-                    error: `PAN deja existant en base de donnees`,
-                    severity: 'warning',
-                    rowData: { ...normalizedRow }
-                  });
-                } else {
-                  stats.validRows++;
-                  rows.push(normalizedRow);
-                  seenPans.add(pan); // Mark PAN as seen
+              seenPans.add(pan);
+              const checkPromise = this.checkExistingPAN(bankId, pan).then(existing => {
+                if (existing) {
+                  stats.updatedRows++;
                 }
+                stats.validRows++;
+                rows.push(normalizedRow);
               });
               pendingChecks.push(checkPromise);
             }
           }
         })
         .on('end', async () => {
-          // Wait for all duplicate checks to complete
           await Promise.all(pendingChecks);
           resolve({ rows, errors, stats, allRows });
         })
@@ -255,22 +254,12 @@ class CSVProcessor {
     });
   }
 
-  /**
-   * Check if PAN already exists in database (duplicate = same PAN only)
-   */
-  async checkDuplicatePAN(bankId, pan) {
-    if (!pan) {
-      return false;
-    }
-
-    const query = `
-      SELECT id FROM processed_records
-      WHERE bank_id = $1 
-        AND pan = $2
-      LIMIT 1
-    `;
-    
-    const result = await db.query(query, [bankId, pan]);
+  async checkExistingPAN(bankId, pan) {
+    if (!pan) return false;
+    const result = await db.query(
+      `SELECT id FROM processed_records WHERE bank_id = $1 AND pan = $2 LIMIT 1`,
+      [bankId, pan]
+    );
     return result.rows.length > 0;
   }
 
@@ -343,11 +332,17 @@ class CSVProcessor {
         behaviour = EXCLUDED.behaviour,
         action = EXCLUDED.action,
         file_name = EXCLUDED.file_name,
+        enrollment_status = 'pending',
+        enrollment_error_code = NULL,
+        enrollment_error_description = NULL,
+        enrollment_date = NULL,
         processed_at = CURRENT_TIMESTAMP
+      RETURNING id, pan
     `;
 
+    const saved = [];
     for (const row of rows) {
-      await db.query(query, [
+      const result = await db.query(query, [
         bankId,
         row.language,
         row.firstName || row.first_name,
@@ -359,7 +354,9 @@ class CSVProcessor {
         row.action,
         fileName
       ]);
+      saved.push(result.rows[0]);
     }
+    return saved;
   }
 
   /**
@@ -429,7 +426,12 @@ class CSVProcessor {
   async checkForNewFiles(sourceUrl) {
     try {
       console.log(`Checking for new files at: ${sourceUrl}`);
-      
+
+      if (sftpService.isRemote(sourceUrl)) {
+        const files = await sftpService.listFiles(sourceUrl, '.csv');
+        return files;
+      }
+
       const response = await axios.get(sourceUrl, {
         timeout: 10000,
         validateStatus: (status) => status < 500
@@ -451,50 +453,138 @@ class CSVProcessor {
   }
 
   /**
-   * Check if a file has already been processed
-   */
-  async isFileAlreadyProcessed(bankId, fileName) {
-    const query = `
-      SELECT id FROM file_logs 
-      WHERE bank_id = $1 
-        AND file_name = $2 
-        AND status IN ('success', 'processing')
-      LIMIT 1
-    `;
-    
-    const result = await db.query(query, [bankId, fileName]);
-    return result.rows.length > 0;
-  }
-
-  /**
-   * Move file to destination
+   * Move file to destination (local filesystem)
    */
   async moveFileToDestination(sourceUrl, destinationUrl, fileName) {
+    const isSftpSource = sftpService.isRemote(sourceUrl);
+    const isSftpDest = sftpService.isRemote(destinationUrl);
+
     console.log(`Moving file from ${sourceUrl}/${fileName} to ${destinationUrl}/${fileName}`);
-    
+
     try {
+      if (isSftpSource || isSftpDest) {
+        const fullSourceUrl = `${sourceUrl}/${fileName}`;
+        const fullDestUrl = `${destinationUrl}/${fileName}`;
+
+        if (isSftpSource && isSftpDest) {
+          await sftpService.moveFile(fullSourceUrl, fullDestUrl);
+        } else if (isSftpSource) {
+          await sftpService.copyToLocal(fullSourceUrl, path.join(destinationUrl.replace('file://', ''), fileName));
+          await sftpService.deleteFile(fullSourceUrl);
+        } else {
+          await sftpService.copyFromLocal(path.join(sourceUrl.replace('file://', ''), fileName), fullDestUrl);
+          fs.unlinkSync(path.join(sourceUrl.replace('file://', ''), fileName));
+        }
+      } else {
+        const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
+        const destPath = destinationUrl.startsWith('file://') ? destinationUrl.slice(7) : destinationUrl;
+
+        if (fs.existsSync(sourcePath)) {
+          if (!fs.existsSync(destPath)) {
+            fs.mkdirSync(destPath, { recursive: true });
+          }
+          fs.cpSync(path.join(sourcePath, fileName), path.join(destPath, fileName));
+          fs.unlinkSync(path.join(sourcePath, fileName));
+        }
+      }
       return {
         success: true,
         destinationPath: `${destinationUrl}/${fileName}`
       };
     } catch (error) {
-      throw new Error(`Failed to move file: ${error.message}`);
+      console.error(`Failed to move file: ${error.message}`);
+      return { success: false, destinationPath: `${destinationUrl}/${fileName}` };
+    }
+  }
+
+  async archiveOldFile(sourceUrl, archiveUrl, fileName) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const oldFileName = `OLD_${timestamp}_${fileName}`;
+    const isSftpSource = sftpService.isRemote(sourceUrl);
+    const isSftpArchive = sftpService.isRemote(archiveUrl);
+
+    console.log(`Archiving file from ${sourceUrl}/${fileName} to ${archiveUrl}/${oldFileName}`);
+
+    try {
+      if (isSftpSource || isSftpArchive) {
+        const fullSourceUrl = `${sourceUrl}/${fileName}`;
+        const fullArchiveUrl = `${archiveUrl}/${oldFileName}`;
+
+        if (isSftpSource && isSftpArchive) {
+          if (sftpService.isRemote(fullSourceUrl)) {
+            let sftp;
+            try {
+              sftp = await sftpService.connect(fullSourceUrl);
+              const srcConfig = sftpService.parseUrl(fullSourceUrl);
+              const dstConfig = sftpService.parseUrl(fullArchiveUrl);
+              const destDir = dstConfig.remotePath.substring(0, dstConfig.remotePath.lastIndexOf('/') + 1);
+              try { await sftp.mkdir(destDir, true); } catch {}
+              const exists = await sftp.exists(srcConfig.remotePath).catch(() => false);
+              if (exists) {
+                const temp = '/tmp/' + oldFileName;
+                await sftp.fastGet(srcConfig.remotePath, temp);
+                await sftp.fastPut(temp, dstConfig.remotePath);
+                fs.unlinkSync(temp);
+              }
+            } finally {
+              if (sftp) await sftp.end();
+            }
+          }
+        } else if (isSftpSource) {
+          await sftpService.copyToLocal(fullSourceUrl, '/tmp/' + oldFileName);
+        } else {
+          const localPath = path.join(sourceUrl.replace('file://', ''), fileName);
+          if (fs.existsSync(localPath)) {
+            await sftpService.copyFromLocal(localPath, fullArchiveUrl);
+          }
+        }
+      } else {
+        const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
+        const archivePath = archiveUrl.startsWith('file://') ? archiveUrl.slice(7) : archiveUrl;
+
+        if (fs.existsSync(sourcePath)) {
+          if (!fs.existsSync(archivePath)) {
+            fs.mkdirSync(archivePath, { recursive: true });
+          }
+          fs.cpSync(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
+        }
+      }
+      return {
+        success: true,
+        archivePath: `${archiveUrl}/${oldFileName}`
+      };
+    } catch (error) {
+      console.error(`Failed to move file: ${error.message}`);
+      return { success: false, destinationPath: `${destinationUrl}/${fileName}` };
     }
   }
 
   /**
-   * Archive old file
+   * Archive old file (local filesystem)
    */
   async archiveOldFile(sourceUrl, archiveUrl, fileName) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const oldFileName = `OLD_${timestamp}_${fileName}`;
-    
-    console.log(`Archiving file from ${sourceUrl}/${fileName} to ${archiveUrl}/${oldFileName}`);
-    
-    return {
-      success: true,
-      archivePath: `${archiveUrl}/${oldFileName}`
-    };
+    const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
+    const archivePath = archiveUrl.startsWith('file://') ? archiveUrl.slice(7) : archiveUrl;
+
+    console.log(`Archiving file from ${sourcePath}/${fileName} to ${archivePath}/${oldFileName}`);
+
+    try {
+      if (fs.existsSync(sourcePath)) {
+        if (!fs.existsSync(archivePath)) {
+          fs.mkdirSync(archivePath, { recursive: true });
+        }
+        fs.cpSync(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
+      }
+      return {
+        success: true,
+        archivePath: `${archiveUrl}/${oldFileName}`
+      };
+    } catch (error) {
+      console.error(`Failed to archive file: ${error.message}`);
+      return { success: false, archivePath: `${archiveUrl}/${oldFileName}` };
+    }
   }
 
   /**

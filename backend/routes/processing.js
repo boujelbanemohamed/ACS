@@ -5,17 +5,22 @@ const path = require('path');
 const fs = require('fs');
 const db = require('../config/database');
 const CSVProcessor = require('../services/csvProcessor');
+const xmlGenerator = require('../services/xmlGenerator');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 const csvProcessor = new CSVProcessor();
 
+const fsPromises = fs.promises;
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: async (req, file, cb) => {
     const uploadDir = '/tmp/uploads';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+      await fsPromises.mkdir(uploadDir, { recursive: true });
+    } catch (e) {
+      if (e.code !== 'EEXIST') return cb(e);
     }
     cb(null, uploadDir);
   },
@@ -33,6 +38,19 @@ const upload = multer({
     }
     cb(null, true);
   }
+});
+
+// Download CSV template
+router.get('/template', authMiddleware, (req, res) => {
+  const headers = ['language', 'firstName', 'lastName', 'pan', 'expiry', 'phone', 'behaviour', 'action'];
+  const sampleRow = ['fr', 'John', 'Doe', '1234567890123456', '12/28', '+21612345678', 'otp', 'update'];
+  let csv = headers.join(';') + '\n';
+  csv += sampleRow.join(';') + '\n';
+  csv += ['fr', 'Jane', 'Smith', '6543210987654321', '06/29', '+21698765432', 'otp', 'update'].join(';') + '\n';
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=template_import.csv');
+  res.send(csv);
 });
 
 // Process file from URL
@@ -70,40 +88,20 @@ router.post('/process-url', authMiddleware, async (req, res) => {
     const result = await csvProcessor.processFileFromURL(bankId, fullUrl, fileName);
 
     if (result.success) {
-      // Save validated records
-      await csvProcessor.saveValidatedRecords(bankId, result.validRows, fileName);
+      // Save validated records and get their DB IDs
+      const savedRecords = await csvProcessor.saveValidatedRecords(bankId, result.validRecords, fileName);
+      for (let i = 0; i < result.validRecords.length; i++) {
+        if (savedRecords[i]) result.validRecords[i].id = savedRecords[i].id;
+      }
 
-      // Generate XML file
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const xmlFileName = 'ACS_CARDS_' + bank.code + '_' + timestamp + '.xml';
-      const xmlOutputUrl = bank.xml_output_url || '/data/xml';
-      
-      let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
-      xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
-      
-      let idCounter = 1;
-      result.validRows.forEach(row => {
-        const phone = row.phone && row.phone.startsWith('+') ? row.phone : '+' + (row.phone || '');
-        const pan = row.pan || '';
-        
-        xmlContent += '  <add id="' + idCounter + '" cardNumber="' + pan + '" profileId="' + bank.code + '" cardStatus="ACTIVE">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </add>\n';
-        idCounter++;
-        
-        xmlContent += '  <setAuthMethod id="' + idCounter + '" cardNumber="' + pan + '" profileId="' + bank.code + '">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </setAuthMethod>\n';
-        idCounter++;
-      });
-      
-      xmlContent += '</cardRegistryRecords>';
-      
-      // Log XML generation
-      await db.query(
-        'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
-        [bankId, result.fileLogId, xmlFileName, xmlOutputUrl, result.validRows.length, result.validRows.length * 2, 'success']
-      );
+      // Generate XML file using centralized service
+      const xmlResult = await xmlGenerator.processAndGenerateXML(result.validRecords, bank);
+      if (xmlResult && xmlResult.success) {
+        await db.query(
+          'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
+          [bankId, result.fileLogId, xmlResult.fileName, xmlResult.filePath, result.validRecords.length, xmlResult.xmlEntriesCount, 'success']
+        );
+      }
 
       // Move file to destination
       await csvProcessor.moveFileToDestination(
@@ -129,7 +127,7 @@ router.post('/process-url', authMiddleware, async (req, res) => {
         fileLogId: result.fileLogId,
         stats: result.stats,
         errors: result.errors,
-        totalValidRows: result.validRows.length
+        totalValidRows: result.validRecords.length
       }
     });
   } catch (error) {
@@ -187,50 +185,26 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
     if (errors.length > 0) {
       await csvProcessor.saveValidationErrors(fileLogId, errors);
     } else {
-      // Save valid records
+      // Save valid records and get their DB IDs
+      const savedRecords = await csvProcessor.saveValidatedRecords(bankId, rows, req.file.originalname);
+      for (let i = 0; i < rows.length; i++) {
+        if (savedRecords[i]) rows[i].id = savedRecords[i].id;
+      }
 
-// Save valid records
-      await csvProcessor.saveValidatedRecords(bankId, rows, req.file.originalname);
-      
-      // Generate XML file
-      const bank = await db.query('SELECT code, xml_output_url FROM banks WHERE id = $1', [bankId]);
-      const bankCode = bank.rows[0]?.code || 'UNKNOWN';
-      const xmlOutputUrl = bank.rows[0]?.xml_output_url || '/data/xml';
-      
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const xmlFileName = 'ACS_CARDS_' + bankCode + '_' + timestamp + '.xml';
-      
-      // Generate XML content
-      let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
-      xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
-      
-      let idCounter = 1;
-      rows.forEach(row => {
-        const phone = row.phone && row.phone.startsWith('+') ? row.phone : '+' + (row.phone || '');
-        const pan = row.pan || '';
-        
-        xmlContent += '  <add id="' + idCounter + '" cardNumber="' + pan + '" profileId="' + bankCode + '" cardStatus="ACTIVE">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </add>\n';
-        idCounter++;
-        
-        xmlContent += '  <setAuthMethod id="' + idCounter + '" cardNumber="' + pan + '" profileId="' + bankCode + '">\n';
-        xmlContent += '    <oneTimePasswordSMS phoneNumber="' + phone + '"></oneTimePasswordSMS>\n';
-        xmlContent += '  </setAuthMethod>\n';
-        idCounter++;
-      });
-      
-      xmlContent += '</cardRegistryRecords>';
-      
-      // Log XML generation
-      await db.query(
-        'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
-        [bankId, fileLogId, xmlFileName, xmlOutputUrl, rows.length, rows.length * 2, 'success']
-      );
+      // Generate XML file using centralized service
+      const bankResult = await db.query('SELECT * FROM banks WHERE id = $1', [bankId]);
+      const bank = bankResult.rows[0];
+      if (bank) {
+        await xmlGenerator.processAndGenerateXML(rows, bank);
+      }
     }
 
     // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
+    try {
+      await fsPromises.unlink(req.file.path);
+    } catch (e) {
+      // ignore cleanup errors
+    }
 
     res.json({
 
@@ -249,8 +223,13 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
     console.error('Upload error:', error);
     
     // Clean up file if it exists
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (req.file) {
+      try {
+        await fsPromises.access(req.file.path);
+        await fsPromises.unlink(req.file.path);
+      } catch (e) {
+        // ignore cleanup errors
+      }
     }
 
     res.status(500).json({
@@ -332,6 +311,8 @@ router.patch('/errors/:errorId/resolve', authMiddleware, async (req, res) => {
 router.get('/logs', authMiddleware, async (req, res) => {
   try {
     const { bankId, status, limit = 50, offset = 0 } = req.query;
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
     let query = `
       SELECT 
@@ -359,7 +340,7 @@ router.get('/logs', authMiddleware, async (req, res) => {
     }
 
     query += ` ORDER BY fl.processed_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(limit, offset);
+    params.push(safeLimit, safeOffset);
 
     const result = await db.query(query, params);
 
@@ -386,8 +367,8 @@ router.get('/logs', authMiddleware, async (req, res) => {
       data: result.rows,
       pagination: {
         total: parseInt(countResult.rows[0].count),
-        limit: parseInt(limit),
-        offset: parseInt(offset)
+        limit: safeLimit,
+        offset: safeOffset
       }
     });
   } catch (error) {
@@ -599,9 +580,10 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
     );
     const fileLogId = fileLogResult.rows[0].id;
 
-    // Insert records into database
+    // Insert records into database with RETURNING
+    const savedRecords = [];
     for (const entry of entries) {
-      await db.query(
+      const result = await db.query(
         `INSERT INTO processed_records (bank_id, language, first_name, last_name, pan, expiry, phone, behaviour, action, file_name)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (bank_id, pan) DO UPDATE SET
@@ -613,48 +595,28 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
            behaviour = EXCLUDED.behaviour,
            action = EXCLUDED.action,
            file_name = EXCLUDED.file_name,
-           processed_at = CURRENT_TIMESTAMP`,
+           processed_at = CURRENT_TIMESTAMP
+         RETURNING id, pan`,
         [bankId, entry.language, entry.firstName, entry.lastName, entry.pan, entry.expiry, entry.phone, entry.behaviour, entry.action, `${fileName}.csv`]
       );
+      savedRecords.push(result.rows[0]);
     }
 
     // Generate CSV content
-    const csvHeaders = ['language', 'firstName', 'lastName', 'pan', 'expiry', 'phone', 'behaviour', 'action'];
-    let csvContent = csvHeaders.join(';') + '\n';
-    entries.forEach(entry => {
-      csvContent += [
-        entry.language, entry.firstName, entry.lastName, entry.pan,
-        entry.expiry, entry.phone, entry.behaviour, entry.action
-      ].join(';') + '\n';
-    });
 
-    // Generate XML content
-    let xmlContent = '<?xml version="1.0" encoding="ISO-8859-15"?>\n';
-    xmlContent += '<cardRegistryRecords xmlns="http://cardRegistry.acs.bpcbt.com/v2/types">\n';
-    
-    let idCounter = 1;
-    entries.forEach(entry => {
-      const phone = entry.phone.startsWith('+') ? entry.phone : `+${entry.phone}`;
-      
-      xmlContent += `  <add id="${idCounter}" cardNumber="${entry.pan}" profileId="${bank.code}" cardStatus="ACTIVE">\n`;
-      xmlContent += `    <oneTimePasswordSMS phoneNumber="${phone}"></oneTimePasswordSMS>\n`;
-      xmlContent += `  </add>\n`;
-      idCounter++;
-      
-      xmlContent += `  <setAuthMethod id="${idCounter}" cardNumber="${entry.pan}" profileId="${bank.code}">\n`;
-      xmlContent += `    <oneTimePasswordSMS phoneNumber="${phone}"></oneTimePasswordSMS>\n`;
-      xmlContent += `  </setAuthMethod>\n`;
-      idCounter++;
-    });
-    
-    xmlContent += '</cardRegistryRecords>';
-
-    // Log XML generation
-    await db.query(
-      `INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
-      [bankId, fileLogId, `${fileName}.xml`, bank.xml_output_url || '/data/xml', entries.length, entries.length * 2, 'success']
-    );
+    // Generate XML using centralized service
+    const recordsForXml = entries.map((e, i) => ({
+      id: savedRecords[i]?.id,
+      pan: e.pan,
+      phone: e.phone,
+      firstName: e.firstName,
+      lastName: e.lastName,
+      expiry: e.expiry,
+      language: e.language,
+      behaviour: e.behaviour,
+      action: e.action
+    }));
+    await xmlGenerator.processAndGenerateXML(recordsForXml, bank);
 
     res.json({
       success: true,

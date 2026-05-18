@@ -1,9 +1,22 @@
 const express = require('express');
 const crypto = require('crypto');
 const db = require('../config/database');
-const csvProcessor = require('../services/csvProcessor');
+const CSVProcessor = require('../services/csvProcessor');
+const csvProcessor = new CSVProcessor();
+const xmlGenerator = require('../services/xmlGenerator');
 
 const router = express.Router();
+
+const apiKeyRateLimits = new Map();
+
+const getRemainingRateLimit = async (apiKeyId) => {
+  const keyData = await db.query(
+    'SELECT rate_limit FROM api_keys WHERE id = $1',
+    [apiKeyId]
+  );
+  if (keyData.rows.length === 0) return 0;
+  return keyData.rows[0].rate_limit || 100;
+};
 
 // Middleware d'authentification API
 const apiAuthMiddleware = async (req, res, next) => {
@@ -57,6 +70,41 @@ const apiAuthMiddleware = async (req, res, next) => {
   }
 };
 
+// Rate limiter par clé API (basé sur le rate_limit configuré dans api_keys)
+const apiRateLimiter = (req, res, next) => {
+  const now = Date.now();
+  const windowMs = 60000;
+  
+  if (!req.apiKey) {
+    return next();
+  }
+  
+  const key = req.apiKey.id;
+  if (!apiKeyRateLimits.has(key)) {
+    apiKeyRateLimits.set(key, { count: 1, windowStart: now });
+    return next();
+  }
+  
+  const entry = apiKeyRateLimits.get(key);
+  if (now - entry.windowStart > windowMs) {
+    entry.count = 1;
+    entry.windowStart = now;
+    return next();
+  }
+  
+  const maxRequests = req.apiKey.rate_limit || 100;
+  if (entry.count >= maxRequests) {
+    return res.status(429).json({
+      success: false,
+      error: 'RATE_LIMIT_EXCEEDED',
+      message: 'Limite de requêtes dépassée pour cette clé API'
+    });
+  }
+  
+  entry.count++;
+  next();
+};
+
 // Logger les appels API
 const logApiCall = async (req, res, startTime, responseBody) => {
   try {
@@ -81,7 +129,7 @@ const logApiCall = async (req, res, startTime, responseBody) => {
 };
 
 // GET /api/v1/banks - Liste des banques
-router.get('/banks', apiAuthMiddleware, async (req, res) => {
+router.get('/banks', apiAuthMiddleware, apiRateLimiter, async (req, res) => {
   const startTime = Date.now();
   try {
     const result = await db.query('SELECT id, name, code FROM banks WHERE is_active = true ORDER BY name');
@@ -99,7 +147,7 @@ router.get('/banks', apiAuthMiddleware, async (req, res) => {
 });
 
 // POST /api/v1/cards/validate - Valider des cartes sans enregistrer
-router.post('/cards/validate', apiAuthMiddleware, async (req, res) => {
+router.post('/cards/validate', apiAuthMiddleware, apiRateLimiter, async (req, res) => {
   const startTime = Date.now();
   try {
     const { bankCode, cards } = req.body;
@@ -146,6 +194,17 @@ router.post('/cards/validate', apiAuthMiddleware, async (req, res) => {
       // Validation expiry
       if (!card.expiry || !/^\d{2}\/\d{2}$/.test(card.expiry)) {
         errors.push({ field: 'expiry', message: 'Format expiry invalide (MM/YY)' });
+      } else {
+        const parts = card.expiry.split('/');
+        const month = parseInt(parts[0], 10);
+        const year = parseInt(parts[1], 10) + 2000;
+        if (month < 1 || month > 12) {
+          errors.push({ field: 'expiry', message: 'Mois invalide (doit être 01-12)' });
+        } else if (year < 2024 || year > 2050) {
+          errors.push({ field: 'expiry', message: 'Année invalide' });
+        } else if (new Date(year, month - 1) < new Date()) {
+          errors.push({ field: 'expiry', message: 'Carte expirée' });
+        }
       }
 
       if (errors.length > 0) {
@@ -185,7 +244,7 @@ router.post('/cards/validate', apiAuthMiddleware, async (req, res) => {
 });
 
 // POST /api/v1/cards/register - Enregistrer des cartes
-router.post('/cards/register', apiAuthMiddleware, async (req, res) => {
+router.post('/cards/register', apiAuthMiddleware, apiRateLimiter, async (req, res) => {
   const startTime = Date.now();
   try {
     const { bankCode, cards, generateXml = true } = req.body;
@@ -229,6 +288,17 @@ router.post('/cards/register', apiAuthMiddleware, async (req, res) => {
       }
       if (!card.expiry || !/^\d{2}\/\d{2}$/.test(card.expiry)) {
         errors.push({ field: 'expiry', message: 'Format expiry invalide (MM/YY)' });
+      } else {
+        const parts = card.expiry.split('/');
+        const month = parseInt(parts[0], 10);
+        const year = parseInt(parts[1], 10) + 2000;
+        if (month < 1 || month > 12) {
+          errors.push({ field: 'expiry', message: 'Mois invalide (doit être 01-12)' });
+        } else if (year < 2024 || year > 2050) {
+          errors.push({ field: 'expiry', message: 'Année invalide' });
+        } else if (new Date(year, month - 1) < new Date()) {
+          errors.push({ field: 'expiry', message: 'Carte expirée' });
+        }
       }
 
       if (errors.length > 0) {
@@ -269,7 +339,10 @@ router.post('/cards/register', apiAuthMiddleware, async (req, res) => {
     const fileLogId = fileLogResult.rows[0].id;
 
     // Sauvegarder les enregistrements
-    await csvProcessor.saveValidatedRecords(bank.id, validCards, fileName);
+    const savedRecords = await csvProcessor.saveValidatedRecords(bank.id, validCards, fileName);
+    for (let i = 0; i < validCards.length; i++) {
+      if (savedRecords[i]) validCards[i].id = savedRecords[i].id;
+    }
 
     let xmlFileName = null;
     let xmlEntriesCount = 0;
@@ -277,11 +350,12 @@ router.post('/cards/register', apiAuthMiddleware, async (req, res) => {
     // Générer XML si demandé
     if (generateXml) {
       xmlFileName = 'ACS_CARDS_' + bankCode + '_' + timestamp + '.xml';
-      xmlEntriesCount = validCards.length * 2;
+      const xmlResult = await xmlGenerator.processAndGenerateXML(validCards, bank);
+      xmlEntriesCount = xmlResult.xmlEntriesCount;
 
       await db.query(
         'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
-        [bank.id, fileLogId, xmlFileName, bank.xml_output_url || '/data/xml', validCards.length, xmlEntriesCount, 'success']
+        [bank.id, fileLogId, xmlFileName, xmlResult.filePath || bank.xml_output_url, validCards.length, xmlEntriesCount, 'success']
       );
     }
 
@@ -310,7 +384,7 @@ router.post('/cards/register', apiAuthMiddleware, async (req, res) => {
 });
 
 // GET /api/v1/status/:fileLogId - Statut d'un traitement
-router.get('/status/:fileLogId', apiAuthMiddleware, async (req, res) => {
+router.get('/status/:fileLogId', apiAuthMiddleware, apiRateLimiter, async (req, res) => {
   const startTime = Date.now();
   try {
     const result = await db.query(

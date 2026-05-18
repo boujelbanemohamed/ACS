@@ -9,6 +9,8 @@ const router = express.Router();
 router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { bankId, sourceType, status, dateFrom, dateTo, limit = 50, offset = 0 } = req.query;
+    const safeLimit = Math.min(parseInt(limit) || 50, 500);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
     let query = `
       SELECT 
@@ -47,13 +49,14 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       WHERE 1=1
     `;
     
-    // Filtrer par banque si utilisateur de type bank
-    if (req.bankFilter) {
-      query += ' AND fl.bank_id = ' + req.bankFilter;
-    }
-
     const params = [];
     let paramCount = 1;
+
+    if (req.bankFilter) {
+      query += ' AND fl.bank_id = $' + paramCount;
+      params.push(req.bankFilter);
+      paramCount++;
+    }
 
     if (bankId) {
       query += ' AND fl.bank_id = $' + paramCount;
@@ -86,7 +89,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     }
 
     query += ' ORDER BY fl.processed_at DESC LIMIT $' + paramCount + ' OFFSET $' + (paramCount + 1);
-    params.push(limit, offset);
+    params.push(safeLimit, safeOffset);
 
     const result = await db.query(query, params);
 
@@ -130,8 +133,8 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       data: result.rows,
       pagination: {
         total: parseInt(countResult.rows[0].count),
-        limit: parseInt(limit),
-        offset: parseInt(offset)
+        limit: safeLimit,
+        offset: safeOffset
       }
     });
   } catch (error) {
@@ -164,12 +167,12 @@ router.get('/stats', authMiddleware, async (req, res) => {
       FROM file_logs
     `;
     
-    // Filtrer par banque si bankId fourni
     if (bankId) {
-      statsQuery += ' WHERE bank_id = ' + parseInt(bankId);
+      statsQuery += ' WHERE bank_id = $1';
     }
+    const statsParams = bankId ? [bankId] : [];
     
-    const result = await db.query(statsQuery);
+    const result = await db.query(statsQuery, statsParams);
 
     res.json({
       success: true,

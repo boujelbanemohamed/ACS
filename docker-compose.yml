@@ -35,6 +35,7 @@ services:
       DB_USER: banking_user
       DB_PASSWORD: banking_password
       JWT_SECRET: dev_secret_key_not_for_production_use_only_12345678901234567890
+      CORS_ORIGIN: http://localhost:3000,http://localhost:8088
     ports:
       - "8000:5000"
     depends_on:

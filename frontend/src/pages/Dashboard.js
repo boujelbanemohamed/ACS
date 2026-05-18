@@ -1,206 +1,235 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Building2, FileText, CheckCircle, Clock, AlertCircle, Database, Activity, AlertTriangle } from 'lucide-react';
+import { Building2, FileText, CheckCircle, Clock, Database, Activity, AlertTriangle, Zap, BarChart3, ArrowRight, RefreshCw, Inbox, ChevronRight } from 'lucide-react';
 import api from '../services/api';
 import './Dashboard.css';
+
+const COLORS = [
+  { name: 'blue', from: '#667eea', to: '#764ba2', bg: '#eef0ff' },
+  { name: 'emerald', from: '#059669', to: '#10b981', bg: '#ecfdf5' },
+  { name: 'violet', from: '#7c3aed', to: '#a78bfa', bg: '#f5f3ff' },
+  { name: 'rose', from: '#e11d48', to: '#fb7185', bg: '#fff1f2' },
+];
+
+const QUICK_ACTIONS = [
+  { label: 'Banques', icon: Building2, path: '/banks', color: '#667eea' },
+  { label: 'Traitement', icon: FileText, path: '/processing', color: '#059669' },
+  { label: 'Enregistrements', icon: Database, path: '/records', color: '#7c3aed' },
+  { label: 'Configuration', icon: Clock, path: '/cron', color: '#d97706' },
+];
+
+const getGreeting = () => {
+  const h = new Date().getHours();
+  if (h < 12) return 'Bonne matinee !';
+  if (h < 17) return 'Bon apres-midi !';
+  return 'Bonne soiree !';
+};
+
+const formatDate = () => new Date().toLocaleDateString('fr-FR', {
+  weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+});
 
 const Dashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    totalBanks: 0,
-    totalRecords: 0,
-    todayFiles: 0,
-    pendingErrors: 0
-  });
+  const [stats, setStats] = useState({ totalBanks: 0, totalRecords: 0, todayFiles: 0, pendingErrors: 0 });
   const [recentActivity, setRecentActivity] = useState([]);
   const [bankStatistics, setBankStatistics] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      fetchDashboardData();
-    }
+    if (user) fetchDashboardData();
   }, [user]);
 
   const fetchDashboardData = async () => {
     try {
-      const bankParam = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
-      const response = await api.get('/dashboard' + bankParam);
-      
-      if (response.data.success) {
-        const data = response.data.data;
-        
+      const bp = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
+      const res = await api.get('/dashboard' + bp);
+      if (res.data.success) {
+        const d = res.data.data;
         setStats({
-          totalBanks: parseInt(data.totalBanks) || 0,
-          totalRecords: parseInt(data.totalRecords) || 0,
-          todayFiles: parseInt(data.todayFiles) || 0,
-          pendingErrors: parseInt(data.pendingErrors) || 0
+          totalBanks: parseInt(d.totalBanks) || 0,
+          totalRecords: parseInt(d.totalRecords) || 0,
+          todayFiles: parseInt(d.todayFiles) || 0,
+          pendingErrors: parseInt(d.pendingErrors) || 0,
         });
-        
-        setRecentActivity(data.recentActivity || []);
-        setBankStatistics(data.bankStats || []);
+        setRecentActivity(d.recentActivity || []);
+        setBankStatistics(d.bankStats || []);
       }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const statCards = [
-    {
-      title: 'Banques',
-      value: stats.totalBanks,
-      subtitle: `${bankStatistics.length} actives`,
-      icon: Building2,
-      color: 'blue',
-      path: '/banks'
-    },
-    {
-      title: 'Enregistrements',
-      value: stats.totalRecords,
-      subtitle: 'Total des enregistrements',
-      icon: Database,
-      color: 'green',
-      path: '/records'
-    },
-    {
-      title: "Fichiers Aujourd'hui",
-      value: stats.todayFiles,
-      subtitle: 'Fichiers traites ce jour',
-      icon: CheckCircle,
-      color: 'purple',
-      path: '/processing'
-    },
-    {
-      title: 'Lignes en erreur',
-      value: stats.pendingErrors,
-      subtitle: 'Lignes a corriger',
-      icon: AlertTriangle,
-      color: stats.pendingErrors > 0 ? 'red' : 'green',
-      path: '/records'
-    }
-  ];
-
   if (loading) {
-    return <div className="loading">Chargement...</div>;
+    return (
+      <div className="dashboard">
+        <div className="loading"><RefreshCw size={32} className="spin" /> Chargement...</div>
+      </div>
+    );
   }
+
+  const statCards = [
+    { label: 'Banques', value: stats.totalBanks, sub: bankStatistics.length + ' actives', icon: Building2, path: '/banks', i: 0 },
+    { label: 'Enregistrements', value: stats.totalRecords.toLocaleString(), sub: 'Total cumule', icon: Database, path: '/records', i: 1 },
+    { label: "Fichiers aujourd'hui", value: stats.todayFiles, sub: 'Fichiers traites', icon: CheckCircle, path: '/processing', i: 2 },
+    { label: 'Lignes en erreur', value: stats.pendingErrors, sub: 'A corriger', icon: AlertTriangle, path: '/records', i: 3 },
+  ];
 
   return (
     <div className="dashboard">
-      <div className="dashboard-header">
-        <h1>📊 Tableau de Bord</h1>
-        <p>Bienvenue dans le gestionnaire de fichiers bancaires</p>
-      </div>
 
-      <div className="stats-grid">
-        {statCards.map((card, index) => (
-          <div 
-            key={index} 
-            className={`stat-card ${card.color} clickable`}
-            onClick={() => navigate(card.path)}
-            role="button"
-            tabIndex={0}
-            onKeyPress={(e) => e.key === 'Enter' && navigate(card.path)}
-          >
-            <div className="stat-icon">
-              <card.icon size={32} />
-            </div>
-            <div className="stat-content">
-              <h3>{card.value}</h3>
-              <p className="stat-title">{card.title}</p>
-              <span className="stat-subtitle">{card.subtitle}</span>
-            </div>
-            <div className="stat-arrow">→</div>
+      {/* Welcome Banner */}
+      <div className="welcome-banner">
+        <div className="welcome-shape welcome-shape-1" />
+        <div className="welcome-shape welcome-shape-2" />
+        <div className="welcome-shape welcome-shape-3" />
+        <div className="welcome-content">
+          <div className="welcome-left">
+            <h1>Bonjour, {user?.username || 'Utilisateur'}</h1>
+            <p className="welcome-greeting">{getGreeting()} — {formatDate()}</p>
+            <p className="welcome-sub">
+              {stats.pendingErrors > 0
+                ? stats.pendingErrors + ' ligne(s) en erreur necessitent votre attention.'
+                : 'Tout est en ordre, aucun probleme signale.'}
+            </p>
           </div>
-        ))}
-      </div>
-
-      <div className="dashboard-sections">
-        <div className="section recent-activity">
-          <div className="section-header">
-            <h2><Activity size={24} /> Activité Récente</h2>
-            <button className="btn btn-secondary btn-sm" onClick={() => navigate('/records')}>
-              Voir tout
-            </button>
-          </div>
-          <div className="activity-list">
-            {recentActivity.length === 0 ? (
-              <div className="empty-state">
-                <AlertCircle size={48} />
-                <p>Aucune activité récente</p>
-              </div>
-            ) : (
-              recentActivity.map((activity, index) => (
-                <div key={index} className="activity-item">
-                  <div className={`activity-icon ${activity.status === 'success' ? 'success' : 'error'}`}>
-                    {activity.status === 'success' ? <CheckCircle size={20} /> : <AlertTriangle size={20} />}
-                  </div>
-                  <div className="activity-content">
-                    <p className="activity-text">
-                      <strong>{activity.file_name}</strong>
-                    </p>
-                    <p className="activity-bank">
-                      <span className="bank-badge">{activity.bank_code}</span> {activity.bank_name}
-                    </p>
-                    <span className="activity-time">
-                      {new Date(activity.processed_at).toLocaleString('fr-FR')}
-                    </span>
-                  </div>
-                  <div className="activity-stats">
-                    <span className="valid-count">✓ {activity.valid_rows || 0}</span>
-                    <span className="invalid-count">✗ {activity.invalid_rows || 0}</span>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="welcome-right">
+            <div className="welcome-stat-ring">
+              <span className="welcome-stat-num">{stats.todayFiles}</span>
+              <span className="welcome-stat-lbl">fichiers<br/>aujourd'hui</span>
+            </div>
           </div>
         </div>
+      </div>
 
-        <div className="section quick-actions">
-          <h2>⚡ Actions Rapides</h2>
-          <div className="actions-grid">
-            <button className="action-btn" onClick={() => navigate('/banks')}>
-              <Building2 size={24} />
-              <span>Gérer les Banques</span>
-            </button>
-            <button className="action-btn" onClick={() => navigate('/processing')}>
-              <FileText size={24} />
-              <span>Traiter des Fichiers</span>
-            </button>
-            <button className="action-btn" onClick={() => navigate('/records')}>
-              <Database size={24} />
-              <span>Voir les Enregistrements</span>
-            </button>
-            <button className="action-btn" onClick={() => navigate('/cron')}>
-              <Clock size={24} />
-              <span>Configurer le Scan</span>
+      {/* Metric Cards */}
+      <div className="metric-grid">
+        {statCards.map((c) => {
+          const col = COLORS[c.i];
+          const isNeutral = c.i === 3 && stats.pendingErrors === 0;
+          const accent = isNeutral ? COLORS[1] : col;
+          return (
+            <div
+              key={c.i}
+              className="metric-card"
+              style={{ '--accent': accent.from, '--accent-bg': accent.bg }}
+              onClick={() => navigate(c.path)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && navigate(c.path)}
+            >
+              <div className="metric-icon">
+                <c.icon size={20} />
+              </div>
+              <span className="metric-value">{c.value}</span>
+              <span className="metric-label">{c.label}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Content Grid */}
+      <div className="content-grid">
+        {/* Left: Activity Timeline */}
+        <div className="card activity-card">
+          <div className="card-header">
+            <h3><Activity size={20} /> Activite Recente</h3>
+            <button className="card-btn" onClick={() => navigate('/records')}>
+              Voir tout <ChevronRight size={16} />
             </button>
           </div>
-
-          {bankStatistics.length > 0 && (
-            <>
-              <h2 style={{ marginTop: '25px' }}>🏦 Statistiques par Banque</h2>
-              <div className="bank-stats-list">
-                {bankStatistics.map((bank, index) => (
-                  <div key={index} className="bank-stat-item">
-                    <div className="bank-info">
-                      <span className="bank-badge">{bank.code}</span>
-                      <span className="bank-name">{bank.name}</span>
+          {recentActivity.length === 0 ? (
+            <div className="empty-state">
+              <Inbox size={40} />
+              <p>Aucune activite recente</p>
+            </div>
+          ) : (
+            <div className="timeline">
+              {recentActivity.slice(0, 8).map((a, i) => (
+                <div key={i} className="timeline-item">
+                  <div className={'timeline-dot ' + (a.status === 'success' ? 'success' : 'error')} />
+                  <div className="timeline-body">
+                    <div className="timeline-head">
+                      <span className="timeline-file">{a.file_name}</span>
+                      <span className="timeline-badge">{a.bank_code}</span>
                     </div>
-                    <div className="bank-numbers">
-                      <span className="records-count">{bank.total_records} enr.</span>
-                      <span className="files-count">{bank.total_files} fich.</span>
+                    <div className="timeline-meta">
+                      <span>{a.bank_name}</span>
+                      <span className="timeline-time">{new Date(a.processed_at).toLocaleString('fr-FR')}</span>
+                    </div>
+                    <div className="timeline-stats">
+                      <span className="stat-ok">OK {a.valid_rows || 0}</span>
+                      <span className="stat-ko">KO {a.invalid_rows || 0}</span>
                     </div>
                   </div>
-                ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Right side */}
+        <div className="content-right">
+          {/* Quick Actions */}
+          <div className="card">
+            <div className="card-header">
+              <h3><Zap size={20} /> Actions Rapides</h3>
+            </div>
+            <div className="quick-grid">
+              {QUICK_ACTIONS.map((a) => (
+                <button key={a.label} className="quick-item" onClick={() => navigate(a.path)}>
+                  <div className="quick-icon" style={{ background: a.color + '15', color: a.color }}>
+                    <a.icon size={22} />
+                  </div>
+                  <span>{a.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Bank Stats */}
+          {bankStatistics.length > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <h3><BarChart3 size={20} /> Statistiques par Banque</h3>
               </div>
-            </>
+              <div className="bank-mini-list">
+                {bankStatistics.map((b, i) => {
+                  const maxRec = Math.max(...bankStatistics.map(x => x.total_records || 0));
+                  const pct = maxRec > 0 ? ((b.total_records || 0) / maxRec) * 100 : 0;
+                  return (
+                    <div key={i} className="bank-mini-item">
+                      <div className="bank-mini-head">
+                        <div className="bank-mini-icon"><Building2 size={14} /></div>
+                        <span className="bank-mini-code">{b.code}</span>
+                        <span className="bank-mini-name">{b.name}</span>
+                      </div>
+                      <div className="bank-mini-body">
+                        <div className="bank-mini-stat">
+                          <span className="bank-mini-val">{b.total_records || 0}</span>
+                          <span className="bank-mini-lbl">enr.</span>
+                        </div>
+                        <div className="bank-mini-stat">
+                          <span className="bank-mini-val">{b.total_files || 0}</span>
+                          <span className="bank-mini-lbl">fich.</span>
+                        </div>
+                      </div>
+                      <div className="bank-mini-bar">
+                        <div className="bank-mini-fill" style={{ width: pct + '%' }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </div>
+
     </div>
   );
 };

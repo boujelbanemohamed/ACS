@@ -328,11 +328,14 @@ router.get('/timeline/:days', authMiddleware, async (req, res) => {
         COUNT(*) FILTER (WHERE source_type IN ('upload', 'manual', 'correction')) as manual_count,
         COUNT(DISTINCT pan) as unique_pans
       FROM record_history
-      WHERE processed_at >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+      WHERE processed_at >= CURRENT_DATE - $1::interval
     `;
     
+    const queryParams = [`${parseInt(days) || 30} days`];
+    
     if (filterBankId) {
-      query += ` AND bank_id = ${parseInt(filterBankId)}`;
+      query += ` AND bank_id = $2`;
+      queryParams.push(parseInt(filterBankId));
     }
     
     query += `
@@ -340,7 +343,7 @@ router.get('/timeline/:days', authMiddleware, async (req, res) => {
       ORDER BY date ASC
     `;
     
-    const result = await db.query(query);
+    const result = await db.query(query, queryParams);
     
     res.json({
       success: true,

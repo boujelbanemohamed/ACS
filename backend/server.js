@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const cron = require('node-cron');
 require('dotenv').config();
 
 const db = require('./config/database');
@@ -18,32 +17,38 @@ const apiKeysRoutes = require('./routes/apiKeys');
 const usersRoutes = require('./routes/users');
 const enrollmentRoutes = require('./routes/enrollment');
 const notificationsRoutes = require('./routes/notifications');
-const FileScanner = require('./services/fileScanner');
+const cronService = require('./services/cronService');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const { authMiddleware } = require('./middleware/auth');
+const { checkRole } = require('./middleware/roleMiddleware');
 
-// Vérification JWT_SECRET en production
-if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your_jwt_secret_change_in_production' || process.env.JWT_SECRET === 'your_super_secret_jwt_key')) {
-  console.error('ERREUR CRITIQUE: JWT_SECRET non configuré ou utilise une valeur par défaut en production!');
-  console.error('Définissez une variable JWT_SECRET sécurisée avant de démarrer en production.');
+if (!process.env.JWT_SECRET) {
+  console.error('ERREUR CRITIQUE: JWT_SECRET non configuré!');
+  console.error('Définissez une variable JWT_SECRET sécurisée avant de démarrer.');
+  process.exit(1);
+}
+
+if (process.env.JWT_SECRET.length < 32) {
+  console.error('ERREUR CRITIQUE: JWT_SECRET trop court (min 32 caractères)!');
   process.exit(1);
 }
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Initialize file scanner
-const fileScanner = new FileScanner();
-
 // Middleware
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map(s => s.trim());
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 
 // Sécurité HTTP headers
 app.use(helmet({
-  contentSecurityPolicy: false, // Désactivé pour permettre le frontend
   crossOriginEmbedderPolicy: false
 }));
 
@@ -56,24 +61,23 @@ if (process.env.NODE_ENV === 'production') {
 } else {
   app.use(morgan('dev'));
 }
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting global
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500, // max 500 requêtes par IP par 15 min
+  windowMs: 15 * 60 * 1000,
+  max: 5000,
   message: { success: false, message: 'Trop de requêtes, veuillez réessayer plus tard.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 app.use(globalLimiter);
 
-// Rate limiting strict pour login (protection brute force)
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // max 5 tentatives de login par IP par 15 min
-  message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans 15 minutes.' },
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans une minute.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -97,80 +101,28 @@ app.use('/api/users', usersRoutes);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/notifications', notificationsRoutes);
 
-// Cron and scanning routes
-app.get('/api/scanner/status', async (req, res) => {
+// Scan routes
+app.get('/api/scanner/status', (req, res) => {
+  res.json({ success: true, data: cronService.getStatus() });
+});
+
+app.post('/api/scanner/trigger', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
-    const stats = await fileScanner.getStats();
-    res.json({
-      success: true,
-      data: {
-        ...stats,
-        cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *',
-        cronDescription: getCronDescription(process.env.CRON_SCHEDULE || '*/5 * * * *'),
-        timezone: process.env.TZ || 'Africa/Tunis'
-      }
-    });
+    const results = await cronService.run();
+    res.json({ success: true, message: 'Scan terminé', data: results });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la recuperation du statut',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Erreur scan', error: error.message });
   }
 });
 
-// Manual trigger for scanning (admin only)
-app.post('/api/scanner/trigger', async (req, res) => {
-  try {
-    // Check authentication
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentification requise'
-      });
-    }
-
-    console.log('Manual scan triggered via API');
-    const results = await fileScanner.scanAllBanks();
-    
-    res.json({
-      success: true,
-      message: 'Scan manuel termine',
-      data: results
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors du scan manuel',
-      error: error.message
-    });
-  }
-});
-
-// Get scan logs
 app.get('/api/scanner/logs', async (req, res) => {
   try {
-    const { limit = 20, offset = 0 } = req.query;
-    
-    const query = `
-      SELECT * FROM scan_logs 
-      ORDER BY scan_time DESC 
-      LIMIT $1 OFFSET $2
-    `;
-    
-    const result = await db.query(query, [limit, offset]);
-    
-    res.json({
-      success: true,
-      data: result.rows
-    });
+    const limit = Math.min(parseInt(req.query.limit) || 20, 500);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const result = await db.query('SELECT * FROM scan_logs ORDER BY scan_time DESC LIMIT $1 OFFSET $2', [limit, offset]);
+    res.json({ success: true, data: result.rows });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la recuperation des logs',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Erreur logs', error: error.message });
   }
 });
 
@@ -198,99 +150,22 @@ app.use(notFoundHandler);
 // Error handler global
 app.use(errorHandler);
 
-// Automated file checking (runs every 5 minutes by default)
-const scheduleAutomatedProcessing = () => {
-  let cronSchedule = process.env.CRON_SCHEDULE || '*/5 * * * *';
-  
-  console.log('Configuring automated file scanning...');
-  console.log(`Schedule: ${cronSchedule} (${getCronDescription(cronSchedule)})`);
-  
-  // Validate cron expression
-  if (!cron.validate(cronSchedule)) {
-    console.error('Invalid cron schedule expression:', cronSchedule);
-    console.error('Using default: */5 * * * * (every 5 minutes)');
-    cronSchedule = '*/5 * * * *';
-  }
-  
-  // Schedule the task
-  const scheduledTask = cron.schedule(cronSchedule, async () => {
-    console.log('\n' + '='.repeat(70));
-    console.log('Cron triggered at:', new Date().toISOString());
-    console.log('='.repeat(70));
-    
-    try {
-      await fileScanner.scanAllBanks();
-    } catch (error) {
-      console.error('Automated scan failed:', error);
-    }
-  }, {
-    scheduled: true,
-    timezone: process.env.TZ || "Africa/Tunis"
-  });
-  
-  console.log('Automated file scanning scheduled successfully');
-  console.log(`Timezone: ${process.env.TZ || "Africa/Tunis"}`);
-  console.log('First scan will run according to schedule');
-  
-  return scheduledTask;
-};
-
-/**
- * Get human-readable description of cron schedule
- */
-const getCronDescription = (schedule) => {
-  const patterns = {
-    '*/1 * * * *': 'every minute',
-    '*/5 * * * *': 'every 5 minutes',
-    '*/10 * * * *': 'every 10 minutes',
-    '*/15 * * * *': 'every 15 minutes',
-    '*/30 * * * *': 'every 30 minutes',
-    '0 * * * *': 'every hour',
-    '0 */2 * * *': 'every 2 hours',
-    '0 */6 * * *': 'every 6 hours',
-    '0 0 * * *': 'every day at midnight'
-  };
-  
-  return patterns[schedule] || 'custom schedule';
-};
-
 // Start server
+let server;
 const startServer = async () => {
   try {
     // Test database connection
     await db.query('SELECT NOW()');
     console.log('Database connection established');
     
-    // Create scan_logs table if needed
-    await fileScanner.createScanLogsTable();
-    
-    // Start automated processing
     if (process.env.NODE_ENV !== 'test') {
-      const scheduledTask = scheduleAutomatedProcessing();
-      
-      // Optional: Run initial scan on startup
-      if (process.env.SCAN_ON_STARTUP === 'true') {
-        console.log('\nRunning initial scan on startup...\n');
-        setTimeout(async () => {
-          try {
-            await fileScanner.scanAllBanks();
-          } catch (error) {
-            console.error('Initial scan failed:', error);
-          }
-        }, 5000); // Wait 5 seconds after startup
-      }
+      await cronService.createTable();
+      cronService.init();
     }
     
-    app.listen(PORT, () => {
-      console.log('\n' + '='.repeat(70));
-      console.log('Banking CSV Processor Server Started');
-      console.log('='.repeat(70));
-      console.log(`Port: ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`API: http://localhost:${PORT}/api`);
-      console.log(`Cron: ${process.env.CRON_SCHEDULE || '*/5 * * * *'} (${getCronDescription(process.env.CRON_SCHEDULE || '*/5 * * * *')})`);
-      console.log(`Timezone: ${process.env.TZ || 'Africa/Tunis'}`);
-      console.log('='.repeat(70) + '\n');
+    server = app.listen(PORT, () => {
+      console.log(`\nServer started on port ${PORT} | ${process.env.NODE_ENV || 'development'}`);
+      console.log(`Scanner: ${cronService.schedule} (${cronService.describeCron(cronService.schedule)}) | ${cronService.enabled ? '✅ Enabled' : '🔴 Disabled'}\n`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
@@ -299,17 +174,19 @@ const startServer = async () => {
 };
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
+const gracefulShutdown = async (signal) => {
+  console.log(`${signal} received, shutting down gracefully`);
+  if (server) {
+    server.close(() => {
+      console.log('HTTP server closed');
+    });
+  }
   await db.pool.end();
   process.exit(0);
-});
+};
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  await db.pool.end();
-  process.exit(0);
-});
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 startServer();
 

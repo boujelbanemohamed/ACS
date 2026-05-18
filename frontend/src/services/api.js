@@ -23,7 +23,7 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    if (error.response && error.response.status === 401 && !window.location.pathname.includes('/login')) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       window.location.href = "/login";
@@ -60,6 +60,7 @@ export const processingAPI = {
   reprocess: (fileLogId) => api.post("/processing/reprocess/" + fileLogId),
   validateManualEntries: (data) => api.post("/processing/validate-manual", data),
   processManualEntries: (data) => api.post("/processing/process-manual", data),
+  downloadTemplate: () => api.get("/processing/template", { responseType: "blob" }),
 };
 
 export const dashboardAPI = {

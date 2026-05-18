@@ -7,74 +7,78 @@ const router = express.Router();
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { bankId } = req.query;
-    
-    // Construire les filtres SQL
     const bankFilterId = bankId ? parseInt(bankId) : null;
-    
-    // Total des banques (1 si filtre, sinon toutes)
-    let totalBanksQuery = 'SELECT COUNT(*) FROM banks WHERE is_active = true';
-    if (bankFilterId) {
-      totalBanksQuery += ' AND id = ' + bankFilterId;
-    }
-    const totalBanks = await db.query(totalBanksQuery);
 
-    // Total des enregistrements
-    let totalRecordsQuery = 'SELECT COUNT(*) FROM processed_records';
-    if (bankFilterId) {
-      totalRecordsQuery += ' WHERE bank_id = ' + bankFilterId;
-    }
-    const totalRecords = await db.query(totalRecordsQuery);
+    const totalBanks = await db.query(
+      bankFilterId
+        ? 'SELECT COUNT(*) FROM banks WHERE is_active = true AND id = $1'
+        : 'SELECT COUNT(*) FROM banks WHERE is_active = true',
+      bankFilterId ? [bankFilterId] : []
+    );
 
-    // Fichiers traités aujourd'hui
-    let todayFilesQuery = 'SELECT COUNT(*) FROM file_logs WHERE DATE(processed_at) = CURRENT_DATE';
-    if (bankFilterId) {
-      todayFilesQuery += ' AND bank_id = ' + bankFilterId;
-    }
-    const todayFiles = await db.query(todayFilesQuery);
+    const totalRecords = await db.query(
+      bankFilterId
+        ? 'SELECT COUNT(*) FROM processed_records WHERE bank_id = $1'
+        : 'SELECT COUNT(*) FROM processed_records',
+      bankFilterId ? [bankFilterId] : []
+    );
 
-    // Erreurs en attente
-    let pendingErrorsQuery = `
-      SELECT COUNT(*) FROM validation_errors ve 
-      JOIN file_logs fl ON ve.file_log_id = fl.id 
-      WHERE ve.is_resolved = false
-    `;
-    if (bankFilterId) {
-      pendingErrorsQuery += ' AND fl.bank_id = ' + bankFilterId;
-    }
-    const pendingErrors = await db.query(pendingErrorsQuery);
+    const todayFiles = await db.query(
+      bankFilterId
+        ? 'SELECT COUNT(*) FROM file_logs WHERE DATE(processed_at) = CURRENT_DATE AND bank_id = $1'
+        : 'SELECT COUNT(*) FROM file_logs WHERE DATE(processed_at) = CURRENT_DATE',
+      bankFilterId ? [bankFilterId] : []
+    );
 
-    // Activité récente
-    let recentActivityQuery = `
-      SELECT fl.*, b.name as bank_name, b.code as bank_code
-      FROM file_logs fl
-      JOIN banks b ON fl.bank_id = b.id
-    `;
-    if (bankFilterId) {
-      recentActivityQuery += ' WHERE fl.bank_id = ' + bankFilterId;
-    }
-    recentActivityQuery += ' ORDER BY fl.processed_at DESC LIMIT 10';
-    const recentActivity = await db.query(recentActivityQuery);
+    const pendingErrors = await db.query(
+      bankFilterId
+        ? `SELECT COUNT(*) FROM validation_errors ve 
+           JOIN file_logs fl ON ve.file_log_id = fl.id 
+           WHERE ve.is_resolved = false AND fl.bank_id = $1`
+        : `SELECT COUNT(*) FROM validation_errors ve 
+           JOIN file_logs fl ON ve.file_log_id = fl.id 
+           WHERE ve.is_resolved = false`,
+      bankFilterId ? [bankFilterId] : []
+    );
 
-    // Statistiques par banque
-    let bankStatsQuery = `
-      SELECT 
-        b.id,
-        b.name,
-        b.code,
-        COUNT(DISTINCT pr.id) as total_records,
-        COUNT(DISTINCT fl.id) as total_files,
-        COUNT(DISTINCT CASE WHEN fl.status = 'success' THEN fl.id END) as successful_files,
-        COUNT(DISTINCT CASE WHEN fl.status = 'error' THEN fl.id END) as failed_files
-      FROM banks b
-      LEFT JOIN processed_records pr ON pr.bank_id = b.id
-      LEFT JOIN file_logs fl ON fl.bank_id = b.id
-      WHERE b.is_active = true
-    `;
-    if (bankFilterId) {
-      bankStatsQuery += ' AND b.id = ' + bankFilterId;
-    }
-    bankStatsQuery += ' GROUP BY b.id, b.name, b.code ORDER BY b.name';
-    const bankStats = await db.query(bankStatsQuery);
+    const recentActivity = await db.query(
+      bankFilterId
+        ? `SELECT fl.*, b.name as bank_name, b.code as bank_code
+           FROM file_logs fl
+           JOIN banks b ON fl.bank_id = b.id
+           WHERE fl.bank_id = $1
+           ORDER BY fl.processed_at DESC LIMIT 10`
+        : `SELECT fl.*, b.name as bank_name, b.code as bank_code
+           FROM file_logs fl
+           JOIN banks b ON fl.bank_id = b.id
+           ORDER BY fl.processed_at DESC LIMIT 10`,
+      bankFilterId ? [bankFilterId] : []
+    );
+
+    const bankStats = await db.query(
+      bankFilterId
+        ? `SELECT b.id, b.name, b.code,
+           COUNT(DISTINCT pr.id) as total_records,
+           COUNT(DISTINCT fl.id) as total_files,
+           COUNT(DISTINCT CASE WHEN fl.status = 'success' THEN fl.id END) as successful_files,
+           COUNT(DISTINCT CASE WHEN fl.status = 'error' THEN fl.id END) as failed_files
+           FROM banks b
+           LEFT JOIN processed_records pr ON pr.bank_id = b.id
+           LEFT JOIN file_logs fl ON fl.bank_id = b.id
+           WHERE b.is_active = true AND b.id = $1
+           GROUP BY b.id, b.name, b.code ORDER BY b.name`
+        : `SELECT b.id, b.name, b.code,
+           COUNT(DISTINCT pr.id) as total_records,
+           COUNT(DISTINCT fl.id) as total_files,
+           COUNT(DISTINCT CASE WHEN fl.status = 'success' THEN fl.id END) as successful_files,
+           COUNT(DISTINCT CASE WHEN fl.status = 'error' THEN fl.id END) as failed_files
+           FROM banks b
+           LEFT JOIN processed_records pr ON pr.bank_id = b.id
+           LEFT JOIN file_logs fl ON fl.bank_id = b.id
+           WHERE b.is_active = true
+           GROUP BY b.id, b.name, b.code ORDER BY b.name`,
+      bankFilterId ? [bankFilterId] : []
+    );
 
     res.json({
       success: true,

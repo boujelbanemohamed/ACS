@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Download, Search, Filter, Trash2, FileText, FileCode, CheckCircle, XCircle, Clock, RefreshCw, X, Eye, Upload, AlertCircle } from 'lucide-react';
+import { Download, Search, Filter, Trash2, FileText, FileCode, CheckCircle, XCircle, Clock, RefreshCw, X, Eye, Upload, AlertCircle, History } from 'lucide-react';
 import api from '../services/api';
 import './Records.css';
 
@@ -52,6 +52,7 @@ const Records = () => {
   const [enrollmentResult, setEnrollmentResult] = useState(null);
   const [enrollmentLogs, setEnrollmentLogs] = useState([]);
   const [enrollmentStats, setEnrollmentStats] = useState(null);
+  const [historyModal, setHistoryModal] = useState({ isOpen: false, loading: false, data: null, record: null });
 
   useEffect(() => {
     fetchBanks();
@@ -103,6 +104,31 @@ const Records = () => {
   const viewEnrollmentLogDetail = (log) => {
     setEnrollmentLogDetail(log);
     setShowLogDetailModal(true);
+  };
+
+  const viewHistory = async (record) => {
+    setHistoryModal({ isOpen: true, loading: true, data: null, record });
+    try {
+      const response = await api.get('/records/history/' + record.id);
+      setHistoryModal(prev => ({ ...prev, loading: false, data: response.data.data }));
+    } catch (error) {
+      setHistoryModal(prev => ({ ...prev, loading: false, data: null }));
+      alert('Erreur lors du chargement de l\'historique');
+    }
+  };
+
+  const getAttemptStatusIcon = (status) => {
+    switch (status) {
+      case 'SUCCESS': return <CheckCircle size={14} className="history-status success" />;
+      case 'REJECTED': return <XCircle size={14} className="history-status error" />;
+      case 'PARTIAL': return <AlertCircle size={14} className="history-status warning" />;
+      default: return <Clock size={14} className="history-status pending" />;
+    }
+  };
+
+  const getSourceLabel = (type) => {
+    const labels = { cron: 'Scan automatique', upload: 'Upload', manual: 'Saisie manuelle', correction: 'Correction', api: 'API' };
+    return labels[type] || type;
   };
 
   const downloadNotFoundIds = (ids, fileName) => {
@@ -518,7 +544,7 @@ const Records = () => {
                         <td><span className="bank-badge">{record.bank_code}</span></td>
                         <td>{record.first_name}</td>
                         <td>{record.last_name}</td>
-                        <td className="pan-cell">{record.pan}</td>
+                        <td className="pan-cell clickable" onClick={() => viewHistory(record)} title="Voir l'historique complet">{record.pan}</td>
                         <td>{record.expiry}</td>
                         <td>{record.phone}</td>
                         <td>{record.language}</td>
@@ -548,7 +574,10 @@ const Records = () => {
                             )}
                           </div>
                         </td>
-                        <td>
+                        <td className="actions-cell">
+                          <button className="btn-icon btn-history" onClick={() => viewHistory(record)} title="Voir l'historique">
+                            <History size={16} />
+                          </button>
                           <button className="btn-icon btn-danger" onClick={() => handleDelete(record.id)} title="Supprimer">
                             <Trash2 size={16} />
                           </button>
@@ -893,6 +922,135 @@ const Records = () => {
                 <p className="success-desc">Ces enregistrements ont ete enroles avec succes.</p>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* History Modal */}
+      {historyModal.isOpen && (
+        <div className="modal-overlay" onClick={() => setHistoryModal({ isOpen: false, loading: false, data: null, record: null })}>
+          <div className="history-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2><History size={20} /> Historique du PAN {historyModal.record?.pan}</h2>
+              <button className="btn-icon" onClick={() => setHistoryModal({ isOpen: false, loading: false, data: null, record: null })}>
+                <X size={24} />
+              </button>
+            </div>
+
+            {historyModal.loading ? (
+              <div className="loading">Chargement de l'historique...</div>
+            ) : historyModal.data ? (
+              <div className="history-body">
+                <div className="history-summary-grid">
+                  <div className="history-summary-item">
+                    <span className="summary-label">Total tentatives</span>
+                    <span className="summary-value">{historyModal.data.summary?.totalAttempts || 0}</span>
+                  </div>
+                  <div className="history-summary-item">
+                    <span className="summary-label">Dernier statut</span>
+                    <span className={'summary-value badge-' + (historyModal.data.summary?.currentStatus === 'SUCCESS' ? 'success' : historyModal.data.summary?.currentStatus === 'REJECTED' ? 'danger' : 'warning')}>
+                      {historyModal.data.summary?.currentStatus === 'SUCCESS' ? 'Accepté' : historyModal.data.summary?.currentStatus === 'REJECTED' ? 'Rejeté' : historyModal.data.summary?.currentStatus || 'En attente'}
+                    </span>
+                  </div>
+                  <div className="history-summary-item">
+                    <span className="summary-label">Première tentative</span>
+                    <span className="summary-value">{historyModal.data.summary?.firstAttempt ? new Date(historyModal.data.summary.firstAttempt).toLocaleString('fr-FR') : '-'}</span>
+                  </div>
+                  <div className="history-summary-item">
+                    <span className="summary-label">Dernière tentative</span>
+                    <span className="summary-value">{historyModal.data.summary?.lastAttempt ? new Date(historyModal.data.summary.lastAttempt).toLocaleString('fr-FR') : '-'}</span>
+                  </div>
+                </div>
+
+                <div className="history-timeline">
+                  {historyModal.data.attempts?.length === 0 ? (
+                    <p className="no-data">Aucun historique disponible</p>
+                  ) : (
+                    historyModal.data.attempts.map((attempt, idx) => (
+                      <div key={attempt.id} className={'history-attempt ' + (attempt.status === 'SUCCESS' ? 'success' : 'rejected')}>
+                        <div className="attempt-header">
+                          <div className="attempt-number">#{attempt.attempt_number}</div>
+                          {getAttemptStatusIcon(attempt.status)}
+                          <span className={'attempt-status ' + (attempt.status === 'SUCCESS' ? 'text-success' : 'text-danger')}>
+                            {attempt.status === 'SUCCESS' ? 'Accepté' : attempt.status === 'REJECTED' ? 'Rejeté' : attempt.status}
+                          </span>
+                          <span className="attempt-date">{new Date(attempt.processed_at).toLocaleString('fr-FR')}</span>
+                        </div>
+
+                        <div className="attempt-details">
+                          <div className="attempt-detail-row">
+                            <span className="detail-label">Source</span>
+                            <span className="detail-value">{getSourceLabel(attempt.source_type)}</span>
+                          </div>
+                          {attempt.file_name && (
+                            <div className="attempt-detail-row">
+                              <span className="detail-label">Fichier</span>
+                              <span className="detail-value">{attempt.file_name}</span>
+                            </div>
+                          )}
+                          {attempt.username && (
+                            <div className="attempt-detail-row">
+                              <span className="detail-label">Utilisateur</span>
+                              <span className="detail-value">{attempt.username}</span>
+                            </div>
+                          )}
+                          {attempt.xml_id && (
+                            <div className="attempt-detail-row">
+                              <span className="detail-label">ID XML</span>
+                              <span className="detail-value xml-id">{attempt.xml_id}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {attempt.data_received && (
+                          <div className="attempt-data">
+                            <h4>Données reçues</h4>
+                            <div className="data-grid">
+                              {Object.entries(typeof attempt.data_received === 'string' ? JSON.parse(attempt.data_received) : attempt.data_received)
+                                .filter(([k]) => k !== 'rowNumber')
+                                .map(([key, val]) => (
+                                <div key={key} className="data-item">
+                                  <span className="data-label">{key}</span>
+                                  <span className="data-value">{val || '-'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {attempt.details && attempt.details.length > 0 && (
+                          <div className="attempt-validation">
+                            <h4>Validation des champs</h4>
+                            <table className="validation-table">
+                              <thead>
+                                <tr>
+                                  <th>Champ</th>
+                                  <th>Valeur</th>
+                                  <th>Valide</th>
+                                  <th>Erreur</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {attempt.details.map((detail, i) => (
+                                  <tr key={i} className={detail.is_valid ? '' : 'invalid-row'}>
+                                    <td className="field-name">{detail.field_name}</td>
+                                    <td className="field-value">{detail.field_value || '-'}</td>
+                                    <td>{detail.is_valid ? <CheckCircle size={14} className="valid-icon" /> : <XCircle size={14} className="invalid-icon" />}</td>
+                                    <td className="field-error">{detail.error_message || '-'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="loading">Aucune donnée d'historique</div>
+            )}
           </div>
         </div>
       )}

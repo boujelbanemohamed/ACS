@@ -1,6 +1,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const db = require('../config/database');
+const sftpService = require('../utils/remoteFileService');
 
 class XMLGenerator {
   // Convertir le PAN en format requis
@@ -117,10 +118,18 @@ class XMLGenerator {
 
   // Sauvegarder le fichier XML
   async saveXML(xmlContent, outputPath, fileName) {
+    if (sftpService.isRemote(outputPath)) {
+      const fileUrl = outputPath.endsWith('/') ? outputPath + fileName : outputPath + '/' + fileName;
+      await sftpService.writeFile(fileUrl, xmlContent);
+      console.log('XML file saved to remote: ' + fileUrl);
+      return fileUrl;
+    }
+
     try {
-      await fs.mkdir(outputPath, { recursive: true });
+      const localPath = outputPath.replace('file://', '');
+      await fs.mkdir(localPath, { recursive: true });
       
-      const filePath = path.join(outputPath, fileName);
+      const filePath = path.join(localPath, fileName);
       await fs.writeFile(filePath, xmlContent, 'utf8');
       
       console.log('XML file saved: ' + filePath);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User , Mail } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User, Mail, Terminal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Layout.css';
 
@@ -58,6 +58,14 @@ const Layout = () => {
             <HistoryIcon size={20} />
             <span>Historique</span>
           </NavLink>
+
+          {isAdmin && (
+            <NavLink to="/api-tester" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Terminal size={20} />
+              <span>Test API</span>
+            </NavLink>
+          )}
+        
 
           {isAdmin && (
             <>

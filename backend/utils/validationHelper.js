@@ -8,7 +8,7 @@ const FIELD_EXPECTATIONS = {
   firstName: { format: '2-255 caractères', description: 'Prénom' },
   lastName: { format: '2-255 caractères', description: 'Nom' },
   pan: { format: '16 chiffres (Luhn valide)', description: 'Numéro de carte' },
-  expiry: { format: 'YYYYMM (non expiré)', description: 'Date d\'expiration' },
+  expiry: { format: 'MM/YY (non expiré)', description: 'Date d\'expiration' },
   phone: { format: '216XXXXXXXX (11 chiffres)', description: 'Numéro de téléphone' },
   behaviour: { format: 'otp, sms, email', description: 'Comportement' },
   action: { format: 'update, create, delete', description: 'Action' }
@@ -98,13 +98,14 @@ function validateRowForHistory(row) {
   if (!expiry) {
     expiryError = 'Date d\'expiration requise';
     expiryErrorType = 'MISSING';
-  } else if (!/^\d{6}$/.test(expiry)) {
-    expiryError = `Format invalide "${expiry}". Attendu: YYYYMM (ex: 202612)`;
+  } else if (!/^\d{2}\/\d{2}$/.test(expiry)) {
+    expiryError = `Format invalide "${expiry}". Attendu: MM/YY (ex: 12/28)`;
     expiryErrorType = 'FORMAT';
   } else {
-    const year = parseInt(expiry.substring(0, 4));
-    const month = parseInt(expiry.substring(4, 6));
-    
+    const parts = expiry.split('/');
+    const month = parseInt(parts[0], 10);
+    const year = parseInt(parts[1], 10) + 2000;
+
     if (month < 1 || month > 12) {
       expiryError = `Mois invalide: ${month}. Doit être entre 01 et 12`;
       expiryErrorType = 'FORMAT';

@@ -101,11 +101,13 @@ router.get('/stats/summary', authMiddleware, async (req, res) => {
       JOIN file_logs fl ON xl.file_log_id = fl.id
     `;
     
+    const queryParams = [];
     if (bankId) {
-      query += ' WHERE fl.bank_id = ' + parseInt(bankId);
+      query += ' WHERE fl.bank_id = $1';
+      queryParams.push(parseInt(bankId));
     }
     
-    const result = await db.query(query);
+    const result = await db.query(query, queryParams);
 
     res.json({
       success: true,

@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
+const { checkRole } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
@@ -62,7 +63,7 @@ router.get('/:id/logs', authMiddleware, async (req, res) => {
 });
 
 // POST - Créer une API Key
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const { name, institution, bankId, permissions, rateLimit, expiresAt } = req.body;
 
@@ -102,7 +103,7 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // PUT - Modifier une API Key
-router.put('/:id', authMiddleware, async (req, res) => {
+router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const { name, institution, bankId, permissions, rateLimit, expiresAt, isActive } = req.body;
 
@@ -130,7 +131,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
 });
 
 // DELETE - Supprimer une API Key
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     await db.query('DELETE FROM api_logs WHERE api_key_id = $1', [req.params.id]);
     const result = await db.query('DELETE FROM api_keys WHERE id = $1 RETURNING id', [req.params.id]);
@@ -146,7 +147,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 });
 
 // POST - Régénérer une API Key
-router.post('/:id/regenerate', authMiddleware, async (req, res) => {
+router.post('/:id/regenerate', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const newApiKey = generateApiKey();
 

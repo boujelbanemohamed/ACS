@@ -1,349 +1,259 @@
 const cron = require('node-cron');
-const db = require('../config/database');
-const fileScanner = require('./fileScanner');
-const enrollmentService = require('./enrollmentService');
-const emailService = require('./emailService');
 const fs = require('fs').promises;
 const path = require('path');
+const db = require('../config/database');
+const FileScanner = require('./fileScanner');
+const enrollmentService = require('./enrollmentService');
+const emailService = require('./emailService');
+const sftpService = require('../utils/remoteFileService');
 
 class CronService {
   constructor() {
-    this.currentTask = null;
-    this.dailyReportTask = null;
+    this.scanner = new FileScanner();
+    this.scanTask = null;
+    this.reportTask = null;
     this.isScanning = false;
     this.lastScanTime = null;
-    this.currentSchedule = process.env.CRON_SCHEDULE || '*/5 * * * *';
-    this.dailyReportSchedule = '0 8 * * *'; // Tous les jours a 8h
+    this.schedule = process.env.CRON_SCHEDULE || '*/5 * * * *';
     this.enabled = true;
-    this.dailyReportEnabled = true;
   }
 
   async init() {
-    // Load settings from database
     try {
       const result = await db.query("SELECT * FROM settings WHERE key IN ('cron_schedule', 'cron_enabled')");
       result.rows.forEach(row => {
-        if (row.key === 'cron_schedule' && row.value) {
-          this.currentSchedule = row.value;
-        }
-        if (row.key === 'cron_enabled') {
-          this.enabled = row.value === 'true';
-        }
+        if (row.key === 'cron_schedule' && row.value) this.schedule = row.value;
+        if (row.key === 'cron_enabled') this.enabled = row.value === 'true';
       });
-    } catch (error) {
-      console.log('Settings table not ready, using defaults');
+    } catch {
+      console.log('Using default cron settings');
     }
 
-    this.startScheduledTask();
-    this.startDailyReportTask();
+    this.startScanTask();
+    this.startReportTask();
   }
 
-  startScheduledTask() {
-    // Stop existing task if any
-    if (this.currentTask) {
-      this.currentTask.stop();
-      this.currentTask = null;
-    }
+  startScanTask() {
+    if (this.scanTask) { this.scanTask.stop(); this.scanTask = null; }
+    if (!this.enabled) { console.log('🔴 Scanner disabled'); return; }
+    if (!cron.validate(this.schedule)) { console.error('Invalid cron:', this.schedule); return; }
 
-    if (!this.enabled) {
-      console.log('🔴 Cron scanner is disabled');
-      return;
-    }
-
-    if (!cron.validate(this.currentSchedule)) {
-      console.error('Invalid cron schedule:', this.currentSchedule);
-      return;
-    }
-
-    console.log(`🕐 Starting cron scheduler with schedule: ${this.currentSchedule}`);
-    
-    this.currentTask = cron.schedule(this.currentSchedule, async () => {
-      await this.runScan();
-    }, {
+    console.log(`🕐 Scanner scheduled: ${this.schedule}`);
+    this.scanTask = cron.schedule(this.schedule, () => this.run(), {
       scheduled: true,
-      timezone: process.env.TIMEZONE || 'Africa/Tunis'
+      timezone: process.env.TZ || 'Africa/Tunis'
     });
-
-    console.log('✅ Cron scheduler started successfully');
   }
 
   async updateSchedule(newSchedule) {
-    if (!cron.validate(newSchedule)) {
-      throw new Error('Invalid cron schedule format');
-    }
-
-    this.currentSchedule = newSchedule;
-    this.startScheduledTask();
-    console.log(`🔄 Cron schedule updated to: ${newSchedule}`);
+    if (!cron.validate(newSchedule)) throw new Error('Invalid cron schedule');
+    this.schedule = newSchedule;
+    this.startScanTask();
   }
 
   async setEnabled(enabled) {
     this.enabled = enabled;
-    
-    // Update in database
-    await db.query(`
-      INSERT INTO settings (key, value, updated_at)
-      VALUES ('cron_enabled', $1, CURRENT_TIMESTAMP)
-      ON CONFLICT (key) 
-      DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP
-    `, [enabled.toString()]);
-
-    if (enabled) {
-      this.startScheduledTask();
-    } else if (this.currentTask) {
-      this.currentTask.stop();
-      this.currentTask = null;
-    }
-    
-    console.log(`🔄 Cron scanner ${enabled ? 'enabled' : 'disabled'}`);
+    await db.query(`INSERT INTO settings (key, value, updated_at) VALUES ('cron_enabled', $1, CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP`, [enabled.toString()]);
+    enabled ? this.startScanTask() : (this.scanTask?.stop(), this.scanTask = null);
   }
 
-  async runScan() {
-    if (this.isScanning) {
-      console.log('⚠️ Scan already in progress, skipping...');
-      return null;
-    }
+  async run() {
+    if (this.isScanning) { console.log('⚠️ Scan already in progress'); return null; }
 
     this.isScanning = true;
     this.lastScanTime = new Date();
-    
-    console.log('🔍 Starting scheduled scan...');
-    
-    const scanResult = {
-      startTime: new Date(),
-      banksScanned: 0,
-      filesFound: 0,
-      filesProcessed: 0,
-      enrollmentFilesFound: 0,
-      enrollmentFilesProcessed: 0,
-      errors: [],
-      bankDetails: []
-    };
+    console.log('🔍 Starting scan...');
+
+    const result = { startTime: new Date(), banksScanned: 0, filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
 
     try {
-      // Get all active banks
-      const banksResult = await db.query('SELECT * FROM banks WHERE is_active = true');
-      const banks = banksResult.rows;
-      
-      scanResult.banksScanned = banks.length;
+      const banks = (await db.query('SELECT * FROM banks WHERE is_active = true')).rows;
+      result.banksScanned = banks.length;
 
       for (const bank of banks) {
+        // Scan for enrollment response XMLs FIRST (before CSV processing)
         try {
-          const result = await fileScanner.scanBankDirectory(bank);
-          scanResult.filesFound += result.filesFound;
-          scanResult.filesProcessed += result.filesProcessed;
-          if (result.errors && result.errors.length > 0) {
-            scanResult.errors.push(...result.errors);
-          }
+          const enrollmentResult = await this.scanEnrollmentReports(bank);
+          result.enrollmentProcessed += enrollmentResult.filesProcessed;
+          if (enrollmentResult.errors.length) result.errors.push(...enrollmentResult.errors);
         } catch (error) {
-          console.error(`Error scanning bank ${bank.name}:`, error);
-          scanResult.errors.push({
-            bank: bank.name,
-            error: error.message
-          });
+          result.errors.push({ bank: bank.name, error: `Enrollment scan: ${error.message}` });
+        }
+
+        try {
+          const bankResult = await this.scanner.scanBank(bank);
+          result.filesFound += bankResult.filesFound;
+          result.filesProcessed += bankResult.filesProcessed;
+          if (bankResult.errors.length) result.errors.push(...bankResult.errors);
+        } catch (error) {
+          result.errors.push({ bank: bank.name, error: error.message });
         }
       }
 
-      // Log the scan
-      await this.logScan(scanResult);
-
-      console.log(`✅ Scan completed: ${scanResult.filesProcessed}/${scanResult.filesFound} files processed`);
+      await this.logResult(result);
+      console.log(`✅ Scan done: ${result.filesProcessed}/${result.filesFound} files, ${result.enrollmentProcessed} enrollment reports`);
     } catch (error) {
       console.error('Scan error:', error);
-      scanResult.errors.push({ error: error.message });
+      result.errors.push({ error: error.message });
     } finally {
       this.isScanning = false;
-    }
-
-    return scanResult;
-  }
-
-  async logScan(result) {
-    try {
-      await db.query(`
-        INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail, bank_details)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      `, [
-        result.startTime,
-        result.banksScanned,
-        result.filesFound,
-        result.filesProcessed,
-        result.enrollmentFilesFound || 0,
-        result.enrollmentFilesProcessed || 0,
-        result.errors.length,
-        JSON.stringify(result.errors),
-        JSON.stringify(result.bankDetails || [])
-      ]);
-    } catch (error) {
-      console.error('Error logging scan:', error);
-    }
-  }
-
-  async scanEnrollmentReports(bank) {
-    const result = {
-      filesFound: 0,
-      filesProcessed: 0,
-      errors: []
-    };
-
-    // Vérifier si la banque a une URL de rapport d'enrôlement configurée
-    if (!bank.enrollment_report_url) {
-      return result;
-    }
-
-    try {
-      // Vérifier si le dossier existe
-      const dirPath = bank.enrollment_report_url;
-      
-      try {
-        await fs.access(dirPath);
-      } catch {
-        // Le dossier n'existe pas, on le crée
-        await fs.mkdir(dirPath, { recursive: true });
-        return result;
-      }
-
-      // Lire les fichiers du dossier
-      const files = await fs.readdir(dirPath);
-      const xmlFiles = files.filter(f => f.toLowerCase().endsWith('.xml') && f.includes('_out'));
-      
-      result.filesFound = xmlFiles.length;
-
-      for (const fileName of xmlFiles) {
-        const filePath = path.join(dirPath, fileName);
-        
-        try {
-          // Vérifier si ce fichier a déjà été traité
-          const existingLog = await db.query(
-            'SELECT id FROM enrollment_logs WHERE file_name = $1 AND bank_id = $2',
-            [fileName, bank.id]
-          );
-          
-          if (existingLog.rows.length > 0) {
-            // Fichier déjà traité, on passe
-            continue;
-          }
-          
-          // Traiter le fichier
-          console.log('Processing enrollment report: ' + fileName + ' for bank ' + bank.name);
-          
-          const processResult = await enrollmentService.processEnrollmentReport(filePath, bank.id, fileName);
-          
-          if (processResult.success) {
-            result.filesProcessed++;
-            
-            // Déplacer le fichier vers un dossier "processed"
-            const processedDir = path.join(dirPath, 'processed');
-            await fs.mkdir(processedDir, { recursive: true });
-            
-            const newPath = path.join(processedDir, fileName);
-            await fs.rename(filePath, newPath);
-            
-            console.log('Enrollment report processed: ' + fileName + ' - ' + processResult.message);
-          } else {
-            result.errors.push({
-              file: fileName,
-              error: processResult.message
-            });
-          }
-        } catch (fileError) {
-          console.error('Error processing enrollment file ' + fileName + ':', fileError);
-          result.errors.push({
-            file: fileName,
-            error: fileError.message
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error scanning enrollment directory for bank ' + bank.name + ':', error);
-      result.errors.push({
-        error: error.message
-      });
     }
 
     return result;
   }
 
-  startDailyReportTask() {
-    if (this.dailyReportTask) {
-      this.dailyReportTask.stop();
-      this.dailyReportTask = null;
-    }
+  async scanEnrollmentReports(bank) {
+    const result = { filesFound: 0, filesProcessed: 0, errors: [] };
 
-    if (!this.dailyReportEnabled) {
-      console.log('Daily report cron is disabled');
-      return;
-    }
+    if (!bank.enrollment_report_url) return result;
 
-    console.log('Starting daily report cron with schedule: ' + this.dailyReportSchedule);
-    
-    this.dailyReportTask = cron.schedule(this.dailyReportSchedule, async () => {
-      console.log('Sending daily reports to all banks...');
-      try {
-        const emailService = require('./emailService');
-        const result = await emailService.sendAllDailyReports(new Date());
-        console.log('Daily reports sent:', result);
-      } catch (error) {
-        console.error('Error sending daily reports:', error);
+    const isSftp = sftpService.isRemote(bank.enrollment_report_url);
+
+    try {
+      let xmlFiles = [];
+
+      if (isSftp) {
+        xmlFiles = await sftpService.listFiles(bank.enrollment_report_url, '.xml');
+      } else {
+        let dirPath = bank.enrollment_report_url.replace('file://', '');
+        try {
+          await fs.access(dirPath);
+        } catch {
+          await fs.mkdir(dirPath, { recursive: true });
+          return result;
+        }
+        const files = await fs.readdir(dirPath);
+        xmlFiles = files.filter(f => f.toLowerCase().endsWith('.xml'));
       }
-    }, {
-      scheduled: true,
-      timezone: process.env.TIMEZONE || 'Africa/Tunis'
-    });
 
-    console.log('Daily report cron started successfully');
+      result.filesFound = xmlFiles.length;
+
+      for (const fileName of xmlFiles) {
+        try {
+          const existing = await db.query(
+            'SELECT id FROM enrollment_logs WHERE file_name = $1 AND bank_id = $2',
+            [fileName, bank.id]
+          );
+
+          if (existing.rows.length > 0) continue;
+
+          console.log(`   📄 Processing enrollment report: ${fileName} for ${bank.name}`);
+
+          let processResult;
+
+          if (isSftp) {
+            const fileUrl = `${bank.enrollment_report_url}/${fileName}`;
+            const xmlContent = await sftpService.readFile(fileUrl);
+            processResult = await enrollmentService.processEnrollmentReportFromContent(xmlContent, bank.id, fileName);
+          } else {
+            const dirPath = bank.enrollment_report_url.replace('file://', '');
+            const filePath = path.join(dirPath, fileName);
+            processResult = await enrollmentService.processEnrollmentReport(filePath, bank.id, fileName);
+          }
+
+          if (processResult.success) {
+            result.filesProcessed++;
+
+            if (isSftp) {
+              const processedUrl = `${bank.enrollment_report_url}/processed/${fileName}`;
+              const fileUrl = `${bank.enrollment_report_url}/${fileName}`;
+              await sftpService.moveFile(fileUrl, processedUrl);
+            } else {
+              const dirPath = bank.enrollment_report_url.replace('file://', '');
+              const filePath = path.join(dirPath, fileName);
+              const processedDir = path.join(dirPath, 'processed');
+              await fs.mkdir(processedDir, { recursive: true });
+              await fs.rename(filePath, path.join(processedDir, fileName));
+            }
+
+            console.log(`   ✅ Enrollment processed: ${fileName} - ${processResult.successCount} success, ${processResult.errorCount} errors`);
+          } else {
+            result.errors.push({ file: fileName, error: processResult.message });
+          }
+        } catch (fileError) {
+          console.error(`   ❌ Error processing enrollment ${fileName}:`, fileError.message);
+          result.errors.push({ file: fileName, error: fileError.message });
+        }
+      }
+    } catch (error) {
+      console.error(`   ❌ Error scanning enrollment dir for ${bank.name}:`, error.message);
+      result.errors.push({ error: error.message });
+    }
+
+    return result;
+  }
+
+  async logResult(result) {
+    try {
+      await db.query(
+        `INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [result.startTime, result.banksScanned, result.filesFound, result.filesProcessed, 0, result.enrollmentProcessed, result.errors.length, JSON.stringify(result.errors)]
+      );
+    } catch (error) {
+      if (error.code === '42P01') {
+        await this.createTable();
+        await this.logResult(result);
+      } else {
+        console.error('Log error:', error);
+      }
+    }
+  }
+
+  async createTable() {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS scan_logs (
+        id SERIAL PRIMARY KEY, scan_time TIMESTAMP NOT NULL,
+        banks_scanned INTEGER DEFAULT 0, files_found INTEGER DEFAULT 0,
+        files_processed INTEGER DEFAULT 0, enrollment_files_found INTEGER DEFAULT 0,
+        enrollment_files_processed INTEGER DEFAULT 0, errors_count INTEGER DEFAULT 0,
+        errors_detail TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Created scan_logs table');
+  }
+
+  startReportTask() {
+    if (this.reportTask) { this.reportTask.stop(); this.reportTask = null; }
+    this.reportTask = cron.schedule('0 8 * * *', async () => {
+      console.log('Sending daily reports...');
+      try { await emailService.sendAllDailyReports(new Date()); } catch (e) { console.error('Report error:', e); }
+    }, { scheduled: true, timezone: process.env.TZ || 'Africa/Tunis' });
+    console.log('✅ Daily report cron started');
   }
 
   getStatus() {
-    const cronDescription = this.describeCron(this.currentSchedule);
-    
     return {
       isScanning: this.isScanning,
       enabled: this.enabled,
-      cronSchedule: this.currentSchedule,
-      cronDescription: cronDescription,
-      lastScanTime: this.lastScanTime,
-      nextScanEstimate: this.getNextScanEstimate(),
-      timezone: process.env.TIMEZONE || 'Africa/Tunis'
+      schedule: this.schedule,
+      description: this.describeCron(this.schedule),
+      lastScan: this.lastScanTime,
+      nextScan: this.estimateNextScan(),
+      timezone: process.env.TZ || 'Africa/Tunis'
     };
   }
 
-  describeCron(schedule) {
-    const descriptions = {
-      '*/1 * * * *': 'Toutes les minutes',
-      '*/5 * * * *': 'Toutes les 5 minutes',
-      '*/10 * * * *': 'Toutes les 10 minutes',
-      '*/15 * * * *': 'Toutes les 15 minutes',
-      '*/30 * * * *': 'Toutes les 30 minutes',
-      '0 * * * *': 'Toutes les heures',
-      '0 */2 * * *': 'Toutes les 2 heures',
-      '0 */6 * * *': 'Toutes les 6 heures',
-      '0 0 * * *': 'Tous les jours à minuit',
-      '0 8 * * *': 'Tous les jours à 8h',
-      '0 8 * * 1-5': 'Lundi-Vendredi à 8h'
+  describeCron(s) {
+    const labels = {
+      '*/1 * * * *': 'Every minute', '*/5 * * * *': 'Every 5 min',
+      '*/10 * * * *': 'Every 10 min', '*/15 * * * *': 'Every 15 min',
+      '*/30 * * * *': 'Every 30 min', '0 * * * *': 'Every hour',
+      '0 */2 * * *': 'Every 2 hours', '0 */6 * * *': 'Every 6 hours',
+      '0 0 * * *': 'Every midnight', '0 8 * * *': 'Every day at 8h',
+      '0 8 * * 1-5': 'Weekdays at 8h'
     };
-
-    return descriptions[schedule] || schedule;
+    return labels[s] || s;
   }
 
-  getNextScanEstimate() {
-    if (!this.enabled || !this.currentTask) return null;
-    
-    // Simple estimation based on schedule
-    const now = new Date();
-    const parts = this.currentSchedule.split(' ');
-    
-    if (parts[0].startsWith('*/')) {
-      const minutes = parseInt(parts[0].substring(2));
-      const nextRun = new Date(now);
-      nextRun.setMinutes(Math.ceil(now.getMinutes() / minutes) * minutes);
-      nextRun.setSeconds(0);
-      if (nextRun <= now) {
-        nextRun.setMinutes(nextRun.getMinutes() + minutes);
-      }
-      return nextRun;
+  estimateNextScan() {
+    if (!this.enabled || !this.lastScanTime) return null;
+    const match = this.schedule.match(/\*\/(\d+)/);
+    if (match) {
+      const next = new Date(this.lastScanTime);
+      next.setMinutes(next.getMinutes() + parseInt(match[1]));
+      return next;
     }
-    
     return null;
   }
 }

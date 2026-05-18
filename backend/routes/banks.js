@@ -21,13 +21,15 @@ router.get('/', authMiddleware, async (req, res) => {
     `;
     
     // Filtrer par bankId si fourni
+    const queryParams = [];
     if (bankId) {
-      query += ' WHERE b.id = ' + parseInt(bankId);
+      query += ' WHERE b.id = $1';
+      queryParams.push(parseInt(bankId));
     }
     
     query += ' GROUP BY b.id ORDER BY b.name';
     
-    const result = await db.query(query);
+    const result = await db.query(query, queryParams);
 
     res.json({
       success: true,
@@ -127,14 +129,6 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
   try {
     const { code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active } = req.body;
 
-    // Validate required fields
-    if (!xml_output_url) {
-      return res.status(400).json({
-        success: false,
-        message: 'Le champ xml_output_url est obligatoire'
-      });
-    }
-
     const query = `
       UPDATE banks 
       SET 
@@ -143,21 +137,23 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
         source_url = COALESCE($3, source_url),
         destination_url = COALESCE($4, destination_url),
         old_url = COALESCE($5, old_url),
-        xml_output_url = $6,
-        is_active = COALESCE($7, is_active),
+        xml_output_url = COALESCE($6, xml_output_url),
+        enrollment_report_url = COALESCE($7, enrollment_report_url),
+        is_active = COALESCE($8, is_active),
         updated_at = NOW()
-      WHERE id = $8
+      WHERE id = $9
       RETURNING *
     `;
 
     const result = await db.query(query, [
       code ? code.toUpperCase() : null,
-      name,
-      source_url,
-      destination_url,
-      old_url,
-      xml_output_url,
-      is_active,
+      name || null,
+      source_url || null,
+      destination_url || null,
+      old_url || null,
+      xml_output_url || null,
+      enrollment_report_url || null,
+      is_active !== undefined ? is_active : null,
       req.params.id
     ]);
 

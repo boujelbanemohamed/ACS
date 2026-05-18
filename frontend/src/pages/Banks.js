@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Building2, Plus, Edit2, Trash2, Eye, Check, X, RefreshCw, ExternalLink, FileText, ArrowRight } from 'lucide-react';
+import { Building2, Plus, Edit2, Trash2, Eye, Check, RefreshCw, FileText, ArrowRight, ToggleLeft, ToggleRight } from 'lucide-react';
 import api from '../services/api';
 import './Banks.css';
 
@@ -13,6 +13,8 @@ const Banks = () => {
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewingBank, setViewingBank] = useState(null);
+  const [bankStats, setBankStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [editingBank, setEditingBank] = useState(null);
   const [formData, setFormData] = useState({
     code: '',
@@ -41,9 +43,19 @@ const Banks = () => {
     }
   };
 
-  const handleView = (bank) => {
+  const handleView = async (bank) => {
     setViewingBank(bank);
     setShowViewModal(true);
+    setStatsLoading(true);
+    try {
+      const response = await api.get('/banks/' + bank.id + '/stats');
+      setBankStats(response.data.data);
+    } catch (error) {
+      console.error('Error fetching bank stats:', error);
+      setBankStats(null);
+    } finally {
+      setStatsLoading(false);
+    }
   };
 
   const handleEdit = (bank) => {
@@ -83,6 +95,21 @@ const Banks = () => {
       fetchBanks();
     } catch (error) {
       alert('Erreur: ' + error.message);
+    }
+  };
+
+  const [togglingId, setTogglingId] = useState(null);
+
+  const handleToggleActive = async (bank) => {
+    if (bank.is_active && !window.confirm('Desactiver la banque "' + bank.name + '" ? Les traitements automatiques seront interrompus.')) return;
+    setTogglingId(bank.id);
+    try {
+      await api.put('/banks/' + bank.id, { is_active: !bank.is_active });
+      fetchBanks();
+    } catch (error) {
+      alert('Erreur: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -149,6 +176,15 @@ const Banks = () => {
               </button>
               {isAdmin && (
                 <>
+                  <button
+                    className={'btn btn-toggle ' + (bank.is_active ? 'active' : 'inactive')}
+                    onClick={() => handleToggleActive(bank)}
+                    disabled={togglingId === bank.id}
+                    title={bank.is_active ? 'Desactiver la banque' : 'Activer la banque'}
+                  >
+                    {togglingId === bank.id ? <RefreshCw size={16} className="spin" /> : (bank.is_active ? <ToggleRight size={16} /> : <ToggleLeft size={16} />)}
+                    {bank.is_active ? 'Active' : 'Inactive'}
+                  </button>
                   <button className="btn btn-secondary" onClick={() => handleEdit(bank)}>
                     <Edit2 size={16} /> Modifier
                   </button>
@@ -211,62 +247,129 @@ const Banks = () => {
       {showViewModal && viewingBank && (
         <div className="modal-overlay" onClick={() => setShowViewModal(false)}>
           <div className="modal-content modal-view" onClick={(e) => e.stopPropagation()}>
-            <h2><Building2 size={24} /> {viewingBank.name}</h2>
-            
-            <div className="view-section">
-              <h3>Informations generales</h3>
-              <div className="info-grid">
-                <div className="info-item">
-                  <label>Code</label>
-                  <span>{viewingBank.code}</span>
-                </div>
-                <div className="info-item">
-                  <label>Nom</label>
-                  <span>{viewingBank.name}</span>
-                </div>
-                <div className="info-item">
-                  <label>Statut</label>
-                  <span className={'status-badge ' + (viewingBank.is_active ? 'active' : 'inactive')}>
-                    {viewingBank.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-              </div>
+            <div className="modal-header">
+              <h2><Building2 size={24} /> {viewingBank.name}</h2>
+              <span className={'status-badge ' + (viewingBank.is_active ? 'active' : 'inactive')}>
+                {viewingBank.is_active ? 'Active' : 'Inactive'}
+              </span>
             </div>
 
-            <div className="view-section">
-              <h3>Flux de traitement</h3>
-              <div className="flow-diagram">
-                <div className="flow-step">
-                  <div className="flow-icon"><FileText size={24} /></div>
-                  <div className="flow-label">Fichier CSV</div>
-                  <div className="flow-desc">Upload ou scan automatique</div>
-                </div>
-                <ArrowRight size={24} className="flow-arrow" />
-                <div className="flow-step">
-                  <div className="flow-icon"><Check size={24} /></div>
-                  <div className="flow-label">Validation</div>
-                  <div className="flow-desc">Verification des donnees</div>
-                </div>
-                <ArrowRight size={24} className="flow-arrow" />
-                <div className="flow-step">
-                  <div className="flow-icon"><FileText size={24} /></div>
-                  <div className="flow-label">Generation XML</div>
-                  <div className="flow-desc">Fichier ACS</div>
+            <div className="view-tabs">
+              <div className="view-section">
+                <h3>Informations generales</h3>
+                <div className="info-grid">
+                  <div className="info-item">
+                    <label>Code banque</label>
+                    <span className="code-badge">{viewingBank.code}</span>
+                  </div>
+                  <div className="info-item">
+                    <label>Nom</label>
+                    <span>{viewingBank.name}</span>
+                  </div>
+                  <div className="info-item">
+                    <label>Statut</label>
+                    <span className={'status-badge ' + (viewingBank.is_active ? 'active' : 'inactive')}>
+                      {viewingBank.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="view-section">
-              <h3>Statistiques</h3>
-              <div className="info-grid">
-                <div className="info-item">
-                  <label>Total enregistrements</label>
-                  <span>{viewingBank.total_records || 0}</span>
+              <div className="view-section">
+                <h3>Configuration des repertoires</h3>
+                <div className="info-grid urls-grid">
+                  <div className="info-item url-item">
+                    <label>Dossier source (CSV)</label>
+                    <span className="url-value">{viewingBank.source_url}</span>
+                  </div>
+                  <div className="info-item url-item">
+                    <label>Dossier destination</label>
+                    <span className="url-value">{viewingBank.destination_url}</span>
+                  </div>
+                  <div className="info-item url-item">
+                    <label>Dossier archive</label>
+                    <span className="url-value">{viewingBank.old_url}</span>
+                  </div>
+                  <div className="info-item url-item">
+                    <label>Sortie XML</label>
+                    <span className="url-value">{viewingBank.xml_output_url}</span>
+                  </div>
+                  {viewingBank.enrollment_report_url && (
+                    <div className="info-item url-item">
+                      <label>Rapport d'enrolement</label>
+                      <span className="url-value">{viewingBank.enrollment_report_url}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="info-item">
-                  <label>Fichiers traites</label>
-                  <span>{viewingBank.total_files_processed || 0}</span>
+              </div>
+
+              <div className="view-section">
+                <h3>Flux de traitement</h3>
+                <div className="flow-diagram">
+                  <div className="flow-step">
+                    <div className="flow-icon"><FileText size={24} /></div>
+                    <div className="flow-label">Fichier CSV</div>
+                    <div className="flow-desc">Upload ou scan automatique</div>
+                  </div>
+                  <ArrowRight size={24} className="flow-arrow" />
+                  <div className="flow-step">
+                    <div className="flow-icon"><Check size={24} /></div>
+                    <div className="flow-label">Validation</div>
+                    <div className="flow-desc">Verification des donnees</div>
+                  </div>
+                  <ArrowRight size={24} className="flow-arrow" />
+                  <div className="flow-step">
+                    <div className="flow-icon"><FileText size={24} /></div>
+                    <div className="flow-label">Generation XML</div>
+                    <div className="flow-desc">Fichier ACS</div>
+                  </div>
                 </div>
+              </div>
+
+              <div className="view-section">
+                <h3>Statistiques detaillees</h3>
+                {statsLoading ? (
+                  <div className="loading"><RefreshCw size={20} className="spin" /> Chargement...</div>
+                ) : (
+                  <div className="stats-detailed">
+                    <div className="stats-row">
+                      <div className="stat-card stat-primary">
+                        <span className="stat-value">{viewingBank.total_records || 0}</span>
+                        <span className="stat-label">Total enregistrements</span>
+                      </div>
+                      <div className="stat-card stat-success">
+                        <span className="stat-value">{bankStats?.successful_files || 0}</span>
+                        <span className="stat-label">Fichiers reussis</span>
+                      </div>
+                      <div className="stat-card stat-danger">
+                        <span className="stat-value">{bankStats?.failed_files || 0}</span>
+                        <span className="stat-label">Fichiers echoues</span>
+                      </div>
+                      <div className="stat-card stat-warning">
+                        <span className="stat-value">{bankStats?.validation_errors || 0}</span>
+                        <span className="stat-label">Erreurs validation</span>
+                      </div>
+                    </div>
+                    <div className="stats-row">
+                      <div className="stat-card">
+                        <span className="stat-value">{bankStats?.total_valid_rows || 0}</span>
+                        <span className="stat-label">Lignes valides</span>
+                      </div>
+                      <div className="stat-card stat-danger">
+                        <span className="stat-value">{bankStats?.total_invalid_rows || 0}</span>
+                        <span className="stat-label">Lignes invalides</span>
+                      </div>
+                      <div className="stat-card stat-warning">
+                        <span className="stat-value">{bankStats?.total_duplicate_rows || 0}</span>
+                        <span className="stat-label">Lignes en double</span>
+                      </div>
+                      <div className="stat-card">
+                        <span className="stat-value">{viewingBank.total_files_processed || 0}</span>
+                        <span className="stat-label">Fichiers traites</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -309,58 +412,67 @@ const Banks = () => {
                 </div>
               </div>
 
-              <div className="form-group">
-                <label>URL Source *</label>
-                <input
-                  type="text"
-                  value={formData.source_url}
-                  onChange={(e) => setFormData({...formData, source_url: e.target.value})}
-                  required
-                  placeholder="https://serveur/ACS/ATB/source"
-                />
+              <div className="form-row">
+                <div className="form-group">
+                  <label>URL Source *</label>
+                  <input
+                    type="url"
+                    value={formData.source_url}
+                    onChange={(e) => setFormData({...formData, source_url: e.target.value})}
+                    required
+                    placeholder="https://serveur/ACS/ATB/source"
+                  />
+                  <small>Dossier source contenant les fichiers CSV</small>
+                </div>
+
+                <div className="form-group">
+                  <label>URL Destination *</label>
+                  <input
+                    type="url"
+                    value={formData.destination_url}
+                    onChange={(e) => setFormData({...formData, destination_url: e.target.value})}
+                    required
+                    placeholder="https://serveur/ACS/ATB/destination"
+                  />
+                  <small>Dossier destination apres traitement</small>
+                </div>
               </div>
 
-              <div className="form-group">
-                <label>URL Destination *</label>
-                <input
-                  type="text"
-                  value={formData.destination_url}
-                  onChange={(e) => setFormData({...formData, destination_url: e.target.value})}
-                  required
-                  placeholder="https://serveur/ACS/ATB/destination"
-                />
-              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>URL Archive *</label>
+                  <input
+                    type="url"
+                    value={formData.old_url}
+                    onChange={(e) => setFormData({...formData, old_url: e.target.value})}
+                    required
+                    placeholder="https://serveur/ACS/ATB/archive"
+                  />
+                  <small>Dossier archive pour les fichiers anciens</small>
+                </div>
 
-              <div className="form-group">
-                <label>URL Archive *</label>
-                <input
-                  type="text"
-                  value={formData.old_url}
-                  onChange={(e) => setFormData({...formData, old_url: e.target.value})}
-                  required
-                  placeholder="https://serveur/ACS/ATB/archive"
-                />
-              </div>
-
-              <div className="form-group">
-                <label>URL Sortie XML *</label>
-                <input
-                  type="text"
-                  value={formData.xml_output_url}
-                  onChange={(e) => setFormData({...formData, xml_output_url: e.target.value})}
-                  required
-                  placeholder="https://serveur/ACS/ATB/xml"
-                />
+                <div className="form-group">
+                  <label>URL Sortie XML *</label>
+                  <input
+                    type="url"
+                    value={formData.xml_output_url}
+                    onChange={(e) => setFormData({...formData, xml_output_url: e.target.value})}
+                    required
+                    placeholder="https://serveur/ACS/ATB/xml"
+                  />
+                  <small>Dossier de sortie des fichiers XML generes</small>
+                </div>
               </div>
 
               <div className="form-group">
                 <label>URL Rapport Enrolement</label>
                 <input
-                  type="text"
+                  type="url"
                   value={formData.enrollment_report_url}
                   onChange={(e) => setFormData({...formData, enrollment_report_url: e.target.value})}
                   placeholder="https://serveur/ACS/ATB/enrollment"
                 />
+                <small>Optionnel - rapport d'enrolement genere</small>
               </div>
 
               <div className="form-group">
