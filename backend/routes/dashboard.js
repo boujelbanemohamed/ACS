@@ -7,7 +7,11 @@ const router = express.Router();
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { bankId } = req.query;
-    const bankFilterId = bankId ? parseInt(bankId) : null;
+    let bankFilterId = bankId ? parseInt(bankId) : null;
+
+    if (req.user.role === 'bank' && req.user.bank_id) {
+      bankFilterId = req.user.bank_id;
+    }
 
     const totalBanks = await db.query(
       bankFilterId

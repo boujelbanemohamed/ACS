@@ -21,6 +21,11 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     const safeLimit = Math.min(parseInt(limit) || 50, 500);
     const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
+    const allowedSortColumns = ['id', 'bank_id', 'pan', 'first_name', 'last_name', 'phone', 'expiry', 'processed_at', 'enrollment_status'];
+    const allowedSortOrders = ['ASC', 'DESC'];
+    const safeSortBy = allowedSortColumns.includes(sortBy) ? sortBy : 'processed_at';
+    const safeSortOrder = allowedSortOrders.includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
+
     let query = `
       SELECT 
         pr.*,
@@ -51,7 +56,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       paramCount++;
     }
 
-    query += ` ORDER BY pr.${sortBy} ${sortOrder} LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    query += ` ORDER BY pr.${safeSortBy} ${safeSortOrder} LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
     params.push(safeLimit, safeOffset);
 
     const result = await db.query(query, params);
