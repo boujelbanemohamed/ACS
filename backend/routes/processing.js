@@ -128,7 +128,17 @@ router.post('/process-url', authMiddleware, validate(processingSchemas.processUr
         if (savedRecords[i]?.id) {
           try {
             const validation = validateRowForHistory(result.validRecords[i]);
-            await recordHistoryService.logAttempt(savedRecords[i].id, result.validRecords[i].pan, bankId, validation, 'url', fileName, req.user?.username || 'SYSTEM');
+            await recordHistoryService.logAttempt({
+              processedRecordId: savedRecords[i].id,
+              pan: result.validRecords[i].pan,
+              bankId,
+              validationResults: validation.results,
+              status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
+              sourceType: 'url',
+              fileName,
+              username: req.user?.username || 'SYSTEM',
+              dataReceived: result.validRecords[i]
+            });
           } catch (e) {
             console.error('History log error:', e.message);
           }
@@ -244,7 +254,17 @@ router.post('/upload', authMiddleware, upload.single('file'), validate(processin
         if (row.id) {
           try {
             const validation = validateRowForHistory(row);
-            await recordHistoryService.logAttempt(row.id, row.pan, bankId, validation, 'upload', req.file.originalname, req.user?.username || 'SYSTEM');
+            await recordHistoryService.logAttempt({
+              processedRecordId: row.id,
+              pan: row.pan,
+              bankId,
+              validationResults: validation.results,
+              status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
+              sourceType: 'upload',
+              fileName: req.file.originalname,
+              username: req.user?.username || 'SYSTEM',
+              dataReceived: row
+            });
           } catch (e) {
             console.error('History log error:', e.message);
           }
@@ -677,7 +697,17 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
       if (savedRecords[i]?.id) {
         try {
           const validation = validateRowForHistory(entry);
-          await recordHistoryService.logAttempt(savedRecords[i].id, entry.pan, bankId, validation, 'manual', `${fileName}.csv`, req.user?.username || 'SYSTEM');
+          await recordHistoryService.logAttempt({
+            processedRecordId: savedRecords[i].id,
+            pan: entry.pan,
+            bankId,
+            validationResults: validation.results,
+            status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
+            sourceType: 'manual',
+            fileName: `${fileName}.csv`,
+            username: req.user?.username || 'SYSTEM',
+            dataReceived: entry
+          });
         } catch (e) {
           console.error('History log error:', e.message);
         }
@@ -836,7 +866,17 @@ router.post('/call-api', authMiddleware, validate(processingSchemas.callApi), as
           if (savedRecords[i]?.id) {
             try {
               const validation = validateRowForHistory(mappedRows[i]);
-              await recordHistoryService.logAttempt(savedRecords[i].id, mappedRows[i].pan, bankId, validation, 'api', fileName, req.user?.username || 'SYSTEM');
+              await recordHistoryService.logAttempt({
+                processedRecordId: savedRecords[i].id,
+                pan: mappedRows[i].pan,
+                bankId,
+                validationResults: validation.results,
+                status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
+                sourceType: 'api',
+                fileName,
+                username: req.user?.username || 'SYSTEM',
+                dataReceived: mappedRows[i]
+              });
             } catch (e) {
               console.error('History log error:', e.message);
             }

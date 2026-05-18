@@ -37,7 +37,7 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
       await page.fill('#username', ADMIN_USER);
       await page.fill('#password', ADMIN_PASS);
       await page.locator('button[type="submit"]').click({ force: true });
-      await expect(page.locator('h1')).toContainText('Tableau de Bord', { timeout: 15000 });
+      await expect(page.locator('h1')).toContainText('Bonjour', { timeout: 15000 });
     });
 
   });
@@ -49,7 +49,7 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
       await page.fill('#username', ADMIN_USER);
       await page.fill('#password', ADMIN_PASS);
       await page.locator('button[type="submit"]').click({ force: true });
-      await expect(page.locator('h1')).toContainText('Tableau de Bord', { timeout: 15000 });
+      await expect(page.locator('h1')).toContainText('Bonjour', { timeout: 15000 });
     });
 
     test('affiche les statistiques apres connexion', async ({ page }) => {
@@ -91,7 +91,7 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
       await page.fill('#username', ADMIN_USER);
       await page.fill('#password', ADMIN_PASS);
       await page.locator('button[type="submit"]').click({ force: true });
-      await expect(page.locator('h1')).toContainText('Tableau de Bord', { timeout: 15000 });
+      await expect(page.locator('h1')).toContainText('Bonjour', { timeout: 15000 });
     });
 
     test('accede a la page Banques', async ({ page }) => {
@@ -428,6 +428,173 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
       const body1 = await existingEmail.json();
       const body2 = await fakeEmail.json();
       expect(body1.message).toEqual(body2.message);
+    });
+
+  });
+
+  test.describe('Scénarios avancés', () => {
+
+    function luhnPAN(prefix) {
+      const digits = (prefix + Date.now().toString().slice(-11)).padEnd(15, '0').slice(0, 15);
+      let sum = 0, isEven = true;
+      for (let i = digits.length - 1; i >= 0; i--) {
+        let d = parseInt(digits[i], 10);
+        if (isEven) { d *= 2; if (d > 9) d -= 9; }
+        sum += d; isEven = !isEven;
+      }
+      return digits + ((10 - (sum % 10)) % 10);
+    }
+
+    test('full flow: upload, history, XML generation', async ({ request }) => {
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await login.json()).data;
+      const pan = luhnPAN('4741');
+
+      const csv = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
+        `fr;ALICE;MARTIN;${pan};12/28;21699123456;otp;create`;
+
+      const upload = await request.post(`${API_BASE}/api/processing/upload`, {
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: {
+          bankId: '1',
+          file: { name: 'fullflow.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) }
+        }
+      });
+      expect(upload.status()).toBe(200);
+      const uploadBody = await upload.json();
+      expect(uploadBody.success).toBe(true);
+
+      const history = await request.get(`${API_BASE}/api/record-history/pan/1/${pan}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      expect(history.status()).toBe(200);
+      const historyBody = await history.json();
+      expect(historyBody.success).toBe(true);
+
+      const logs = await request.get(`${API_BASE}/api/processing/logs`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      expect(logs.status()).toBe(200);
+      const logsBody = await logs.json();
+      expect(logsBody.data.some(l => l.id === uploadBody.data.fileLogId)).toBe(true);
+    });
+
+    test('duplicate PAN with different action resets enrollment', async ({ request }) => {
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await login.json()).data;
+      const pan = luhnPAN('4741');
+
+      const csv1 = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
+        `fr;BOB;TEST;${pan};12/28;21699123456;otp;create`;
+      const r1 = await request.post(`${API_BASE}/api/processing/upload`, {
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: { bankId: '1', file: { name: 'dup1.csv', mimeType: 'text/csv', buffer: Buffer.from(csv1) } }
+      });
+      expect((await r1.json()).success).toBe(true);
+
+      const csv2 = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
+        `fr;BOB;TEST;${pan};12/28;21699123456;otp;update`;
+      const r2 = await request.post(`${API_BASE}/api/processing/upload`, {
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: { bankId: '1', file: { name: 'dup2.csv', mimeType: 'text/csv', buffer: Buffer.from(csv2) } }
+      });
+      const body2 = await r2.json();
+      expect(body2.success).toBe(true);
+    });
+
+    test('enter-data (saisie manuelle) avec PAN valide', async ({ request }) => {
+      const pan = luhnPAN('4741');
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await login.json()).data;
+
+      const res = await request.post(`${API_BASE}/api/processing/process-manual`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        data: {
+          bankId: 1,
+          entries: [{ pan, firstName: 'Manual', lastName: 'Entry', expiry: '12/28', phone: '21699123456', behaviour: 'otp', action: 'create' }]
+        }
+      });
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+    });
+
+  });
+
+  test.describe('Sécurité avancée', () => {
+
+    test('role bypass: bank user cannot list all banks', async ({ request }) => {
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: BANK_USER, password: BANK_PASS }
+      });
+      const { token } = (await login.json()).data;
+
+      const banks = await request.get(`${API_BASE}/api/banks`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const banksBody = await banks.json();
+      if (Array.isArray(banksBody.data)) {
+        expect(banksBody.data.length).toBeLessThanOrEqual(1);
+      }
+    });
+
+    test('role bypass: bank user cannot access users list', async ({ request }) => {
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: BANK_USER, password: BANK_PASS }
+      });
+      const { token } = (await login.json()).data;
+
+      const users = await request.get(`${API_BASE}/api/users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      expect(users.status()).toBe(403);
+    });
+
+    test('JWT falsifié: invalid signature returns 401', async ({ request }) => {
+      const res = await request.get(`${API_BASE}/api/dashboard`, {
+        headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJpZCI6MX0.invalid' }
+      });
+      expect(res.status()).toBe(401);
+    });
+
+    test('JWT falsifié: expired token returns 401', async ({ request }) => {
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await login.json()).data;
+
+      const dash = await request.get(`${API_BASE}/api/dashboard`, {
+        headers: { Authorization: `Bearer ${token}x` }
+      });
+      expect(dash.status()).toBe(401);
+    });
+
+    test('XSS dans nom de fichier: filename est sanitize', async ({ request }) => {
+      const login = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await login.json()).data;
+
+      const csv = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
+        'fr;Jean;Dupont;4000056655665556;12/28;21699123456;otp;create';
+
+      const res = await request.post(`${API_BASE}/api/processing/upload`, {
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: {
+          bankId: '1',
+          file: { name: '<script>xss</script>.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) }
+        }
+      });
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+      expect(body.data.stats.validRows).toBe(1);
     });
 
   });

@@ -13,9 +13,9 @@ const COLORS = [
 ];
 
 const QUICK_ACTIONS = [
-  { label: 'Banques', icon: Building2, path: '/banks', color: '#667eea' },
-  { label: 'Traitement', icon: FileText, path: '/processing', color: '#059669' },
-  { label: 'Enregistrements', icon: Database, path: '/records', color: '#7c3aed' },
+  { label: 'Gérer les Banques', icon: Building2, path: '/banks', color: '#667eea' },
+  { label: 'Traiter des Fichiers', icon: FileText, path: '/processing', color: '#059669' },
+  { label: 'Voir les Enregistrements', icon: Database, path: '/records', color: '#7c3aed' },
   { label: 'Configuration', icon: Clock, path: '/cron', color: '#d97706' },
 ];
 
@@ -115,7 +115,7 @@ const Dashboard = () => {
           return (
             <div
               key={c.i}
-              className="metric-card"
+              className="metric-card stat-card"
               style={{ '--accent': accent.from, '--accent-bg': accent.bg }}
               onClick={() => navigate(c.path)}
               role="button"
@@ -137,7 +137,7 @@ const Dashboard = () => {
         {/* Left: Activity Timeline */}
         <div className="card activity-card">
           <div className="card-header">
-            <h3><Activity size={20} /> Activite Recente</h3>
+            <h3><Activity size={20} /> Activité Récente</h3>
             <button className="card-btn" onClick={() => navigate('/records')}>
               Voir tout <ChevronRight size={16} />
             </button>
