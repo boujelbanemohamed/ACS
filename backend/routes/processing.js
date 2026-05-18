@@ -9,6 +9,32 @@ const xmlGenerator = require('../services/xmlGenerator');
 const recordHistoryService = require('../services/recordHistoryService');
 const { validateRowForHistory } = require('../utils/validationHelper');
 const { authMiddleware } = require('../middleware/auth');
+const { processingSchemas, validate } = require('../utils/validators');
+
+const ALLOWED_API_DOMAINS = (process.env.ALLOWED_API_DOMAINS || '').split(',').filter(Boolean);
+
+function isAllowedApiUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname;
+
+    if (ALLOWED_API_DOMAINS.length > 0) {
+      return ALLOWED_API_DOMAINS.some(d => host === d || host.endsWith('.' + d));
+    }
+
+    const blocked = ['localhost', '127.0.0.1', '0.0.0.0', '::1', '169.254.169.254',
+      '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.',
+      '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.',
+      '172.29.', '172.30.', '172.31.', '192.168.'];
+    for (const b of blocked) {
+      if (host === b || host.startsWith(b)) return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const router = express.Router();
 const csvProcessor = new CSVProcessor();
@@ -57,7 +83,7 @@ router.get('/template', authMiddleware, (req, res) => {
 });
 
 // Process file from URL
-router.post('/process-url', authMiddleware, async (req, res) => {
+router.post('/process-url', authMiddleware, validate(processingSchemas.processUrl), async (req, res) => {
   try {
     const { bankId, baseUrl } = req.body;
 
@@ -156,7 +182,7 @@ router.post('/process-url', authMiddleware, async (req, res) => {
 });
 
 // Upload and process CSV file manually
-router.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
+router.post('/upload', authMiddleware, upload.single('file'), validate(processingSchemas.upload), async (req, res) => {
   try {
     const { bankId } = req.body;
 
@@ -680,7 +706,7 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
 });
 
 // Call external API
-router.post('/call-api', authMiddleware, async (req, res) => {
+router.post('/call-api', authMiddleware, validate(processingSchemas.callApi), async (req, res) => {
   try {
     const { bankId, url, method, headers, body, authType, authToken, dataPath } = req.body;
 
@@ -688,6 +714,13 @@ router.post('/call-api', authMiddleware, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Bank ID et URL requis'
+      });
+    }
+
+    if (!isAllowedApiUrl(url)) {
+      return res.status(400).json({
+        success: false,
+        message: 'URL non autorisée'
       });
     }
 

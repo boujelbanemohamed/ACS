@@ -118,6 +118,22 @@ const processingSchemas = {
         action: Joi.string().valid('update', 'create', 'delete').default('update')
       })
     ).min(1).required()
+  }),
+
+  upload: Joi.object({
+    bankId: Joi.number().integer().required()
+      .messages({ 'any.required': 'L\'ID de la banque est requis' })
+  }),
+
+  callApi: Joi.object({
+    bankId: Joi.number().integer().required()
+      .messages({ 'any.required': 'L\'ID de la banque est requis' }),
+    url: Joi.string().uri().required()
+      .messages({ 'string.uri': 'URL invalide' }),
+    method: Joi.string().valid('GET', 'POST', 'PUT', 'DELETE').default('GET'),
+    authType: Joi.string().valid('bearer', 'basic', 'apikey').allow(null, ''),
+    authToken: Joi.string().allow(null, ''),
+    dataPath: Joi.string().allow(null, '')
   })
 };
 

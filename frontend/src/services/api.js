@@ -61,6 +61,7 @@ export const processingAPI = {
   validateManualEntries: (data) => api.post("/processing/validate-manual", data),
   processManualEntries: (data) => api.post("/processing/process-manual", data),
   downloadTemplate: () => api.get("/processing/template", { responseType: "blob" }),
+  callExternalApi: (data) => api.post("/processing/call-api", data),
 };
 
 export const dashboardAPI = {
