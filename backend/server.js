@@ -76,7 +76,7 @@ app.use(globalLimiter);
 
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 10,
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 10,
   message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans une minute.' },
   standardHeaders: true,
   legacyHeaders: false,

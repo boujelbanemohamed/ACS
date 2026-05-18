@@ -2,16 +2,19 @@ const { test, expect } = require('@playwright/test');
 
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'Admin@123';
+const BANK_USER = 'bankuser';
+const BANK_PASS = 'Bank1234!';
+const API_BASE = process.env.API_URL || 'http://localhost:5001';
 
 test.describe('ACS Banking CSV Processor - Tests E2E', () => {
 
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(() => localStorage.clear());
-    await page.context().clearCookies();
-  });
-
   test.describe('Authentification', () => {
+
+    test.beforeEach(async ({ page }) => {
+      await page.goto('/');
+      await page.evaluate(() => localStorage.clear());
+      await page.context().clearCookies();
+    });
 
     test('affiche la page de connexion', async ({ page }) => {
       await page.goto('/login');
@@ -122,19 +125,19 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
   test.describe('API Health', () => {
 
     test('API backend est accessible', async ({ request }) => {
-      const response = await request.get('http://localhost:8000/api/health');
+      const response = await request.get(`${API_BASE}/api/health`);
       expect(response.status()).toBe(200);
       const body = await response.json();
       expect(body.success).toBe(true);
     });
 
     test('API retourne les banques', async ({ request }) => {
-      const loginRes = await request.post('http://localhost:8000/api/auth/login', {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await loginRes.json()).data;
 
-      const banksRes = await request.get('http://localhost:8000/api/banks', {
+      const banksRes = await request.get(`${API_BASE}/api/banks`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       expect(banksRes.status()).toBe(200);
@@ -144,12 +147,12 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
     });
 
     test('API dashboard accessible avec auth', async ({ request }) => {
-      const loginRes = await request.post('http://localhost:8000/api/auth/login', {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await loginRes.json()).data;
 
-      const dashRes = await request.get('http://localhost:8000/api/dashboard', {
+      const dashRes = await request.get(`${API_BASE}/api/dashboard`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       expect(dashRes.status()).toBe(200);
@@ -165,22 +168,32 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
 
     function uniquePAN() {
       const prefix = '4741';
-      const now = Date.now().toString().slice(-12);
-      const padded = now.padStart(12, '0');
-      return prefix + padded;
+      const now = Date.now().toString().slice(-11);
+      const padded = now.padStart(11, '0');
+      const pan15 = prefix + padded;
+      let sum = 0;
+      let isEven = true;
+      for (let i = pan15.length - 1; i >= 0; i--) {
+        let d = parseInt(pan15[i], 10);
+        if (isEven) { d *= 2; if (d > 9) d -= 9; }
+        sum += d;
+        isEven = !isEven;
+      }
+      const check = (10 - (sum % 10)) % 10;
+      return pan15 + check;
     }
 
     test('upload reussi d un fichier CSV valide', async ({ request }) => {
-      const loginRes = await request.post('http://localhost:8000/api/auth/login', {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await loginRes.json()).data;
 
       const pan = uniquePAN();
       const csvContent = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
-        `fr;JEAN;DUPONT;${pan};202612;21624080852;otp;update`;
+        `fr;JEAN;DUPONT;${pan};12/28;21624080852;otp;update`;
 
-      const response = await request.post('http://localhost:8000/api/processing/upload', {
+      const response = await request.post(`${API_BASE}/api/processing/upload`, {
         headers: {
           Authorization: `Bearer ${token}`
         },
@@ -202,15 +215,15 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
     });
 
     test('rejette un fichier CSV avec PAN invalide', async ({ request }) => {
-      const loginRes = await request.post('http://localhost:8000/api/auth/login', {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await loginRes.json()).data;
 
       const csvContent = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
-        'fr;JEAN;DUPONT;1234;202612;21624080852;otp;update';
+        'fr;JEAN;DUPONT;1234;12/28;21624080852;otp;update';
 
-      const response = await request.post('http://localhost:8000/api/processing/upload', {
+      const response = await request.post(`${API_BASE}/api/processing/upload`, {
         headers: {
           Authorization: `Bearer ${token}`
         },
@@ -233,27 +246,27 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
   test.describe('Sécurité - Corrections appliquées', () => {
 
     test('API publique a rate limiting', async ({ request }) => {
-      const apiKeyRes = await request.post('http://localhost:8000/api/auth/login', {
+      const apiKeyRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await apiKeyRes.json()).data;
 
       const responses = [];
       for (let i = 0; i < 5; i++) {
-        responses.push(await request.get('http://localhost:8000/api/v1/docs'));
+        responses.push(await request.get(`${API_BASE}/api/v1/docs`));
       }
       const lastStatus = responses[responses.length - 1].status();
       expect(lastStatus).toBe(200);
     });
 
     test('SQL injection echoue sur le dashboard', async ({ request }) => {
-      const loginRes = await request.post('http://localhost:8000/api/auth/login', {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await loginRes.json()).data;
 
       const response = await request.get(
-        "http://localhost:8000/api/dashboard?bankId=1' OR '1'='1",
+        `${API_BASE}/api/dashboard?bankId=1' OR '1'='1`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       expect(response.status()).toBe(200);
@@ -262,18 +275,159 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
     });
 
     test('pagination limitee a 500 max', async ({ request }) => {
-      const loginRes = await request.post('http://localhost:8000/api/auth/login', {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
         data: { username: ADMIN_USER, password: ADMIN_PASS }
       });
       const { token } = (await loginRes.json()).data;
 
       const response = await request.get(
-        'http://localhost:8000/api/processing/logs?limit=999999',
+        `${API_BASE}/api/processing/logs?limit=999999`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       expect(response.status()).toBe(200);
       const body = await response.json();
       expect(body.pagination.limit).toBeLessThanOrEqual(500);
+    });
+
+    test('SSRF bloque IP privee sur call-api', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await loginRes.json()).data;
+
+      const response = await request.post(`${API_BASE}/api/processing/call-api`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        data: { bankId: 1, url: 'http://localhost:5432' }
+      });
+      expect(response.status()).toBe(400);
+      const body = await response.json();
+      expect(body.success).toBe(false);
+      expect(body.message).toContain('non autoris');
+    });
+
+    test('SSRF retourne 200 pour URL autorisee', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await loginRes.json()).data;
+
+      const response = await request.post(`${API_BASE}/api/processing/call-api`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        data: { bankId: 1, url: 'https://jsonplaceholder.typicode.com/posts/1' }
+      });
+      expect(response.status()).toBe(200);
+      const body = await response.json();
+      expect(body.success).toBe(true);
+    });
+
+    test('Joi validation rejette mauvaise URL sur process-url', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: ADMIN_USER, password: ADMIN_PASS }
+      });
+      const { token } = (await loginRes.json()).data;
+
+      const response = await request.post(`${API_BASE}/api/processing/process-url`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        data: { bankId: 'abc', baseUrl: 'pas-une-url' }
+      });
+      expect(response.status()).toBe(400);
+    });
+
+  });
+
+  test.describe('Profil Banque - Accès restreint', () => {
+
+    test('bank user peut se connecter via API', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: BANK_USER, password: BANK_PASS }
+      });
+      expect(loginRes.status()).toBe(200);
+      const body = await loginRes.json();
+      expect(body.success).toBe(true);
+      expect(body.data.user.role).toBe('bank');
+      expect(body.data.user.bank_id).toBe(1);
+    });
+
+    test('bank user voit uniquement sa banque sur le dashboard', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: BANK_USER, password: BANK_PASS }
+      });
+      const { token } = (await loginRes.json()).data;
+
+      const dashRes = await request.get(`${API_BASE}/api/dashboard`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      expect(dashRes.status()).toBe(200);
+      const body = await dashRes.json();
+      expect(body.data.totalBanks).toBe(1);
+    });
+
+    test('bank user ne peut pas acceder a la liste des banques', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: BANK_USER, password: BANK_PASS }
+      });
+      const { token } = (await loginRes.json()).data;
+
+      const banksRes = await request.get(`${API_BASE}/api/banks`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const banks = (await banksRes.json()).data || [];
+      expect(banks.length).toBeLessThanOrEqual(1);
+    });
+
+    test('bank user peut uploader un CSV pour sa banque', async ({ request }) => {
+      const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: BANK_USER, password: BANK_PASS }
+      });
+      const { token } = (await loginRes.json()).data;
+
+      const csvContent = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n' +
+        'fr;MARIE;LECLERC;4741000000000006;12/28;21624080852;otp;update';
+
+      const response = await request.post(`${API_BASE}/api/processing/upload`, {
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: {
+          bankId: '1',
+          file: { name: 'bank_test.csv', mimeType: 'text/csv', buffer: Buffer.from(csvContent) }
+        }
+      });
+      expect(response.status()).toBe(200);
+      const body = await response.json();
+      expect(body.success).toBe(true);
+    });
+
+  });
+
+  test.describe('Mot de passe oublié - Forgot Password', () => {
+
+    test('affiche le lien mot de passe oublié sur la page login', async ({ page }) => {
+      await page.goto('/login');
+      await expect(page.locator('text=Mot de passe oubli')).toBeVisible();
+    });
+
+    test('affiche la page forgot-password', async ({ page }) => {
+      await page.goto('/login');
+      await page.locator('text=Mot de passe oubli').click();
+      await expect(page.locator('h1')).toContainText('Mot de passe oubli', { timeout: 10000 });
+    });
+
+    test('soumet forgot-password avec email valide', async ({ page }) => {
+      await page.goto('/forgot-password');
+      await page.fill('input[type="email"]', 'admin@example.com');
+      await page.locator('button[type="submit"]').click({ force: true });
+      await expect(page.locator('text=envoy')).toBeVisible({ timeout: 10000 });
+    });
+
+    test('API forgot-password repond identique email existe ou pas', async ({ request }) => {
+      const existingEmail = await request.post(`${API_BASE}/api/auth/forgot-password`, {
+        data: { email: 'admin@example.com' }
+      });
+      const fakeEmail = await request.post(`${API_BASE}/api/auth/forgot-password`, {
+        data: { email: 'nobody@nonexistent.com' }
+      });
+      const body1 = await existingEmail.json();
+      const body2 = await fakeEmail.json();
+      expect(body1.message).toEqual(body2.message);
     });
 
   });
