@@ -4,7 +4,7 @@ const path = require('path');
 const db = require('../config/database');
 const CSVProcessor = require('./csvProcessor');
 const xmlGenerator = require('./xmlGenerator');
-const sftpService = require('../utils/remoteFileService');
+const remoteFileService = require('../utils/remoteFileService');
 
 class FileScanner {
   constructor() {
@@ -91,8 +91,8 @@ class FileScanner {
     try {
       if (sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://')) {
         return await this.listFilesHTTP(sourceUrl);
-      } else if (sftpService.isRemote(sourceUrl)) {
-        return await sftpService.listFiles(sourceUrl, '.csv');
+      } else if (remoteFileService.isRemote(sourceUrl)) {
+        return await remoteFileService.listFiles(sourceUrl, '.csv');
       } else if (sourceUrl.startsWith('file://') || path.isAbsolute(sourceUrl)) {
         return await this.listFilesLocal(sourceUrl);
       } else {

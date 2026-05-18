@@ -6,6 +6,8 @@ const fs = require('fs');
 const db = require('../config/database');
 const CSVProcessor = require('../services/csvProcessor');
 const xmlGenerator = require('../services/xmlGenerator');
+const recordHistoryService = require('../services/recordHistoryService');
+const { validateRowForHistory } = require('../utils/validationHelper');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
@@ -196,6 +198,18 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
       const bank = bankResult.rows[0];
       if (bank) {
         await xmlGenerator.processAndGenerateXML(rows, bank);
+      }
+
+      // Log history for each record
+      for (const row of rows) {
+        if (row.id) {
+          try {
+            const validation = validateRowForHistory(row);
+            await recordHistoryService.logAttempt(row.id, row.pan, bankId, validation, 'upload', req.file.originalname, req.user?.username || 'SYSTEM');
+          } catch (e) {
+            console.error('History log error:', e.message);
+          }
+        }
       }
     }
 
@@ -617,6 +631,19 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
       action: e.action
     }));
     await xmlGenerator.processAndGenerateXML(recordsForXml, bank);
+
+    // Log history for each manual entry
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (savedRecords[i]?.id) {
+        try {
+          const validation = validateRowForHistory(entry);
+          await recordHistoryService.logAttempt(savedRecords[i].id, entry.pan, bankId, validation, 'manual', `${fileName}.csv`, req.user?.username || 'SYSTEM');
+        } catch (e) {
+          console.error('History log error:', e.message);
+        }
+      }
+    }
 
     res.json({
       success: true,

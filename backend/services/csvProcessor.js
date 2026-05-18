@@ -6,7 +6,7 @@ const db = require('../config/database');
 const recordHistoryService = require('./recordHistoryService');
 const CSVValidator = require('../utils/csvValidator');
 const { validateRowForHistory } = require('../utils/validationHelper');
-const sftpService = require('../utils/remoteFileService');
+const remoteFileService = require('../utils/remoteFileService');
 
 class CSVProcessor {
   constructor() {
@@ -148,8 +148,8 @@ class CSVProcessor {
       });
     }
 
-    if (sftpService.isRemote(url)) {
-      await sftpService.copyToLocal(url, destPath);
+    if (remoteFileService.isRemote(url)) {
+      await remoteFileService.copyToLocal(url, destPath);
       return;
     }
 
@@ -427,8 +427,8 @@ class CSVProcessor {
     try {
       console.log(`Checking for new files at: ${sourceUrl}`);
 
-      if (sftpService.isRemote(sourceUrl)) {
-        const files = await sftpService.listFiles(sourceUrl, '.csv');
+      if (remoteFileService.isRemote(sourceUrl)) {
+        const files = await remoteFileService.listFiles(sourceUrl, '.csv');
         return files;
       }
 
@@ -456,8 +456,8 @@ class CSVProcessor {
    * Move file to destination (local filesystem)
    */
   async moveFileToDestination(sourceUrl, destinationUrl, fileName) {
-    const isSftpSource = sftpService.isRemote(sourceUrl);
-    const isSftpDest = sftpService.isRemote(destinationUrl);
+    const isSftpSource = remoteFileService.isRemote(sourceUrl);
+    const isSftpDest = remoteFileService.isRemote(destinationUrl);
 
     console.log(`Moving file from ${sourceUrl}/${fileName} to ${destinationUrl}/${fileName}`);
 
@@ -467,12 +467,12 @@ class CSVProcessor {
         const fullDestUrl = `${destinationUrl}/${fileName}`;
 
         if (isSftpSource && isSftpDest) {
-          await sftpService.moveFile(fullSourceUrl, fullDestUrl);
+          await remoteFileService.moveFile(fullSourceUrl, fullDestUrl);
         } else if (isSftpSource) {
-          await sftpService.copyToLocal(fullSourceUrl, path.join(destinationUrl.replace('file://', ''), fileName));
-          await sftpService.deleteFile(fullSourceUrl);
+          await remoteFileService.copyToLocal(fullSourceUrl, path.join(destinationUrl.replace('file://', ''), fileName));
+          await remoteFileService.deleteFile(fullSourceUrl);
         } else {
-          await sftpService.copyFromLocal(path.join(sourceUrl.replace('file://', ''), fileName), fullDestUrl);
+          await remoteFileService.copyFromLocal(path.join(sourceUrl.replace('file://', ''), fileName), fullDestUrl);
           fs.unlinkSync(path.join(sourceUrl.replace('file://', ''), fileName));
         }
       } else {
@@ -500,8 +500,8 @@ class CSVProcessor {
   async archiveOldFile(sourceUrl, archiveUrl, fileName) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const oldFileName = `OLD_${timestamp}_${fileName}`;
-    const isSftpSource = sftpService.isRemote(sourceUrl);
-    const isSftpArchive = sftpService.isRemote(archiveUrl);
+    const isSftpSource = remoteFileService.isRemote(sourceUrl);
+    const isSftpArchive = remoteFileService.isRemote(archiveUrl);
 
     console.log(`Archiving file from ${sourceUrl}/${fileName} to ${archiveUrl}/${oldFileName}`);
 
@@ -511,12 +511,12 @@ class CSVProcessor {
         const fullArchiveUrl = `${archiveUrl}/${oldFileName}`;
 
         if (isSftpSource && isSftpArchive) {
-          if (sftpService.isRemote(fullSourceUrl)) {
+          if (remoteFileService.isRemote(fullSourceUrl)) {
             let sftp;
             try {
-              sftp = await sftpService.connect(fullSourceUrl);
-              const srcConfig = sftpService.parseUrl(fullSourceUrl);
-              const dstConfig = sftpService.parseUrl(fullArchiveUrl);
+              sftp = await remoteFileService.connect(fullSourceUrl);
+              const srcConfig = remoteFileService.parseUrl(fullSourceUrl);
+              const dstConfig = remoteFileService.parseUrl(fullArchiveUrl);
               const destDir = dstConfig.remotePath.substring(0, dstConfig.remotePath.lastIndexOf('/') + 1);
               try { await sftp.mkdir(destDir, true); } catch {}
               const exists = await sftp.exists(srcConfig.remotePath).catch(() => false);
@@ -531,11 +531,11 @@ class CSVProcessor {
             }
           }
         } else if (isSftpSource) {
-          await sftpService.copyToLocal(fullSourceUrl, '/tmp/' + oldFileName);
+          await remoteFileService.copyToLocal(fullSourceUrl, '/tmp/' + oldFileName);
         } else {
           const localPath = path.join(sourceUrl.replace('file://', ''), fileName);
           if (fs.existsSync(localPath)) {
-            await sftpService.copyFromLocal(localPath, fullArchiveUrl);
+            await remoteFileService.copyFromLocal(localPath, fullArchiveUrl);
           }
         }
       } else {
@@ -556,34 +556,6 @@ class CSVProcessor {
     } catch (error) {
       console.error(`Failed to move file: ${error.message}`);
       return { success: false, destinationPath: `${destinationUrl}/${fileName}` };
-    }
-  }
-
-  /**
-   * Archive old file (local filesystem)
-   */
-  async archiveOldFile(sourceUrl, archiveUrl, fileName) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const oldFileName = `OLD_${timestamp}_${fileName}`;
-    const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
-    const archivePath = archiveUrl.startsWith('file://') ? archiveUrl.slice(7) : archiveUrl;
-
-    console.log(`Archiving file from ${sourcePath}/${fileName} to ${archivePath}/${oldFileName}`);
-
-    try {
-      if (fs.existsSync(sourcePath)) {
-        if (!fs.existsSync(archivePath)) {
-          fs.mkdirSync(archivePath, { recursive: true });
-        }
-        fs.cpSync(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
-      }
-      return {
-        success: true,
-        archivePath: `${archiveUrl}/${oldFileName}`
-      };
-    } catch (error) {
-      console.error(`Failed to archive file: ${error.message}`);
-      return { success: false, archivePath: `${archiveUrl}/${oldFileName}` };
     }
   }
 

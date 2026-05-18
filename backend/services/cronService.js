@@ -5,7 +5,7 @@ const db = require('../config/database');
 const FileScanner = require('./fileScanner');
 const enrollmentService = require('./enrollmentService');
 const emailService = require('./emailService');
-const sftpService = require('../utils/remoteFileService');
+const remoteFileService = require('../utils/remoteFileService');
 
 class CronService {
   constructor() {
@@ -16,6 +16,8 @@ class CronService {
     this.lastScanTime = null;
     this.schedule = process.env.CRON_SCHEDULE || '*/5 * * * *';
     this.enabled = true;
+    this.dailyReportSchedule = process.env.REPORT_CRON || '0 8 * * *';
+    this.dailyReportEnabled = process.env.REPORT_ENABLED !== 'false';
   }
 
   async init() {
@@ -107,13 +109,13 @@ class CronService {
 
     if (!bank.enrollment_report_url) return result;
 
-    const isSftp = sftpService.isRemote(bank.enrollment_report_url);
+    const isSftp = remoteFileService.isRemote(bank.enrollment_report_url);
 
     try {
       let xmlFiles = [];
 
       if (isSftp) {
-        xmlFiles = await sftpService.listFiles(bank.enrollment_report_url, '.xml');
+        xmlFiles = await remoteFileService.listFiles(bank.enrollment_report_url, '.xml');
       } else {
         let dirPath = bank.enrollment_report_url.replace('file://', '');
         try {
@@ -143,7 +145,7 @@ class CronService {
 
           if (isSftp) {
             const fileUrl = `${bank.enrollment_report_url}/${fileName}`;
-            const xmlContent = await sftpService.readFile(fileUrl);
+            const xmlContent = await remoteFileService.readFile(fileUrl);
             processResult = await enrollmentService.processEnrollmentReportFromContent(xmlContent, bank.id, fileName);
           } else {
             const dirPath = bank.enrollment_report_url.replace('file://', '');
@@ -157,7 +159,7 @@ class CronService {
             if (isSftp) {
               const processedUrl = `${bank.enrollment_report_url}/processed/${fileName}`;
               const fileUrl = `${bank.enrollment_report_url}/${fileName}`;
-              await sftpService.moveFile(fileUrl, processedUrl);
+              await remoteFileService.moveFile(fileUrl, processedUrl);
             } else {
               const dirPath = bank.enrollment_report_url.replace('file://', '');
               const filePath = path.join(dirPath, fileName);
@@ -215,11 +217,17 @@ class CronService {
 
   startReportTask() {
     if (this.reportTask) { this.reportTask.stop(); this.reportTask = null; }
-    this.reportTask = cron.schedule('0 8 * * *', async () => {
+    if (!this.dailyReportEnabled) { console.log('🔴 Daily reports disabled'); return; }
+    if (!cron.validate(this.dailyReportSchedule)) { console.error('Invalid report cron:', this.dailyReportSchedule); return; }
+    this.reportTask = cron.schedule(this.dailyReportSchedule, async () => {
       console.log('Sending daily reports...');
       try { await emailService.sendAllDailyReports(new Date()); } catch (e) { console.error('Report error:', e); }
     }, { scheduled: true, timezone: process.env.TZ || 'Africa/Tunis' });
-    console.log('✅ Daily report cron started');
+    console.log(`✅ Daily report cron started: ${this.dailyReportSchedule}`);
+  }
+
+  startDailyReportTask() {
+    this.startReportTask();
   }
 
   getStatus() {
