@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
-const { checkRole } = require('../middleware/roleMiddleware');
+const { checkRole, filterByBank } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
@@ -12,16 +12,23 @@ const generateApiKey = () => {
 };
 
 // GET - Liste des API Keys
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
-    const result = await db.query(
-      `SELECT ak.*, b.name as bank_name, b.code as bank_code,
+    let query = `
+      SELECT ak.*, b.name as bank_name, b.code as bank_code,
         (SELECT COUNT(*) FROM api_logs al WHERE al.api_key_id = ak.id) as total_calls,
         (SELECT COUNT(*) FROM api_logs al WHERE al.api_key_id = ak.id AND al.created_at > NOW() - INTERVAL '24 hours') as calls_today
-       FROM api_keys ak
-       LEFT JOIN banks b ON ak.bank_id = b.id
-       ORDER BY ak.created_at DESC`
-    );
+      FROM api_keys ak
+      LEFT JOIN banks b ON ak.bank_id = b.id
+    `;
+    const params = [];
+    if (req.query.bankId) {
+      query += ' WHERE ak.bank_id = $1';
+      params.push(parseInt(req.query.bankId));
+    }
+    query += ' ORDER BY ak.created_at DESC';
+    
+    const result = await db.query(query, params);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error('Get API keys error:', error);

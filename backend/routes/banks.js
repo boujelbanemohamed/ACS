@@ -1,12 +1,12 @@
 const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
-const { checkRole } = require('../middleware/roleMiddleware');
+const { checkRole, filterByBank } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Get all banks
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { bankId } = req.query;
     
