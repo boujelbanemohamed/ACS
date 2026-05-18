@@ -9,16 +9,14 @@ const router = express.Router();
 // Fonction d'audit log (enregistre les actions utilisateurs)
 const auditLog = async (userId, action, tableName, recordId, oldData, newData, req) => {
   try {
-    // Log simple en console pour le moment
-    console.log('[AUDIT]', {
-      userId,
-      action,
-      tableName,
-      recordId,
-      timestamp: new Date().toISOString(),
-      ip: req?.ip || 'unknown'
-    });
-    // TODO: Implémenter la persistance en base de données si nécessaire
+    await db.query(
+      `INSERT INTO audit_logs (user_id, username, action, table_name, record_id, old_data, new_data, ip_address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [userId, req?.user?.username || 'SYSTEM', action, tableName, recordId,
+       oldData ? JSON.stringify(oldData) : null,
+       newData ? JSON.stringify(newData) : null,
+       req?.ip || 'unknown']
+    );
   } catch (error) {
     console.error('Audit log error:', error);
   }

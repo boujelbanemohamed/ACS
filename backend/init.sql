@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS file_logs (
     valid_rows INTEGER DEFAULT 0,
     invalid_rows INTEGER DEFAULT 0,
     duplicate_rows INTEGER DEFAULT 0,
+    updated_rows INTEGER DEFAULT 0,
     error_details TEXT,
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -232,6 +233,24 @@ CREATE TABLE IF NOT EXISTS file_history (
     status VARCHAR(50),
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Audit logs for user actions
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username VARCHAR(100),
+    action VARCHAR(50) NOT NULL,
+    table_name VARCHAR(100),
+    record_id INTEGER,
+    old_data JSONB,
+    new_data JSONB,
+    ip_address VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
 
 -- XML generation logs (alternative name used in some queries)
 CREATE TABLE IF NOT EXISTS xml_generation_logs (

@@ -37,5 +37,8 @@ tmp/
 temp/
 *.tmp
 
+# Artifact file:// directories
+file:
+
 # Production
 frontend/build/

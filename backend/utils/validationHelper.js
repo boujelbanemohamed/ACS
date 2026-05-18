@@ -37,33 +37,36 @@ function validateRowForHistory(row) {
   
   // Language
   const validLanguages = ['fr', 'en', 'ar'];
-  const languageValid = row.language && validLanguages.includes(row.language.toLowerCase());
+  const hasLanguage = !!(row.language && row.language.trim());
+  const languageValid = hasLanguage && validLanguages.includes(row.language.toLowerCase());
   results.push(createFieldValidation(
     'language',
     row.language,
-    languageValid,
+    !!languageValid,
     !languageValid ? 'INVALID' : null,
     !languageValid ? `Valeur "${row.language}" non reconnue. Attendu: fr, en, ar` : null
   ));
   
   // FirstName
-  const firstNameValid = row.firstName && row.firstName.trim().length >= 2 && row.firstName.trim().length <= 255;
+  const hasFirstName = !!(row.firstName && row.firstName.trim());
+  const firstNameValid = hasFirstName && row.firstName.trim().length >= 2 && row.firstName.trim().length <= 255;
   results.push(createFieldValidation(
     'firstName',
     row.firstName,
-    firstNameValid,
-    !row.firstName ? 'MISSING' : !firstNameValid ? 'FORMAT' : null,
-    !row.firstName ? 'Prénom requis' : !firstNameValid ? 'Prénom doit contenir 2-255 caractères' : null
+    !!firstNameValid,
+    !hasFirstName ? 'MISSING' : !firstNameValid ? 'FORMAT' : null,
+    !hasFirstName ? 'Prénom requis' : !firstNameValid ? 'Prénom doit contenir 2-255 caractères' : null
   ));
   
   // LastName
-  const lastNameValid = row.lastName && row.lastName.trim().length >= 2 && row.lastName.trim().length <= 255;
+  const hasLastName = !!(row.lastName && row.lastName.trim());
+  const lastNameValid = hasLastName && row.lastName.trim().length >= 2 && row.lastName.trim().length <= 255;
   results.push(createFieldValidation(
     'lastName',
     row.lastName,
-    lastNameValid,
-    !row.lastName ? 'MISSING' : !lastNameValid ? 'FORMAT' : null,
-    !row.lastName ? 'Nom requis' : !lastNameValid ? 'Nom doit contenir 2-255 caractères' : null
+    !!lastNameValid,
+    !hasLastName ? 'MISSING' : !lastNameValid ? 'FORMAT' : null,
+    !hasLastName ? 'Nom requis' : !lastNameValid ? 'Nom doit contenir 2-255 caractères' : null
   ));
   
   // PAN
@@ -147,26 +150,28 @@ function validateRowForHistory(row) {
   
   // Behaviour
   const validBehaviours = ['otp', 'sms', 'email'];
-  const behaviourValue = (row.behaviour || '').toLowerCase();
-  const behaviourValid = behaviourValue && validBehaviours.includes(behaviourValue);
+  const hasBehaviour = !!(row.behaviour && row.behaviour.trim());
+  const behaviourValue = hasBehaviour ? row.behaviour.toLowerCase() : '';
+  const behaviourValid = hasBehaviour && validBehaviours.includes(behaviourValue);
   results.push(createFieldValidation(
     'behaviour',
     row.behaviour,
-    behaviourValid,
-    !row.behaviour ? 'MISSING' : !behaviourValid ? 'INVALID' : null,
-    !row.behaviour ? 'Comportement requis' : !behaviourValid ? `Valeur "${row.behaviour}" non reconnue. Attendu: otp, sms, email` : null
+    !!behaviourValid,
+    !hasBehaviour ? 'MISSING' : !behaviourValid ? 'INVALID' : null,
+    !hasBehaviour ? 'Comportement requis' : !behaviourValid ? `Valeur "${row.behaviour}" non reconnue. Attendu: otp, sms, email` : null
   ));
   
   // Action
   const validActions = ['update', 'create', 'delete'];
-  const actionValue = (row.action || '').toLowerCase();
-  const actionValid = actionValue && validActions.includes(actionValue);
+  const hasAction = !!(row.action && row.action.trim());
+  const actionValue = hasAction ? row.action.toLowerCase() : '';
+  const actionValid = hasAction && validActions.includes(actionValue);
   results.push(createFieldValidation(
     'action',
     row.action,
-    actionValid,
-    !row.action ? 'MISSING' : !actionValid ? 'INVALID' : null,
-    !row.action ? 'Action requise' : !actionValid ? `Valeur "${row.action}" non reconnue. Attendu: update, create, delete` : null
+    !!actionValid,
+    !hasAction ? 'MISSING' : !actionValid ? 'INVALID' : null,
+    !hasAction ? 'Action requise' : !actionValid ? `Valeur "${row.action}" non reconnue. Attendu: update, create, delete` : null
   ));
   
   return {

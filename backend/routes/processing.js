@@ -96,6 +96,18 @@ router.post('/process-url', authMiddleware, async (req, res) => {
         if (savedRecords[i]) result.validRecords[i].id = savedRecords[i].id;
       }
 
+      // Log history for each record
+      for (let i = 0; i < result.validRecords.length; i++) {
+        if (savedRecords[i]?.id) {
+          try {
+            const validation = validateRowForHistory(result.validRecords[i]);
+            await recordHistoryService.logAttempt(savedRecords[i].id, result.validRecords[i].pan, bankId, validation, 'url', fileName, req.user?.username || 'SYSTEM');
+          } catch (e) {
+            console.error('History log error:', e.message);
+          }
+        }
+      }
+
       // Generate XML file using centralized service
       const xmlResult = await xmlGenerator.processAndGenerateXML(result.validRecords, bank);
       if (xmlResult && xmlResult.success) {
@@ -772,6 +784,50 @@ router.post('/call-api', authMiddleware, async (req, res) => {
     );
 
     const fileLogId = fileLogResult.rows[0].id;
+
+    // Save validated records and log history
+    if (mappedRows.length > 0) {
+      try {
+        const bankResult = await db.query('SELECT * FROM banks WHERE id = $1', [bankId]);
+        const bank = bankResult.rows[0];
+        const fileName = 'API_' + new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-') + '.json';
+
+        const savedRecords = await csvProcessor.saveValidatedRecords(bankId, mappedRows, fileName);
+        for (let i = 0; i < mappedRows.length; i++) {
+          if (savedRecords[i]) mappedRows[i].id = savedRecords[i].id;
+        }
+
+        // Log history
+        for (let i = 0; i < mappedRows.length; i++) {
+          if (savedRecords[i]?.id) {
+            try {
+              const validation = validateRowForHistory(mappedRows[i]);
+              await recordHistoryService.logAttempt(savedRecords[i].id, mappedRows[i].pan, bankId, validation, 'api', fileName, req.user?.username || 'SYSTEM');
+            } catch (e) {
+              console.error('History log error:', e.message);
+            }
+          }
+        }
+
+        // Generate XML
+        if (bank) {
+          const recordsForXml = mappedRows.map(r => ({
+            id: r.id, pan: r.pan, phone: r.phone, firstName: r.firstName,
+            lastName: r.lastName, expiry: r.expiry, language: r.language,
+            behaviour: r.behaviour, action: r.action
+          }));
+          const xmlResult = await xmlGenerator.processAndGenerateXML(recordsForXml, bank);
+          if (xmlResult && xmlResult.success) {
+            await db.query(
+              'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
+              [bankId, fileLogId, xmlResult.fileName, xmlResult.filePath, mappedRows.length, xmlResult.xmlEntriesCount, 'success']
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Save records / history error:', e.message);
+      }
+    }
 
     res.json({
       success: true,
