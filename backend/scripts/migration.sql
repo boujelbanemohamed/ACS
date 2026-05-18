@@ -1,7 +1,10 @@
--- Migration: add updated_rows column to file_logs
+-- Migration: add reset_token fields to users + create audit_logs if missing
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP;
+
+-- Ensure audit_logs and updated_rows are present
 ALTER TABLE file_logs ADD COLUMN IF NOT EXISTS updated_rows INTEGER DEFAULT 0;
 
--- Migration: create audit_logs table
 CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,

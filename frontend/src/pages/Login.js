@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { LogIn, AlertCircle } from 'lucide-react';
 import './Login.css';
@@ -89,6 +89,12 @@ const Login = () => {
           >
             {loading ? 'Connexion...' : 'Se connecter'}
           </button>
+
+          <div style={{ textAlign: 'center', marginTop: '12px' }}>
+            <Link to="/forgot-password" style={{ color: '#2563eb', textDecoration: 'none', fontSize: '14px' }}>
+              Mot de passe oublié ?
+            </Link>
+          </div>
         </form>
 
         {process.env.REACT_APP_SHOW_DEFAULT_CREDENTIALS === 'true' && (

@@ -1,7 +1,9 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const db = require('../config/database');
+const emailService = require('../services/emailService');
 
 const { authSchemas, validate } = require('../utils/validators');
 
@@ -79,6 +81,91 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
       message: 'Erreur lors de la connexion',
       error: error.message
     });
+  }
+});
+
+// Mot de passe oublié - génération du token
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email requis' });
+    }
+
+    const userResult = await db.query('SELECT id, username, email FROM users WHERE email = $1 AND is_active = true', [email]);
+
+    if (userResult.rows.length === 0) {
+      return res.json({ success: true, message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
+    }
+
+    const user = userResult.rows[0];
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 3600000);
+
+    await db.query(
+      'UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3',
+      [resetToken, expiresAt, user.id]
+    );
+
+    const resetUrl = `${req.protocol}://${req.get('host')}/reset-password?token=${resetToken}`;
+
+    const htmlContent = `
+      <h2>Réinitialisation de mot de passe</h2>
+      <p>Bonjour ${user.username},</p>
+      <p>Vous avez demandé la réinitialisation de votre mot de passe.</p>
+      <p>Cliquez sur le lien ci-dessous pour créer un nouveau mot de passe :</p>
+      <p><a href="${resetUrl}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;">Réinitialiser mon mot de passe</a></p>
+      <p>Ce lien expire dans 1 heure.</p>
+      <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+      <hr>
+      <p style="color:#666;font-size:12px;">ACS Banking System</p>
+    `;
+
+    const textContent = `Réinitialisation de mot de passe\n\nBonjour ${user.username},\n\nVous avez demandé la réinitialisation de votre mot de passe.\n\nCliquez sur ce lien : ${resetUrl}\n\nCe lien expire dans 1 heure.\n\nACS Banking System`;
+
+    await emailService.sendEmail(user.email, 'Réinitialisation de mot de passe - ACS Banking', htmlContent, textContent);
+
+    res.json({ success: true, message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de la demande de réinitialisation' });
+  }
+});
+
+// Réinitialisation du mot de passe
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ success: false, message: 'Token et nouveau mot de passe requis' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 6 caractères' });
+    }
+
+    const userResult = await db.query(
+      'SELECT id FROM users WHERE reset_token = $1 AND reset_token_expires > NOW() AND is_active = true',
+      [token]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({ success: false, message: 'Token invalide ou expiré' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await db.query(
+      'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
+      [hashedPassword, userResult.rows[0].id]
+    );
+
+    res.json({ success: true, message: 'Mot de passe réinitialisé avec succès' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de la réinitialisation du mot de passe' });
   }
 });
 

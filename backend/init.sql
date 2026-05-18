@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(20),
     is_active BOOLEAN DEFAULT true,
     last_login TIMESTAMP,
+    reset_token VARCHAR(255),
+    reset_token_expires TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
