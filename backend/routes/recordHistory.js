@@ -7,6 +7,7 @@ const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { filterByBank } = require('../middleware/roleMiddleware');
 const recordHistoryService = require('../services/recordHistoryService');
+const { decrypt, hashPan } = require('../services/encryptionService');
 
 const router = express.Router();
 
@@ -184,9 +185,11 @@ router.get('/pan-lookup', authMiddleware, async (req, res) => {
       });
     }
     
+    const panHash = hashPan(pan);
+    
     let query = `
       SELECT DISTINCT 
-        rh.pan,
+        rh.pan_hash,
         rh.bank_id,
         b.code as bank_code,
         b.name as bank_name,
@@ -195,10 +198,10 @@ router.get('/pan-lookup', authMiddleware, async (req, res) => {
         MAX(CASE WHEN rh.status = 'SUCCESS' THEN 1 ELSE 0 END) as has_success
       FROM record_history rh
       JOIN banks b ON rh.bank_id = b.id
-      WHERE rh.pan LIKE $1
+      WHERE rh.pan_hash = $1
     `;
     
-    const params = [`%${pan}%`];
+    const params = [panHash];
     let paramCount = 2;
     
     if (bankId) {
@@ -210,7 +213,7 @@ router.get('/pan-lookup', authMiddleware, async (req, res) => {
     }
     
     query += `
-      GROUP BY rh.pan, rh.bank_id, b.code, b.name
+      GROUP BY rh.pan_hash, rh.bank_id, b.code, b.name
       ORDER BY last_attempt DESC
       LIMIT 20
     `;
@@ -221,6 +224,7 @@ router.get('/pan-lookup', authMiddleware, async (req, res) => {
       success: true,
       data: result.rows.map(row => ({
         ...row,
+        pan: pan,
         status: row.has_success ? 'SUCCESS' : 'PENDING'
       }))
     });
@@ -248,7 +252,7 @@ router.get('/corrections', authMiddleware, async (req, res) => {
     
     let query = `
       SELECT 
-        rh.pan,
+        rh.pan_hash,
         rh.bank_id,
         b.code as bank_code,
         b.name as bank_name,
@@ -273,7 +277,7 @@ router.get('/corrections', authMiddleware, async (req, res) => {
     }
     
     query += `
-      GROUP BY rh.pan, rh.bank_id, b.code, b.name
+      GROUP BY rh.pan_hash, rh.bank_id, b.code, b.name
       HAVING COUNT(*) > 1
       ORDER BY last_attempt DESC
       LIMIT $${paramCount} OFFSET $${paramCount + 1}
@@ -285,6 +289,8 @@ router.get('/corrections', authMiddleware, async (req, res) => {
     // Calculer le délai de correction pour chaque entrée
     const data = result.rows.map(row => ({
       ...row,
+      pan_hash: row.pan_hash,
+      pan: row.pan_hash ? '(chiffré)' : null,
       correction_delay_hours: row.success_date 
         ? Math.round((new Date(row.success_date) - new Date(row.first_attempt)) / (1000 * 60 * 60) * 10) / 10
         : null,

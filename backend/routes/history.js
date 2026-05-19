@@ -71,8 +71,14 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     }
 
     if (status) {
-      query += ' AND fl.status = $' + paramCount;
-      params.push(status);
+      const statuses = status.split(',');
+      if (statuses.length > 1) {
+        query += ' AND fl.status = ANY($' + paramCount + '::text[])';
+        params.push(statuses);
+      } else {
+        query += ' AND fl.status = $' + paramCount;
+        params.push(status);
+      }
       paramCount++;
     }
 
@@ -110,8 +116,14 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     }
 
     if (status) {
-      countQuery += ' AND fl.status = $' + countParamCount;
-      countParams.push(status);
+      const statuses = status.split(',');
+      if (statuses.length > 1) {
+        countQuery += ' AND fl.status = ANY($' + countParamCount + '::text[])';
+        countParams.push(statuses);
+      } else {
+        countQuery += ' AND fl.status = $' + countParamCount;
+        countParams.push(status);
+      }
       countParamCount++;
     }
 

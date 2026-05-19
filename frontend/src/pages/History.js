@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Clock, Upload, Globe, Edit3, CheckCircle, XCircle, AlertTriangle, FileText, FileCode, Download, Eye, RefreshCw, Filter, ChevronDown, ChevronUp, ExternalLink, Archive } from 'lucide-react';
+import { Clock, Upload, Globe, Edit3, CheckCircle, XCircle, AlertTriangle, FileText, FileCode, Download, Eye, RefreshCw, Filter, ChevronDown, ChevronUp, Archive } from 'lucide-react';
 import api from '../services/api';
 import './History.css';
 
@@ -10,7 +10,7 @@ const History = () => {
   const [stats, setStats] = useState(null);
   const [banks, setBanks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedRow, setExpandedRow] = useState(null);
+  const [expandedRows, setExpandedRows] = useState({});
   const [filters, setFilters] = useState({
     bankId: '',
     sourceType: '',
@@ -23,6 +23,7 @@ const History = () => {
     offset: 0,
     total: 0
   });
+  const [activeStat, setActiveStat] = useState(null);
 
   useEffect(() => {
     fetchBanks();
@@ -34,6 +35,7 @@ const History = () => {
   }, [filters, pagination.offset]);
 
   const handleResetFilters = () => {
+    setActiveStat(null);
     setFilters({
       bankId: '',
       sourceType: '',
@@ -42,6 +44,39 @@ const History = () => {
       dateTo: ''
     });
     setPagination(prev => ({ ...prev, offset: 0 }));
+  };
+
+  const handleStatClick = (stat) => {
+    if (activeStat === stat) {
+      setActiveStat(null);
+      setPagination(prev => ({ ...prev, offset: 0 }));
+      setFilters(prev => ({ ...prev, sourceType: '', status: '' }));
+      return;
+    }
+    setActiveStat(stat);
+    setPagination(prev => ({ ...prev, offset: 0 }));
+    switch (stat) {
+      case 'total':
+        setFilters({ bankId: filters.bankId, sourceType: '', status: '', dateFrom: '', dateTo: '' });
+        break;
+      case 'upload':
+        setFilters(prev => ({ ...prev, sourceType: 'upload', status: '' }));
+        break;
+      case 'url':
+        setFilters(prev => ({ ...prev, sourceType: 'url', status: '' }));
+        break;
+      case 'manual':
+        setFilters(prev => ({ ...prev, sourceType: 'manual', status: '' }));
+        break;
+      case 'success':
+        setFilters(prev => ({ ...prev, sourceType: '', status: 'success' }));
+        break;
+      case 'error':
+        setFilters(prev => ({ ...prev, sourceType: '', status: 'error,validation_error' }));
+        break;
+      default:
+        break;
+    }
   };
 
   const fetchBanks = async () => {
@@ -54,7 +89,6 @@ const History = () => {
       const banksData = response.data.data || [];
       setBanks(banksData);
       
-      // Auto-sélectionner la banque pour les utilisateurs banque
       if (user?.role === 'bank' && user?.bank_id) {
         setFilters(prev => ({ ...prev, bankId: user.bank_id.toString() }));
       }
@@ -84,12 +118,13 @@ const History = () => {
         limit: pagination.limit,
         offset: pagination.offset
       };
-      // Forcer le bankId pour les utilisateurs banque
       if (user?.role === 'bank' && user?.bank_id) {
         params.bankId = user.bank_id.toString();
       }
       const response = await api.get('/history', { params });
-      setHistory(response.data.data || []);
+      const items = response.data.data || [];
+      setHistory(items);
+      setExpandedRows({});
       setPagination(prev => ({
         ...prev,
         total: response.data.pagination?.total || 0
@@ -103,10 +138,10 @@ const History = () => {
 
   const getSourceTypeIcon = (type) => {
     switch (type) {
-      case 'upload': return <Upload size={16} className="source-icon upload" />;
-      case 'url': return <Globe size={16} className="source-icon url" />;
-      case 'manual': return <Edit3 size={16} className="source-icon manual" />;
-      default: return <FileText size={16} className="source-icon" />;
+      case 'upload': return <Upload size={14} className="source-icon upload" />;
+      case 'url': return <Globe size={14} className="source-icon url" />;
+      case 'manual': return <Edit3 size={14} className="source-icon manual" />;
+      default: return <FileText size={14} className="source-icon" />;
     }
   };
 
@@ -121,15 +156,15 @@ const History = () => {
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      success: { icon: <CheckCircle size={14} />, label: 'Succes', class: 'success' },
-      error: { icon: <XCircle size={14} />, label: 'Erreur', class: 'error' },
-      validation_error: { icon: <AlertTriangle size={14} />, label: 'Erreur validation', class: 'warning' },
-      pending: { icon: <Clock size={14} />, label: 'En attente', class: 'pending' },
-      processing: { icon: <RefreshCw size={14} className="spin" />, label: 'En cours', class: 'processing' }
+      success: { icon: <CheckCircle size={14} />, label: 'Succes', class: 'badge-success' },
+      error: { icon: <XCircle size={14} />, label: 'Erreur', class: 'badge-danger' },
+      validation_error: { icon: <AlertTriangle size={14} />, label: 'Erreur validation', class: 'badge-warning' },
+      pending: { icon: <Clock size={14} />, label: 'En attente', class: 'badge-info' },
+      processing: { icon: <RefreshCw size={14} className="spin" />, label: 'En cours', class: 'badge-info' }
     };
     const config = statusConfig[status] || statusConfig.pending;
     return (
-      <span className={'status-badge ' + config.class}>
+      <span className={'badge ' + config.class}>
         {config.icon} {config.label}
       </span>
     );
@@ -137,13 +172,13 @@ const History = () => {
 
   const getStepStatus = (status) => {
     if (status === 'success' || status === 'completed') {
-      return <CheckCircle size={18} className="step-icon success" />;
+      return <CheckCircle size={16} className="step-icon success" />;
     } else if (status === 'error' || status === 'failed') {
-      return <XCircle size={18} className="step-icon error" />;
+      return <XCircle size={16} className="step-icon error" />;
     } else if (status === 'pending' || !status) {
-      return <Clock size={18} className="step-icon pending" />;
+      return <Clock size={16} className="step-icon pending" />;
     }
-    return <AlertTriangle size={18} className="step-icon warning" />;
+    return <AlertTriangle size={16} className="step-icon warning" />;
   };
 
   const handleViewFile = async (fileName, type) => {
@@ -207,7 +242,7 @@ const History = () => {
   };
 
   const toggleExpand = (id) => {
-    setExpandedRow(expandedRow === id ? null : id);
+    setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const nextPage = () => {
@@ -221,54 +256,54 @@ const History = () => {
   return (
     <div className="history-page">
       <div className="page-header">
-        <h1><Clock size={28} /> Historique des Traitements</h1>
+        <h1><Clock size={24} /> Historique des Traitements</h1>
         <button className="btn btn-secondary" onClick={fetchHistory}>
-          <RefreshCw size={18} /> Actualiser
+          <RefreshCw size={16} /> Actualiser
         </button>
       </div>
 
       {stats && (
         <div className="stats-grid">
-          <div className="stat-card total">
-            <div className="stat-icon"><FileText size={24} /></div>
+          <div className={'stat-card total' + (activeStat === 'total' ? ' active' : '')} onClick={() => handleStatClick('total')}>
+            <div className="stat-icon"><FileText size={22} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.total || 0}</span>
-              <span className="stat-label">Total Traitements</span>
+              <span className="stat-label">Total</span>
             </div>
           </div>
-          <div className="stat-card upload">
-            <div className="stat-icon"><Upload size={24} /></div>
+          <div className={'stat-card upload' + (activeStat === 'upload' ? ' active' : '')} onClick={() => handleStatClick('upload')}>
+            <div className="stat-icon"><Upload size={22} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.upload_count || 0}</span>
               <span className="stat-label">Uploads</span>
             </div>
           </div>
-          <div className="stat-card url">
-            <div className="stat-icon"><Globe size={24} /></div>
+          <div className={'stat-card url' + (activeStat === 'url' ? ' active' : '')} onClick={() => handleStatClick('url')}>
+            <div className="stat-icon"><Globe size={22} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.url_count || 0}</span>
               <span className="stat-label">URL</span>
             </div>
           </div>
-          <div className="stat-card manual">
-            <div className="stat-icon"><Edit3 size={24} /></div>
+          <div className={'stat-card manual' + (activeStat === 'manual' ? ' active' : '')} onClick={() => handleStatClick('manual')}>
+            <div className="stat-icon"><Edit3 size={22} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.manual_count || 0}</span>
               <span className="stat-label">Manuel</span>
             </div>
           </div>
-          <div className="stat-card success">
-            <div className="stat-icon"><CheckCircle size={24} /></div>
+          <div className={'stat-card success' + (activeStat === 'success' ? ' active' : '')} onClick={() => handleStatClick('success')}>
+            <div className="stat-icon"><CheckCircle size={22} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.success_count || 0}</span>
               <span className="stat-label">Succes</span>
             </div>
           </div>
-          <div className="stat-card error">
-            <div className="stat-icon"><XCircle size={24} /></div>
+          <div className={'stat-card error' + (activeStat === 'error' ? ' active' : '')} onClick={() => handleStatClick('error')}>
+            <div className="stat-icon"><XCircle size={22} /></div>
             <div className="stat-info">
               <span className="stat-value">{stats.error_count || 0}</span>
-              <span className="stat-label">Fichiers en erreur</span>
+              <span className="stat-label">Erreurs</span>
             </div>
           </div>
         </div>
@@ -276,7 +311,7 @@ const History = () => {
 
       <div className="filters-section">
         <div className="filter-group">
-          <Filter size={18} />
+          <Filter size={16} />
           <select 
             value={filters.bankId} 
             onChange={(e) => setFilters({...filters, bankId: e.target.value})}
@@ -330,168 +365,179 @@ const History = () => {
           />
         </div>
         <button className="btn btn-secondary" onClick={handleResetFilters}>
-          <RefreshCw size={18} /> Reinitialiser
+          <RefreshCw size={14} /> Reinitialiser
         </button>
       </div>
 
       {loading ? (
-        <div className="loading"><RefreshCw size={32} className="spin" /> Chargement...</div>
+        <div className="loading"><RefreshCw size={24} className="spin" /> Chargement...</div>
       ) : (
         <>
-          <div className="history-list">
-            {history.length === 0 ? (
-              <div className="empty-state">
-                <Clock size={48} />
-                <p>Aucun historique trouve</p>
-              </div>
-            ) : (
-              history.map(item => (
-                <div key={item.id} className={'history-card ' + (item.status || 'pending')}>
-                  <div className="history-header" onClick={() => toggleExpand(item.id)}>
-                    <div className="history-main-info">
-                      <div className="source-type">
-                        {getSourceTypeIcon(item.source_type)}
-                        <span>{getSourceTypeLabel(item.source_type)}</span>
-                      </div>
-                      <div className="file-info">
-                        <span className="file-name">{item.file_name}</span>
-                        <span className="bank-badge">{item.bank_code}</span>
-                      </div>
-                    </div>
-                    <div className="process-status-indicators">
-                      <div className={'status-indicator ' + (item.original_path || item.file_name ? 'success' : 'pending')} title="Source (Input)">
-                        <Upload size={14} />
-                        <span>Input</span>
-                      </div>
-                      <div className={'status-indicator ' + (item.status === 'success' ? 'success' : (item.status === 'validation_error' ? 'warning' : (item.status === 'error' ? 'error' : 'pending')))} title="Validation">
-                        <CheckCircle size={14} />
-                        <span>Valid.</span>
-                      </div>
-                      <div className={'status-indicator ' + (item.valid_rows > 0 ? 'success' : 'pending')} title="Output CSV">
-                        <FileText size={14} />
-                        <span>CSV</span>
-                      </div>
-                      <div className={'status-indicator ' + (item.xml_file_name ? 'success' : 'pending')} title="XML">
-                        <FileCode size={14} />
-                        <span>XML</span>
-                      </div>
-                      <div className={'status-indicator ' + (item.archive_path ? 'success' : 'pending')} title="Archive">
-                        <Archive size={14} />
-                        <span>Arch.</span>
-                      </div>
-                    </div>
-                    <div className="history-meta">
-                      <span className="date">{new Date(item.processed_at).toLocaleString('fr-FR')}</span>
-                      <span className="rows-info">{item.valid_rows || 0}/{item.total_rows || 0} lignes</span>
-                      {expandedRow === item.id ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                    </div>
-                  </div>
-
-                  {expandedRow === item.id && (
-                    <div className="history-details">
-                      <div className="process-steps">
-                        <div className="step">
-                          <div className="step-header">
-                            {getStepStatus(item.status === 'success' || item.status === 'validation_error' ? 'success' : item.status)}
-                            <span className="step-title">1. Source (Input)</span>
+          <div className="table-container">
+            <table className="records-table">
+              <thead>
+                <tr>
+                  <th>Statut</th>
+                  <th>Banque</th>
+                  <th>Fichier</th>
+                  <th>Source</th>
+                  <th>Lignes</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.length === 0 ? (
+                  <tr><td colSpan="7" className="no-data">Aucun historique trouve</td></tr>
+                ) : (
+                  history.map((item, index) => (
+                    <React.Fragment key={item.id}>
+                      <tr 
+                        className={'history-row ' + (item.status || 'pending')}
+                        onClick={() => toggleExpand(item.id)}
+                      >
+                        <td className="status-cell">
+                          {getStatusBadge(item.status)}
+                        </td>
+                        <td>
+                          <span className="bank-badge">{item.bank_code}</span>
+                        </td>
+                        <td className="file-cell">{item.file_name}</td>
+                        <td>
+                          <span className="source-badge">
+                            {getSourceTypeIcon(item.source_type)}
+                            {getSourceTypeLabel(item.source_type)}
+                          </span>
+                        </td>
+                        <td className="rows-cell">{item.valid_rows || 0}/{item.total_rows || 0}</td>
+                        <td className="date-cell">
+                          {item.processed_at ? new Date(item.processed_at).toLocaleString('fr-FR') : '-'}
+                        </td>
+                        <td className="actions-cell">
+                          <div className="status-indicators" onClick={(e) => e.stopPropagation()}>
+                            <span className={'step-dot success ' + (item.original_path ? 'active' : '')} title="Input">
+                              <Upload size={12} />
+                            </span>
+                            <span className={'step-dot ' + (item.status === 'success' ? 'success' : item.status === 'validation_error' ? 'warning' : item.status === 'error' ? 'error' : '') + ' ' + (item.status ? 'active' : '')} title="Validation">
+                              <CheckCircle size={12} />
+                            </span>
+                            <span className={'step-dot success ' + (item.valid_rows > 0 ? 'active' : '')} title="CSV">
+                              <FileText size={12} />
+                            </span>
+                            <span className={'step-dot success ' + (item.xml_file_name ? 'active' : '')} title="XML">
+                              <FileCode size={12} />
+                            </span>
+                            <span className={'step-dot success ' + (item.archive_path ? 'active' : '')} title="Archive">
+                              <Archive size={12} />
+                            </span>
                           </div>
-                          <div className="step-content">
-                            <p><strong>Fichier:</strong> {item.file_name}</p>
-                            <p><strong>Chemin:</strong> {item.original_path || 'N/A'}</p>
-                            <p><strong>Lignes totales:</strong> {item.total_rows || 0}</p>
-                            <div className="step-actions">
-                              <button className="btn btn-sm" onClick={() => handleViewFile(item.file_name, 'csv')}>
-                                <Eye size={14} /> Voir
-                              </button>
-                              <button className="btn btn-sm" onClick={() => handleDownloadFile(item.file_name, 'csv')}>
-                                <Download size={14} /> Telecharger
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="step">
-                          <div className="step-header">
-                            {getStepStatus(item.status === 'success' ? 'success' : (item.status === 'validation_error' ? 'warning' : item.status))}
-                            <span className="step-title">2. Validation</span>
-                          </div>
-                          <div className="step-content">
-                            <p><strong>Lignes valides:</strong> <span className="text-success">{item.valid_rows || 0}</span></p>
-                            <p><strong>Lignes invalides:</strong> <span className="text-error">{item.invalid_rows || 0}</span></p>
-                            <p><strong>Doublons:</strong> <span className="text-warning">{item.duplicate_rows || 0}</span></p>
-                            {(item.pending_errors > 0 || item.resolved_errors > 0) && (
-                              <p><strong>Erreurs:</strong> {item.resolved_errors || 0} resolues / {item.pending_errors || 0} en attente</p>
-                            )}
-                            {item.error_details && (
-                              <p className="error-details"><strong>Details:</strong> {item.error_details}</p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="step">
-                          <div className="step-header">
-                            {getStepStatus(item.destination_path ? 'success' : 'pending')}
-                            <span className="step-title">3. Output (CSV valide)</span>
-                          </div>
-                          <div className="step-content">
-                            <p><strong>Chemin:</strong> {item.destination_path || 'Non genere'}</p>
-                            {item.destination_path && (
-                              <div className="step-actions">
-                                <button className="btn btn-sm" onClick={() => handleViewFile(item.file_name, 'csv')}>
-                                  <Eye size={14} /> Voir
-                                </button>
-                                <button className="btn btn-sm" onClick={() => handleDownloadFile(item.file_name, 'csv')}>
-                                  <Download size={14} /> Telecharger
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="step">
-                          <div className="step-header">
-                            {getStepStatus(item.xml_file_name ? 'success' : 'pending')}
-                            <span className="step-title">4. XML</span>
-                          </div>
-                          <div className="step-content">
-                            {item.xml_file_name ? (
-                              <>
-                                <p><strong>Fichier:</strong> {item.xml_file_name}</p>
-                                <p><strong>Chemin:</strong> {item.xml_file_path || 'N/A'}</p>
-                                <p><strong>Entrees XML:</strong> {item.xml_entries_count || 0}</p>
-                                <p><strong>Statut:</strong> {getStatusBadge(item.xml_status)}</p>
-                                {item.xml_error && <p className="error-details">{item.xml_error}</p>}
-                                <div className="step-actions">
-                                  <button className="btn btn-sm" onClick={() => handleViewFile(item.xml_file_name, 'xml')}>
-                                    <Eye size={14} /> Voir XML
-                                  </button>
-                                  <button className="btn btn-sm" onClick={() => handleDownloadFile(item.xml_file_name, 'xml')}>
-                                    <Download size={14} /> Telecharger
-                                  </button>
+                          {expandedRows[item.id] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </td>
+                      </tr>
+                      {expandedRows[item.id] && (
+                        <tr className="history-detail-row">
+                          <td colSpan="7">
+                            <div className="process-steps">
+                              <div className="step">
+                                <div className="step-header">
+                                  {getStepStatus(item.status === 'success' || item.status === 'validation_error' ? 'success' : item.status)}
+                                  <span className="step-title">1. Source</span>
                                 </div>
-                              </>
-                            ) : (
-                              <p className="not-generated">XML non genere</p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="step">
-                          <div className="step-header">
-                            {getStepStatus(item.archive_path ? 'success' : 'pending')}
-                            <span className="step-title">5. Archive</span>
-                          </div>
-                          <div className="step-content">
-                            <p><strong>Chemin:</strong> {item.archive_path || 'Non archive'}</p>
-                            <p><strong>Statut:</strong> {item.archive_status || 'N/A'}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+                                <div className="step-content">
+                                  <p><strong>Fichier:</strong> {item.file_name}</p>
+                                  <p><strong>Chemin:</strong> {item.original_path || 'N/A'}</p>
+                                  <p><strong>Lignes:</strong> {item.total_rows || 0}</p>
+                                  <div className="step-actions">
+                                    <button className="btn btn-sm" onClick={() => handleViewFile(item.file_name, 'csv')}>
+                                      <Eye size={12} /> Voir
+                                    </button>
+                                    <button className="btn btn-sm" onClick={() => handleDownloadFile(item.file_name, 'csv')}>
+                                      <Download size={12} /> Telecharger
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="step">
+                                <div className="step-header">
+                                  {getStepStatus(item.status === 'success' ? 'success' : (item.status === 'validation_error' ? 'warning' : item.status))}
+                                  <span className="step-title">2. Validation</span>
+                                </div>
+                                <div className="step-content">
+                                  <p><strong>Valides:</strong> <span className="text-success">{item.valid_rows || 0}</span></p>
+                                  <p><strong>Invalides:</strong> <span className="text-error">{item.invalid_rows || 0}</span></p>
+                                  <p><strong>Doublons:</strong> <span className="text-warning">{item.duplicate_rows || 0}</span></p>
+                                  {(item.pending_errors > 0 || item.resolved_errors > 0) && (
+                                    <p><strong>Erreurs:</strong> {item.resolved_errors || 0} resolues / {item.pending_errors || 0} attente</p>
+                                  )}
+                                  {item.error_details && (
+                                    <p className="error-details">{item.error_details}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="step">
+                                <div className="step-header">
+                                  {getStepStatus(item.destination_path ? 'success' : 'pending')}
+                                  <span className="step-title">3. CSV</span>
+                                </div>
+                                <div className="step-content">
+                                  <p><strong>Chemin:</strong> {item.destination_path || 'Non genere'}</p>
+                                  {item.destination_path && (
+                                    <div className="step-actions">
+                                      <button className="btn btn-sm" onClick={() => handleViewFile(item.file_name, 'csv')}>
+                                        <Eye size={12} /> Voir
+                                      </button>
+                                      <button className="btn btn-sm" onClick={() => handleDownloadFile(item.file_name, 'csv')}>
+                                        <Download size={12} /> Telecharger
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="step">
+                                <div className="step-header">
+                                  {getStepStatus(item.xml_file_name ? 'success' : 'pending')}
+                                  <span className="step-title">4. XML</span>
+                                </div>
+                                <div className="step-content">
+                                  {item.xml_file_name ? (
+                                    <>
+                                      <p><strong>Fichier:</strong> {item.xml_file_name}</p>
+                                      <p><strong>Entrees:</strong> {item.xml_entries_count || 0}</p>
+                                      <p><strong>Statut:</strong> {getStatusBadge(item.xml_status)}</p>
+                                      {item.xml_error && <p className="error-details">{item.xml_error}</p>}
+                                      <div className="step-actions">
+                                        <button className="btn btn-sm" onClick={() => handleViewFile(item.xml_file_name, 'xml')}>
+                                          <Eye size={12} /> Voir XML
+                                        </button>
+                                        <button className="btn btn-sm" onClick={() => handleDownloadFile(item.xml_file_name, 'xml')}>
+                                          <Download size={12} /> Telecharger
+                                        </button>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <p className="not-generated">XML non genere</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="step">
+                                <div className="step-header">
+                                  {getStepStatus(item.archive_path ? 'success' : 'pending')}
+                                  <span className="step-title">5. Archive</span>
+                                </div>
+                                <div className="step-content">
+                                  <p><strong>Chemin:</strong> {item.archive_path || 'Non archive'}</p>
+                                  <p><strong>Statut:</strong> {item.archive_status || 'N/A'}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
 
           <div className="pagination">

@@ -3,6 +3,7 @@
  * Traçabilité complète de chaque tentative d'import par PAN
  */
 const db = require('../config/database');
+const { encrypt, decrypt, hashPan } = require('./encryptionService');
 
 class RecordHistoryService {
   
@@ -13,32 +14,43 @@ class RecordHistoryService {
   async logAttempt({
     bankId,
     pan,
-    fileLogId = null,
-    fileName = null,
-    sourceType, // 'cron', 'upload', 'manual', 'correction', 'api'
-    userId = null,
-    username = null,
-    status, // 'REJECTED', 'SUCCESS', 'PARTIAL'
-    ipAddress = null,
-    userAgent = null,
+    attemptNumber: providedAttemptNumber,
+    fileLogId,
+    fileName,
+    sourceType,
+    userId,
+    username,
+    status,
+    ipAddress,
+    userAgent,
     dataReceived,
-    validationResults, // Array of {field, value, isValid, errorType, errorMessage, expectedFormat}
-    processedRecordId = null,
-    xmlId = null
+    validationResults = [],
+    processedRecordId,
+    xmlId
   }) {
-    const client = await db.pool.connect();
+    if (!bankId || !pan) {
+      throw new Error('bankId et pan sont requis');
+    }
+
+    const encryptedPan = encrypt(pan);
+    const panHash = hashPan(pan);
+    
+    const client = await db.connect();
     
     try {
       await client.query('BEGIN');
       
       // Calculer le numéro de tentative pour ce PAN
-      const attemptResult = await client.query(
-        `SELECT COALESCE(MAX(attempt_number), 0) + 1 as next_attempt 
-         FROM record_history 
-         WHERE bank_id = $1 AND pan = $2`,
-        [bankId, pan]
-      );
-      const attemptNumber = attemptResult.rows[0].next_attempt;
+      let attemptNumber = providedAttemptNumber;
+      if (!attemptNumber) {
+        const attemptResult = await client.query(
+          `SELECT COALESCE(MAX(attempt_number), 0) + 1 as next_attempt 
+           FROM record_history 
+           WHERE bank_id = $1 AND pan_hash = $2`,
+          [bankId, panHash]
+        );
+        attemptNumber = attemptResult.rows[0].next_attempt;
+      }
       
       // Compter erreurs et warnings
       const totalErrors = validationResults.filter(v => !v.isValid && v.severity === 'error').length;
@@ -55,13 +67,13 @@ class RecordHistoryService {
       // Insérer l'entrée principale
       const historyResult = await client.query(
         `INSERT INTO record_history 
-         (bank_id, pan, attempt_number, file_log_id, file_name, source_type, 
+         (bank_id, pan, pan_hash, attempt_number, file_log_id, file_name, source_type, 
           user_id, username, status, ip_address, user_agent, data_received,
           total_errors, total_warnings, processed_record_id, xml_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
          RETURNING id`,
         [
-          bankId, pan, attemptNumber, fileLogId, fileName, sourceType,
+          bankId, encryptedPan, panHash, attemptNumber, fileLogId, fileName, sourceType,
           userId, displayUsername, status, ipAddress, userAgent, 
           JSON.stringify(dataReceived),
           totalErrors, totalWarnings, processedRecordId, xmlId
@@ -76,8 +88,8 @@ class RecordHistoryService {
           `SELECT rhd.field_name, rhd.field_value
            FROM record_history_details rhd
            JOIN record_history rh ON rhd.history_id = rh.id
-           WHERE rh.bank_id = $1 AND rh.pan = $2 AND rh.attempt_number = $3`,
-          [bankId, pan, attemptNumber - 1]
+           WHERE rh.bank_id = $1 AND rh.pan_hash = $2 AND rh.attempt_number = $3`,
+          [bankId, panHash, attemptNumber - 1]
         );
         prevResult.rows.forEach(row => {
           previousValues[row.field_name] = row.field_value;
@@ -133,6 +145,8 @@ class RecordHistoryService {
    * Récupère l'historique complet d'un PAN
    */
   async getHistoryByPan(bankId, pan) {
+    const panHash = hashPan(pan);
+    
     // Récupérer toutes les tentatives
     const attemptsResult = await db.query(
       `SELECT 
@@ -141,12 +155,17 @@ class RecordHistoryService {
         b.name as bank_name
        FROM record_history rh
        JOIN banks b ON rh.bank_id = b.id
-       WHERE rh.bank_id = $1 AND rh.pan = $2
+       WHERE rh.bank_id = $1 AND rh.pan_hash = $2
        ORDER BY rh.attempt_number ASC`,
-      [bankId, pan]
+      [bankId, panHash]
     );
     
     const attempts = attemptsResult.rows;
+    
+    // Déchiffrer le PAN dans chaque tentative
+    for (const attempt of attempts) {
+      attempt.pan = decrypt(attempt.pan);
+    }
     
     // Pour chaque tentative, récupérer les détails
     for (const attempt of attempts) {
@@ -209,7 +228,7 @@ class RecordHistoryService {
         b.code as bank_code,
         b.name as bank_name,
         (SELECT COUNT(*) FROM record_history rh2 
-         WHERE rh2.bank_id = rh.bank_id AND rh2.pan = rh.pan) as total_attempts_for_pan
+         WHERE rh2.bank_id = rh.bank_id AND rh2.pan_hash = rh.pan_hash) as total_attempts_for_pan
       FROM record_history rh
       JOIN banks b ON rh.bank_id = b.id
       WHERE 1=1
@@ -265,6 +284,11 @@ class RecordHistoryService {
     params.push(limit, offset);
     
     const result = await db.query(query, params);
+    
+    // Déchiffrer le PAN dans chaque résultat
+    for (const row of result.rows) {
+      row.pan = decrypt(row.pan);
+    }
     
     // Count total
     let countQuery = `
@@ -323,7 +347,7 @@ class RecordHistoryService {
     const result = await db.query(`
       SELECT 
         COUNT(*) as total_attempts,
-        COUNT(DISTINCT pan) as unique_pans,
+        COUNT(DISTINCT pan_hash) as unique_pans,
         COUNT(*) FILTER (WHERE status = 'SUCCESS') as success_count,
         COUNT(*) FILTER (WHERE status = 'REJECTED') as rejected_count,
         COUNT(*) FILTER (WHERE status = 'PARTIAL') as partial_count,
@@ -343,10 +367,10 @@ class RecordHistoryService {
     const multiAttemptResult = await db.query(`
       SELECT COUNT(*) as pans_with_corrections
       FROM (
-        SELECT pan, bank_id, COUNT(*) as attempts
+        SELECT pan_hash, bank_id, COUNT(*) as attempts
         FROM record_history rh
         ${bankFilter}
-        GROUP BY pan, bank_id
+        GROUP BY pan_hash, bank_id
         HAVING COUNT(*) > 1
       ) sub
     `, params);

@@ -1,9 +1,10 @@
 const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
-const { filterByBank } = require('../middleware/roleMiddleware');
+const { filterByBank, checkRole } = require('../middleware/roleMiddleware');
 const xmlGenerator = require('../services/xmlGenerator');
 const recordHistoryService = require('../services/recordHistoryService');
+const { decrypt, hashPan, maskPan } = require('../services/encryptionService');
 
 const router = express.Router();
 
@@ -49,7 +50,6 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       query += ` AND (
         pr.first_name ILIKE $${paramCount} OR 
         pr.last_name ILIKE $${paramCount} OR 
-        pr.pan ILIKE $${paramCount} OR 
         pr.phone ILIKE $${paramCount}
       )`;
       params.push(`%${search}%`);
@@ -60,6 +60,11 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     params.push(safeLimit, safeOffset);
 
     const result = await db.query(query, params);
+
+    // Déchiffrer le PAN dans chaque résultat
+    for (const row of result.rows) {
+      row.pan = decrypt(row.pan);
+    }
 
     let countQuery = `SELECT COUNT(*) FROM processed_records pr JOIN banks b ON pr.bank_id = b.id WHERE 1=1`;
     const countParams = [];
@@ -72,7 +77,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     }
 
     if (search) {
-      countQuery += ` AND (pr.first_name ILIKE $${countParamCount} OR pr.last_name ILIKE $${countParamCount} OR pr.pan ILIKE $${countParamCount} OR pr.phone ILIKE $${countParamCount})`;
+      countQuery += ` AND (pr.first_name ILIKE $${countParamCount} OR pr.last_name ILIKE $${countParamCount} OR pr.phone ILIKE $${countParamCount})`;
       countParams.push(`%${search}%`);
     }
 
@@ -137,6 +142,11 @@ router.get('/export/csv', authMiddleware, async (req, res) => {
     
     query += ` ORDER BY pr.processed_at DESC`;
     const result = await db.query(query, params);
+
+    // Déchiffrer le PAN pour le CSV
+    for (const row of result.rows) {
+      row.pan = decrypt(row.pan);
+    }
 
     const escapeCsvField = (field) => {
       if (field == null) return '';
@@ -219,6 +229,11 @@ router.get('/file-content/byname', authMiddleware, filterByBank, async (req, res
     
     const result = await db.query(recordsQuery, queryParams);
 
+    // Déchiffrer le PAN dans chaque résultat
+    for (const row of result.rows) {
+      row.pan = decrypt(row.pan);
+    }
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -276,6 +291,11 @@ router.get('/file-content/:fileLogId', authMiddleware, async (req, res) => {
     
     const result = await db.query(recordsQuery, [fileLogId]);
 
+    // Déchiffrer le PAN dans chaque résultat
+    for (const row of result.rows) {
+      row.pan = decrypt(row.pan);
+    }
+
     if (type === 'xml') {
       const bankQuery = `
         SELECT b.code FROM file_logs fl
@@ -321,6 +341,7 @@ router.get('/history/:recordId', authMiddleware, async (req, res) => {
     }
 
     const record = recordResult.rows[0];
+    record.pan = decrypt(record.pan);
 
     if (req.user.role === 'bank' && req.user.bank_id !== record.bank_id) {
       return res.status(403).json({ success: false, message: 'Accès refusé' });
@@ -336,6 +357,22 @@ router.get('/history/:recordId', authMiddleware, async (req, res) => {
       message: 'Erreur lors de la récupération de l\'historique',
       error: error.message
     });
+  }
+});
+
+// POST /api/records/decrypt-pan - Déchiffre un PAN (admin uniquement)
+router.post('/decrypt-pan', authMiddleware, checkRole('super_admin'), async (req, res) => {
+  try {
+    const { encryptedPan } = req.body;
+    if (!encryptedPan) {
+      return res.status(400).json({ success: false, message: 'encryptedPan requis' });
+    }
+    const decrypted = decrypt(encryptedPan);
+    res.locals.skipMask = true;
+    res.json({ success: true, data: { pan: decrypted, masked: maskPan(decrypted) } });
+  } catch (error) {
+    console.error('Decrypt PAN error:', error);
+    res.status(500).json({ success: false, message: 'Erreur de déchiffrement' });
   }
 });
 

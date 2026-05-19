@@ -7,6 +7,7 @@ const recordHistoryService = require('./recordHistoryService');
 const CSVValidator = require('../utils/csvValidator');
 const { validateRowForHistory } = require('../utils/validationHelper');
 const remoteFileService = require('../utils/remoteFileService');
+const { encrypt, decrypt, hashPan } = require('./encryptionService');
 
 class CSVProcessor {
   constructor() {
@@ -256,9 +257,10 @@ class CSVProcessor {
 
   async checkExistingPAN(bankId, pan) {
     if (!pan) return false;
+    const panHash = hashPan(pan);
     const result = await db.query(
-      `SELECT id FROM processed_records WHERE bank_id = $1 AND pan = $2 LIMIT 1`,
-      [bankId, pan]
+      `SELECT id FROM processed_records WHERE bank_id = $1 AND pan_hash = $2 LIMIT 1`,
+      [bankId, panHash]
     );
     return result.rows.length > 0;
   }
@@ -321,17 +323,19 @@ class CSVProcessor {
   async saveValidatedRecords(bankId, rows, fileName) {
     const query = `
       INSERT INTO processed_records 
-        (bank_id, language, first_name, last_name, pan, expiry, phone, behaviour, action, file_name)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      ON CONFLICT (bank_id, pan) DO UPDATE SET
+        (bank_id, language, first_name, last_name, pan, pan_hash, expiry, phone, behaviour, action, file_name)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (bank_id, pan_hash) DO UPDATE SET
         language = EXCLUDED.language,
         first_name = EXCLUDED.first_name,
         last_name = EXCLUDED.last_name,
+        pan = EXCLUDED.pan,
         expiry = EXCLUDED.expiry,
         phone = EXCLUDED.phone,
         behaviour = EXCLUDED.behaviour,
         action = EXCLUDED.action,
         file_name = EXCLUDED.file_name,
+        pan_hash = EXCLUDED.pan_hash,
         enrollment_status = 'pending',
         enrollment_error_code = NULL,
         enrollment_error_description = NULL,
@@ -342,19 +346,22 @@ class CSVProcessor {
 
     const saved = [];
     for (const row of rows) {
+      const encryptedPan = encrypt(row.pan);
+      const panHash = hashPan(row.pan);
       const result = await db.query(query, [
         bankId,
         row.language,
         row.firstName || row.first_name,
         row.lastName || row.last_name,
-        row.pan,
+        encryptedPan,
+        panHash,
         row.expiry,
         row.phone,
         row.behaviour,
         row.action,
         fileName
       ]);
-      saved.push(result.rows[0]);
+      saved.push({ ...result.rows[0], pan: decrypt(result.rows[0].pan) });
     }
     return saved;
   }

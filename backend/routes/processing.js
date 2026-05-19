@@ -10,6 +10,7 @@ const recordHistoryService = require('../services/recordHistoryService');
 const { validateRowForHistory } = require('../utils/validationHelper');
 const { authMiddleware } = require('../middleware/auth');
 const { processingSchemas, validate } = require('../utils/validators');
+const { encrypt, decrypt, hashPan } = require('../services/encryptionService');
 
 const ALLOWED_API_DOMAINS = (process.env.ALLOWED_API_DOMAINS || '').split(',').filter(Boolean);
 
@@ -574,9 +575,10 @@ router.post('/validate-manual', authMiddleware, async (req, res) => {
       let errorMessage = '';
       
       // Check for duplicate PAN in database
+      const panHash = hashPan(entry.pan);
       const duplicateCheck = await db.query(
-        'SELECT id FROM processed_records WHERE bank_id = $1 AND pan = $2 LIMIT 1',
-        [bankId, entry.pan]
+        'SELECT id FROM processed_records WHERE bank_id = $1 AND pan_hash = $2 LIMIT 1',
+        [bankId, panHash]
       );
       
       if (duplicateCheck.rows.length > 0) {
@@ -656,13 +658,17 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
     // Insert records into database with RETURNING
     const savedRecords = [];
     for (const entry of entries) {
+      const encryptedPan = encrypt(entry.pan);
+      const panHashVal = hashPan(entry.pan);
       const result = await db.query(
-        `INSERT INTO processed_records (bank_id, language, first_name, last_name, pan, expiry, phone, behaviour, action, file_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (bank_id, pan) DO UPDATE SET
+        `INSERT INTO processed_records (bank_id, language, first_name, last_name, pan, pan_hash, expiry, phone, behaviour, action, file_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (bank_id, pan_hash) DO UPDATE SET
            language = EXCLUDED.language,
            first_name = EXCLUDED.first_name,
            last_name = EXCLUDED.last_name,
+           pan = EXCLUDED.pan,
+           pan_hash = EXCLUDED.pan_hash,
            expiry = EXCLUDED.expiry,
            phone = EXCLUDED.phone,
            behaviour = EXCLUDED.behaviour,
@@ -670,7 +676,7 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
            file_name = EXCLUDED.file_name,
            processed_at = CURRENT_TIMESTAMP
          RETURNING id, pan`,
-        [bankId, entry.language, entry.firstName, entry.lastName, entry.pan, entry.expiry, entry.phone, entry.behaviour, entry.action, `${fileName}.csv`]
+        [bankId, entry.language, entry.firstName, entry.lastName, encryptedPan, panHashVal, entry.expiry, entry.phone, entry.behaviour, entry.action, `${fileName}.csv`]
       );
       savedRecords.push(result.rows[0]);
     }

@@ -25,6 +25,12 @@ const morgan = require('morgan');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/auth');
 const { checkRole } = require('./middleware/roleMiddleware');
+const { maskResponseData } = require('./services/encryptionService');
+
+if (!process.env.PAN_ENCRYPTION_KEY) {
+  console.warn('⚠️  PAN_ENCRYPTION_KEY non configurée - le PAN est stocké en clair dans la DB');
+  console.warn('   Définissez une clé AES-256 sécurisée pour la production.');
+}
 
 if (!process.env.JWT_SECRET) {
   console.error('ERREUR CRITIQUE: JWT_SECRET non configuré!');
@@ -83,7 +89,17 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth/login', authLimiter);
 
-
+// PAN masking middleware - masque automatiquement tous les PAN dans les réponses JSON
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = function (body) {
+    if (res.locals.skipMask) {
+      return originalJson(body);
+    }
+    return originalJson(maskResponseData(body));
+  };
+  next();
+});
 
 // Routes
 app.use('/api/auth', authRoutes);
