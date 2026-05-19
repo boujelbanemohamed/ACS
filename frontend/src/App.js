@@ -10,6 +10,7 @@ import Banks from './pages/Banks';
 import Processing from './pages/Processing';
 import CronManager from './pages/CronManager';
 import Notifications from './pages/Notifications';
+import Monitor from './pages/Monitor';
 import Records from './pages/Records';
 import History from './pages/History';
 import ApiTester from './pages/ApiTester';
@@ -52,6 +53,7 @@ function App() {
             <Route path="users" element={<Users />} />
             <Route path="profile" element={<Profile />} />
             <Route path="notifications" element={<Notifications />} />
+            <Route path="monitoring" element={<Monitor />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

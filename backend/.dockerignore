@@ -3,3 +3,13 @@ node_modules
 .git
 *.md
 .gitignore
+scripts/
+__tests__/
+test/
+uploads/
+data/
+dist/
+eslint.config.js
+jest.config.ts
+tsconfig.json
+tsconfig.tsbuildinfo

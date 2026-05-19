@@ -34,10 +34,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRE: ${JWT_EXPIRE:-8h}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      PAN_ENCRYPTION_KEY: ${PAN_ENCRYPTION_KEY}
       TZ: ${TZ:-Africa/Tunis}
       CRON_SCHEDULE: ${CRON_SCHEDULE:-*/5 * * * *}
-    ports:
-      - "8000:5000"
+      AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-20}
+    expose:
+      - "5000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,12 +53,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: /api
     container_name: banking_frontend_prod
     restart: always
-    environment:
-      REACT_APP_API_URL: ${API_URL:-http://localhost:8000/api}
     ports:
-      - "8088:3000"
+      - "8080:80"
     depends_on:
       - backend
     networks:

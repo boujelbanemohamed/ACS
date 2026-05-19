@@ -35,7 +35,7 @@ class RecordHistoryService {
     const encryptedPan = encrypt(pan);
     const panHash = hashPan(pan);
     
-    const client = await db.connect();
+    const client = await db.pool.connect();
     
     try {
       await client.query('BEGIN');

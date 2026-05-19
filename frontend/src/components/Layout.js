@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User, Mail, Terminal } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User, Mail, Terminal, Activity } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Layout.css';
 
@@ -84,6 +84,10 @@ const Layout = () => {
                   <span>Notifications</span>
                 </NavLink>
               )}
+              <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                <Activity size={20} />
+                <span>Monitoring</span>
+              </NavLink>
             </>
           )}
         </nav>

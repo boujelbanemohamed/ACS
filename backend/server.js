@@ -82,7 +82,7 @@ app.use(globalLimiter);
 
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 10,
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 1000,
   message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans une minute.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -117,6 +117,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/scanner', require('./routes/scanner'));
+app.use('/api/monitoring', require('./routes/monitoring'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {

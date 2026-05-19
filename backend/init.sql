@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS processed_records (
     language VARCHAR(10),
     first_name VARCHAR(255),
     last_name VARCHAR(255),
-    pan VARCHAR(20),
+    pan TEXT,
+    pan_hash VARCHAR(64),
     expiry VARCHAR(10),
     phone VARCHAR(20),
     behaviour VARCHAR(50),
@@ -55,8 +56,9 @@ CREATE TABLE IF NOT EXISTS processed_records (
     enrollment_date TIMESTAMP,
     enrollment_xml_id INTEGER,
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(bank_id, pan)
+    UNIQUE(bank_id, pan_hash)
 );
+CREATE INDEX IF NOT EXISTS idx_processed_records_pan_hash ON processed_records(pan_hash);
 
 -- File processing logs
 CREATE TABLE IF NOT EXISTS file_logs (
@@ -312,7 +314,8 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO banking_user;
 CREATE TABLE IF NOT EXISTS record_history (
     id SERIAL PRIMARY KEY,
     bank_id INTEGER REFERENCES banks(id) ON DELETE CASCADE,
-    pan VARCHAR(20) NOT NULL,
+    pan TEXT NOT NULL,
+    pan_hash VARCHAR(64),
     attempt_number INTEGER DEFAULT 1,
     file_log_id INTEGER REFERENCES file_logs(id) ON DELETE SET NULL,
     file_name VARCHAR(255),
@@ -337,6 +340,8 @@ CREATE TABLE IF NOT EXISTS record_history (
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_record_history_pan_hash ON record_history(pan_hash);
+CREATE INDEX IF NOT EXISTS idx_record_history_bank_pan_hash ON record_history(bank_id, pan_hash);
 
 -- Table de détail des validations par champ pour chaque tentative
 CREATE TABLE IF NOT EXISTS record_history_details (
@@ -389,7 +394,7 @@ SELECT
     rh.ip_address,
     rh.processed_at,
     rh.xml_id,
-    (SELECT COUNT(*) FROM record_history rh2 WHERE rh2.bank_id = rh.bank_id AND rh2.pan = rh.pan) as total_attempts
+    (SELECT COUNT(*) FROM record_history rh2 WHERE rh2.bank_id = rh.bank_id AND rh2.pan_hash = rh.pan_hash) as total_attempts
 FROM record_history rh
 JOIN banks b ON rh.bank_id = b.id
 ORDER BY rh.processed_at DESC;
