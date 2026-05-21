@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, User, Mail, Terminal, Activity } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Layout.css';
 
@@ -93,23 +93,22 @@ const Layout = () => {
         </nav>
 
         <div className="sidebar-footer">
-          <NavLink to="/profile" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <User size={20} />
-            <span>Mon Profil</span>
-          </NavLink>
-          
-          <div className="user-info">
-            <div className="user-avatar">{user?.username?.charAt(0).toUpperCase()}</div>
-            <div className="user-details">
-              <span className="user-name">{user?.username}</span>
-              <span className="user-role">{user?.role === 'super_admin' ? 'Admin' : user?.bank_name || 'Banque'}</span>
-            </div>
+          <div className="footer-actions">
+            <NavLink to="/profile" className={({ isActive }) => isActive ? 'profile-link active' : 'profile-link'}>
+              <div className="user-info">
+                <div className="user-avatar">{user?.username?.charAt(0).toUpperCase()}</div>
+                <div className="user-details">
+                  <span className="user-name">{user?.username}</span>
+                  <span className="user-role">{user?.role === 'super_admin' ? 'Admin' : user?.bank_name || 'Banque'}</span>
+                </div>
+              </div>
+            </NavLink>
+
+            <button className="logout-btn" onClick={handleLogout} title="Déconnexion">
+              <LogOut size={18} />
+              <span>Déconnexion</span>
+            </button>
           </div>
-          
-          <button className="logout-btn" onClick={handleLogout}>
-            <LogOut size={20} />
-            <span>Deconnexion</span>
-          </button>
         </div>
       </aside>
 

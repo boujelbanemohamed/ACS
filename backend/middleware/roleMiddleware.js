@@ -80,9 +80,25 @@ const filterByBank = (req, res, next) => {
   next();
 };
 
+const forceBankId = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Non authentifié'
+    });
+  }
+
+  if (req.user.role === 'bank' && req.user.bank_id) {
+    req.body.bankId = req.user.bank_id;
+  }
+
+  next();
+};
+
 module.exports = {
   checkRole,
   checkBankAccess,
   isSuperAdmin,
-  filterByBank
+  filterByBank,
+  forceBankId
 };

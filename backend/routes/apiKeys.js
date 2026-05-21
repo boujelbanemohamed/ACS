@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
-const { checkRole, filterByBank } = require('../middleware/roleMiddleware');
+const { checkRole, filterByBank, isSuperAdmin } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
@@ -37,7 +37,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 });
 
 // GET - Stats des API Keys
-router.get('/stats', authMiddleware, async (req, res) => {
+router.get('/stats', authMiddleware, isSuperAdmin, async (req, res) => {
   try {
     const stats = await db.query(`
       SELECT 
@@ -56,7 +56,7 @@ router.get('/stats', authMiddleware, async (req, res) => {
 });
 
 // GET - Logs d'une API Key
-router.get('/:id/logs', authMiddleware, async (req, res) => {
+router.get('/:id/logs', authMiddleware, isSuperAdmin, async (req, res) => {
   try {
     const { limit = 50, offset = 0 } = req.query;
     const result = await db.query(

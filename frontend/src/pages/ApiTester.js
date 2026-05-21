@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Send, Code, Key, Globe, RefreshCw, CheckCircle, XCircle, Clock, Copy, Terminal, Trash2, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import { Send, Code, Key, Globe, RefreshCw, CheckCircle, XCircle, Clock, Copy, Terminal, Trash2, BookOpen, ChevronDown, ChevronRight, Info, Shield, ExternalLink, Database, FileText, MapPin, AlertTriangle, ArrowRight } from 'lucide-react';
 import api from '../services/api';
 import './ApiTester.css';
 
@@ -11,7 +11,8 @@ const endpoints = [
     method: 'POST',
     path: '/api/v1/cards/validate',
     auth: 'api_key',
-    description: 'Valide une liste de cartes sans les enregistrer',
+    type: 'internal',
+    description: 'Valide une liste de cartes bancaires sans les enregistrer en base',
     bodyTemplate: `{
   "bankCode": "BT",
   "cards": [
@@ -23,7 +24,32 @@ const endpoints = [
       "lastName": "BenAli"
     }
   ]
+}`,
+    docs: {
+      purpose: 'API interne de pré-validation — vérifie la conformité des données avant un enregistrement.',
+      useCase: 'Idéal pour : intégration frontale, formulaire de saisie, test de validité avant envoi batch.',
+      integration: [
+        'Authentification par clé API (header X-API-Key)',
+        'Appel POST avec bankCode + tableau cards',
+        'Retourne les cartes valides et les erreurs par carte',
+        'N\'enregistre rien en base — safe pour des tests',
+      ],
+      fieldMapping: [
+        { field: 'bankCode', type: 'string', required: true, desc: 'Code de la banque (BT, BIAT, ATB)' },
+        { field: 'cards[].pan', type: 'string', required: true, desc: '16 chiffres, validation Luhn' },
+        { field: 'cards[].expiry', type: 'string', required: true, desc: 'Format MM/YY' },
+        { field: 'cards[].phone', type: 'string', required: true, desc: 'Format tunisien 216XXXXXXXX' },
+        { field: 'cards[].firstName', type: 'string', required: false, desc: 'Prénom du titulaire' },
+        { field: 'cards[].lastName', type: 'string', required: false, desc: 'Nom du titulaire' },
+      ],
+      responseExample: `{
+  "success": true,
+  "data": {
+    "valid": [ /* cartes valides */ ],
+    "invalid": [ /* cartes avec erreurs */ ]
+  }
 }`
+    }
   },
   {
     id: 'register',
@@ -31,7 +57,8 @@ const endpoints = [
     method: 'POST',
     path: '/api/v1/cards/register',
     auth: 'api_key',
-    description: 'Enregistre des cartes et génère le XML',
+    type: 'internal',
+    description: 'Valide et enregistre les cartes en base, avec génération XML optionnelle',
     bodyTemplate: `{
   "bankCode": "BT",
   "generateXml": true,
@@ -46,7 +73,38 @@ const endpoints = [
       "action": "create"
     }
   ]
+}`,
+    docs: {
+      purpose: 'API interne d\'enregistrement — valide, persist en base, et génère les fichiers XML d\'enrôlement.',
+      useCase: 'Utilisé par : systèmes tiers, batchs nocturnes, API externe → synchronisation automatique.',
+      integration: [
+        'Authentification par clé API (header X-API-Key)',
+        'Validation identique à /validate + enregistrement',
+        'Option generateXml: true → génération XML + export',
+        'Champ action = create | update | delete (cycle de vie)',
+        'Champ behaviour = otp | sms | email (comportement OTP)',
+        'Les doublons (PAN + banque) sont détectés et mis à jour',
+      ],
+      fieldMapping: [
+        { field: 'bankCode', type: 'string', required: true, desc: 'BT, BIAT, ATB' },
+        { field: 'generateXml', type: 'boolean', required: false, desc: 'Générer le XML (defaut: true)' },
+        { field: 'cards[].pan', type: 'string', required: true, desc: '16 chiffres, validation Luhn' },
+        { field: 'cards[].expiry', type: 'string', required: true, desc: 'MM/YY' },
+        { field: 'cards[].phone', type: 'string', required: true, desc: '216XXXXXXXX' },
+        { field: 'cards[].behaviour', type: 'string', required: false, desc: 'otp | sms | email' },
+        { field: 'cards[].action', type: 'string', required: false, desc: 'create | update | delete' },
+      ],
+      responseExample: `{
+  "success": true,
+  "data": {
+    "totalCards": 2,
+    "validCards": 2,
+    "invalidCards": [],
+    "xmlGenerated": true,
+    "xmlPath": "/data/banks/BT/xml/..."
+  }
 }`
+    }
   },
   {
     id: 'call-api',
@@ -54,19 +112,71 @@ const endpoints = [
     method: 'POST',
     path: '/api/processing/call-api',
     auth: 'jwt',
-    description: 'Appelle une API externe, récupère et enregistre les données',
+    type: 'external',
+    description: 'Appelle une API externe, mappe les champs, valide et enregistre les données',
     bodyTemplate: `{
   "bankId": 1,
-  "url": "https://api.exemple.com/cards",
+  "url": "https://jsonplaceholder.typicode.com/posts/1",
   "method": "GET",
   "headers": {
     "Authorization": "Bearer token123"
   },
-  "authType": "bearer",
+  "authType": "none",
   "authToken": "",
-  "dataPath": "data.cards",
+  "dataPath": "",
   "body": {}
+}`,
+    docs: {
+      purpose: 'API externe — pont entre des systèmes tiers et le processeur de cartes.',
+      useCase: 'Parfait pour : intégration avec API bancaire partenaire, synchronisation automatique depuis un CRM, récupération de fichiers CSV depuis un serveur SFTP transformé en API REST.',
+      integration: [
+        'SSRF Protection : les IP privées (10.x, 172.16-31.x, 192.168.x, localhost) sont automatiquement bloquées',
+        'Méthodes supportées : GET, POST, PUT, PATCH, DELETE',
+        'Types d\'authentification : bearer, basic, api_key, ou none',
+        'Les données reçues peuvent être filtrées via dataPath (ex: "data.cards")',
+        'Le mapping externe → interne se fait automatiquement si les champs sont reconnus',
+        'Les cartes valides sont enregistrées en base avec historique complet',
+        'Un fileLogId est créé pour chaque appel, traçable dans la section Historique',
+      ],
+      fieldMapping: [
+        { field: 'bankId', type: 'number', required: true, desc: 'ID de la banque cible (1=BT, 2=BIAT, 3=ATB)' },
+        { field: 'url', type: 'string', required: true, desc: 'URL complète de l\'API externe' },
+        { field: 'method', type: 'string', required: false, desc: 'GET | POST | PUT | PATCH | DELETE (defaut: GET)' },
+        { field: 'headers', type: 'object', required: false, desc: 'Headers personnalisés à envoyer' },
+        { field: 'authType', type: 'string', required: false, desc: 'none | bearer | basic | apikey' },
+        { field: 'authToken', type: 'string', required: false, desc: 'Token/valeur pour l\'auth' },
+        { field: 'dataPath', type: 'string', required: false, desc: 'Chemin JSON pour extraire les données (ex: data.cards)' },
+        { field: 'body', type: 'object', required: false, desc: 'Corps de requête pour POST/PUT' },
+      ],
+      dataPathExample: `// Si l'API externe retourne :
+{
+  "status": "ok",
+  "data": {
+    "cards": [
+      { "pan": "4000056655665556", ... }
+    ],
+    "total": 42
+  },
+  "meta": { "page": 1 }
+}
+
+// Utilisez dataPath: "data.cards"
+→ Seul le tableau cards sera traité`,
+      authExamples: [
+        { type: 'bearer', template: '{"authType":"bearer","authToken":"votre_token_jwt"}' },
+        { type: 'basic', template: '{"authType":"basic","authToken":"base64(user:pass)"}' },
+        { type: 'apikey', template: '{"authType":"apikey","headers":{"X-API-Key":"votre_cle"}}' },
+      ],
+      responseExample: `{
+  "success": true,
+  "message": "API appelee avec succes",
+  "data": {
+    "fileLogId": 42,
+    "validRows": [ /* cartes valides */ ],
+    "errors": [ /* erreurs de validation */ ]
+  }
 }`
+    }
   },
   {
     id: 'process-url',
@@ -74,11 +184,51 @@ const endpoints = [
     method: 'POST',
     path: '/api/processing/process-url',
     auth: 'jwt',
-    description: 'Télécharge et traite un fichier CSV depuis une URL',
+    type: 'external',
+    description: 'Télécharge un fichier CSV depuis une URL distante et le traite automatiquement',
     bodyTemplate: `{
   "bankId": 1,
   "baseUrl": "https://serveur-externe.com/csv"
+}`,
+    docs: {
+      purpose: 'API externe — récupération et traitement de fichiers CSV hébergés sur des serveurs distants.',
+      useCase: 'Conçu pour : partenaires déposant des fichiers CSV sur un serveur FTP/HTTP, intégration avec des plateformes externes, automatisation des imports sans upload manuel.',
+      integration: [
+        'Le serveur télécharge le CSV depuis baseUrl + code banque (ex: /BT/fichier.csv)',
+        'Validation complète : en-têtes, PAN Luhn, dates, téléphones tunisiens',
+        'Détection et rejet des doublons (PAN + banque)',
+        'Les fichiers valides sont archivés et les données enregistrées',
+        'Les erreurs sont stockées et consultables dans Traitement > Erreurs',
+      ],
+      fieldMapping: [
+        { field: 'bankId', type: 'number', required: true, desc: 'ID de la banque (1=BT, 2=BIAT, 3=ATB)' },
+        { field: 'baseUrl', type: 'string', required: true, desc: 'URL de base du serveur distant' },
+      ],
+      csvFormat: {
+        headers: ['language', 'firstName', 'lastName', 'pan', 'expiry', 'phone', 'behaviour', 'action'],
+        example: 'fr;Jean;Dupont;4000056655665556;12/28;21699123456;otp;create',
+        rules: [
+          'language: fr | en | ar',
+          'pan: 16 chiffres (validation Luhn automatique)',
+          'expiry: format MM/YY ou YYYYMM',
+          'phone: format tunisien 216XXXXXXXX (11 chiffres)',
+          'behaviour: otp | sms | email',
+          'action: create | update | delete',
+        ]
+      },
+      responseExample: `{
+  "success": true,
+  "data": {
+    "fileLogId": 42,
+    "stats": {
+      "totalRows": 100,
+      "validRows": 95,
+      "invalidRows": 5,
+      "duplicateRows": 0
+    }
+  }
 }`
+    }
   }
 ];
 
@@ -110,6 +260,7 @@ const errorCatalog = {
   ],
   'call-api': [
     { code: 'BANK_ID_OR_URL_MISSING', status: 400, message: 'Paramètres manquants', explanation: 'Le champ "bankId" ou "url" est manquant dans le corps de la requête.', fix: 'Ajoutez "bankId" (ID numérique de la banque) et "url" (URL de l\'API externe).' },
+    { code: 'UNAUTHORIZED_URL', status: 400, message: 'URL non autorisée', explanation: 'L\'URL cible est une adresse IP privée ou locale. La protection SSRF bloque les accès à 10.x, 172.16-31.x, 192.168.x, localhost.', fix: 'Utilisez une URL publique accessible depuis le serveur.' },
     { code: 'EXTERNAL_API_ERROR', status: null, message: 'Erreur API externe', explanation: 'L\'appel vers l\'API externe a échoué (réseau, timeout, ou réponse non-2xx).', fix: 'Vérifiez que l\'URL est correcte et que le serveur distant est accessible.' }
   ],
   'process-url': [
@@ -149,6 +300,7 @@ const ApiTester = () => {
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [formatError, setFormatError] = useState(null);
+  const [expandedDocs, setExpandedDocs] = useState({});
   const bodyRef = useRef(null);
 
   useEffect(() => {
@@ -161,6 +313,10 @@ const ApiTester = () => {
   }, [activeEndpoint]);
 
   const endpoint = endpoints.find(e => e.id === activeEndpoint);
+
+  const toggleDocs = (section) => {
+    setExpandedDocs(prev => ({ ...prev, [section]: !prev[section] }));
+  };
 
   const formatJson = (obj) => {
     try {
@@ -308,7 +464,7 @@ const ApiTester = () => {
     <div className="api-tester-page">
       <div className="page-header">
         <h1><Terminal size={24} /> Testeur d'API</h1>
-        <p className="page-subtitle">Interface Postman-like pour tester les endpoints de l'application</p>
+        <p className="page-subtitle">Interface Postman-like pour tester les endpoints internes et externes de l'application</p>
       </div>
 
       <div className="tester-layout">
@@ -316,19 +472,38 @@ const ApiTester = () => {
         <div className="tester-sidebar">
           <div className="sidebar-section">
             <h3><Code size={16} /> Endpoints</h3>
-            {endpoints.map(ep => (
-              <button
-                key={ep.id}
-                className={'endpoint-btn ' + (activeEndpoint === ep.id ? 'active' : '')}
-                onClick={() => setActiveEndpoint(ep.id)}
-              >
-                <span className="endpoint-method" data-method={ep.method}>{ep.method}</span>
-                <div className="endpoint-info">
-                  <span className="endpoint-label">{ep.label}</span>
-                  <span className="endpoint-path">{ep.path}</span>
-                </div>
-              </button>
-            ))}
+            <div className="endpoint-group">
+              <span className="endpoint-group-label">🔒 API Interne</span>
+              {endpoints.filter(e => e.type === 'internal').map(ep => (
+                <button
+                  key={ep.id}
+                  className={'endpoint-btn ' + (activeEndpoint === ep.id ? 'active' : '')}
+                  onClick={() => setActiveEndpoint(ep.id)}
+                >
+                  <span className="endpoint-method" data-method={ep.method}>{ep.method}</span>
+                  <div className="endpoint-info">
+                    <span className="endpoint-label">{ep.label}</span>
+                    <span className="endpoint-path">{ep.path}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="endpoint-group">
+              <span className="endpoint-group-label">🌐 API Externe</span>
+              {endpoints.filter(e => e.type === 'external').map(ep => (
+                <button
+                  key={ep.id}
+                  className={'endpoint-btn ' + (activeEndpoint === ep.id ? 'active' : '')}
+                  onClick={() => setActiveEndpoint(ep.id)}
+                >
+                  <span className="endpoint-method" data-method={ep.method}>{ep.method}</span>
+                  <div className="endpoint-info">
+                    <span className="endpoint-label">{ep.label}</span>
+                    <span className="endpoint-path">{ep.path}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="sidebar-section">
@@ -370,6 +545,10 @@ const ApiTester = () => {
               <div className="request-meta">
                 <span className={'method-badge method-' + endpoint.method}>{endpoint.method}</span>
                 <span className="request-path">{endpoint.path}</span>
+                <span className={'type-badge type-' + endpoint.type}>
+                  {endpoint.type === 'external' ? <ExternalLink size={12} /> : <Database size={12} />}
+                  {endpoint.type === 'external' ? 'Externe' : 'Interne'}
+                </span>
               </div>
               <button
                 className="btn btn-primary btn-send"
@@ -382,6 +561,128 @@ const ApiTester = () => {
             </div>
 
             <p className="endpoint-desc">{endpoint.description}</p>
+
+            {/* Documentation & Integration */}
+            <div className="endpoint-docs">
+              <button
+                className={'docs-toggle ' + (expandedDocs['integration'] ? 'expanded' : '')}
+                onClick={() => toggleDocs('integration')}
+              >
+                {expandedDocs['integration'] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <Info size={16} />
+                <span>Documentation & Intégration</span>
+              </button>
+
+              {expandedDocs['integration'] && (
+                <div className="docs-content">
+                  <div className="docs-section">
+                    <h4><Shield size={14} /> Objectif</h4>
+                    <p>{endpoint.docs.purpose}</p>
+                  </div>
+
+                  <div className="docs-section">
+                    <h4><ArrowRight size={14} /> Cas d'utilisation</h4>
+                    <p>{endpoint.docs.useCase}</p>
+                  </div>
+
+                  <div className="docs-section">
+                    <h4><Code size={14} /> Guide d'intégration</h4>
+                    <ul className="integration-list">
+                      {endpoint.docs.integration.map((item, i) => (
+                        <li key={i}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="docs-section">
+                    <h4><MapPin size={14} /> Paramètres de la requête</h4>
+                    <div className="field-mapping">
+                      <div className="field-mapping-header">
+                        <span className="fm-col field-req">Oblig.</span>
+                        <span className="fm-col field-name">Champ</span>
+                        <span className="fm-col field-type">Type</span>
+                        <span className="fm-col field-desc">Description</span>
+                      </div>
+                      {endpoint.docs.fieldMapping.map((f, i) => (
+                        <div key={i} className="field-mapping-row">
+                          <span className="fm-col field-req">{f.required ? <CheckCircle size={12} className="icon-yes" /> : <XCircle size={12} className="icon-no" />}</span>
+                          <span className="fm-col field-name"><code>{f.field}</code></span>
+                          <span className="fm-col field-type"><span className="type-tag">{f.type}</span></span>
+                          <span className="fm-col field-desc">{f.desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* call-api specific: dataPath explanation */}
+                  {endpoint.id === 'call-api' && endpoint.docs.dataPathExample && (
+                    <div className="docs-section highlight-section">
+                      <h4><MapPin size={14} /> Extraction par dataPath</h4>
+                      <p className="docs-desc">Si l'API externe retourne une structure JSON imbriquée, utilisez <code>dataPath</code> pour extraire uniquement le tableau contenant les cartes :</p>
+                      <pre className="docs-code-block">{endpoint.docs.dataPathExample}</pre>
+                    </div>
+                  )}
+
+                  {/* call-api specific: auth examples */}
+                  {endpoint.id === 'call-api' && endpoint.docs.authExamples && (
+                    <div className="docs-section">
+                      <h4><Key size={14} /> Modes d'authentification supportés</h4>
+                      <div className="auth-modes">
+                        {endpoint.docs.authExamples.map((auth, i) => (
+                          <div key={i} className="auth-mode-card">
+                            <span className="auth-mode-label">{auth.type}</span>
+                            <pre className="auth-mode-code">{auth.template}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* process-url specific: CSV format */}
+                  {endpoint.id === 'process-url' && endpoint.docs.csvFormat && (
+                    <div className="docs-section highlight-section">
+                      <h4><FileText size={14} /> Format CSV attendu</h4>
+                      <p className="docs-desc">Le fichier CSV téléchargé doit respecter le format suivant :</p>
+                      <div className="csv-format">
+                        <div className="csv-headers">
+                          {endpoint.docs.csvFormat.headers.map((h, i) => (
+                            <span key={i} className="csv-header-tag">{h}</span>
+                          ))}
+                        </div>
+                        <pre className="docs-code-block">{endpoint.docs.csvFormat.example}</pre>
+                      </div>
+                      <div className="csv-rules">
+                        <h5>Règles de validation</h5>
+                        <ul className="integration-list">
+                          {endpoint.docs.csvFormat.rules.map((rule, i) => (
+                            <li key={i}>{rule}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SSRF Protection notice for external APIs */}
+                  {endpoint.type === 'external' && (
+                    <div className="docs-section security-section">
+                      <h4><Shield size={14} /> Sécurité & Protection</h4>
+                      <div className="security-notice">
+                        <AlertTriangle size={16} />
+                        <div>
+                          <strong>Protection SSRF activée</strong>
+                          <p>Les appels vers des adresses IP privées (10.x, 172.16-31.x, 192.168.x, 127.x, localhost) sont automatiquement bloqués pour prévenir les attaques SSRF.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="docs-section">
+                    <h4><Code size={14} /> Exemple de réponse</h4>
+                    <pre className="docs-code-block">{endpoint.docs.responseExample}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {endpoint.auth === 'api_key' && (
               <div className="auth-section">
@@ -444,6 +745,7 @@ const ApiTester = () => {
                 <div className="response-placeholder">
                   <Terminal size={48} />
                   <p>Configurez la requête et cliquez sur "Envoyer"</p>
+                  <p className="placeholder-hint">Ouvrez la section "Documentation & Intégration" pour voir le guide de l'API</p>
                 </div>
               )}
 

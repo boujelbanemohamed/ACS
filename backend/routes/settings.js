@@ -1,11 +1,12 @@
 const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
+const { isSuperAdmin } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Get all settings
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, isSuperAdmin, async (req, res) => {
   try {
     // Check if settings table exists
     const tableCheck = await db.query(`
@@ -63,7 +64,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Update setting
-router.put('/:key', authMiddleware, async (req, res) => {
+router.put('/:key', authMiddleware, isSuperAdmin, async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
@@ -94,7 +95,7 @@ router.put('/:key', authMiddleware, async (req, res) => {
 });
 
 // Bulk update settings
-router.post('/bulk', authMiddleware, async (req, res) => {
+router.post('/bulk', authMiddleware, isSuperAdmin, async (req, res) => {
   try {
     const { settings } = req.body;
 

@@ -9,6 +9,7 @@ const xmlGenerator = require('../services/xmlGenerator');
 const recordHistoryService = require('../services/recordHistoryService');
 const { validateRowForHistory } = require('../utils/validationHelper');
 const { authMiddleware } = require('../middleware/auth');
+const { forceBankId } = require('../middleware/roleMiddleware');
 const { processingSchemas, validate } = require('../utils/validators');
 const { encrypt, decrypt, hashPan } = require('../services/encryptionService');
 
@@ -84,7 +85,7 @@ router.get('/template', authMiddleware, (req, res) => {
 });
 
 // Process file from URL
-router.post('/process-url', authMiddleware, validate(processingSchemas.processUrl), async (req, res) => {
+router.post('/process-url', authMiddleware, forceBankId, validate(processingSchemas.processUrl), async (req, res) => {
   try {
     const { bankId, baseUrl } = req.body;
 
@@ -193,7 +194,7 @@ router.post('/process-url', authMiddleware, validate(processingSchemas.processUr
 });
 
 // Upload and process CSV file manually
-router.post('/upload', authMiddleware, upload.single('file'), validate(processingSchemas.upload), async (req, res) => {
+router.post('/upload', authMiddleware, forceBankId, upload.single('file'), validate(processingSchemas.upload), async (req, res) => {
   try {
     const { bankId } = req.body;
 
@@ -557,7 +558,7 @@ router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
 
 
 // Validate manual entries
-router.post('/validate-manual', authMiddleware, async (req, res) => {
+router.post('/validate-manual', authMiddleware, forceBankId, async (req, res) => {
   try {
     const { bankId, entries } = req.body;
     
@@ -623,7 +624,7 @@ router.post('/validate-manual', authMiddleware, async (req, res) => {
 });
 
 // Process manual entries (create CSV and XML)
-router.post('/process-manual', authMiddleware, async (req, res) => {
+router.post('/process-manual', authMiddleware, forceBankId, async (req, res) => {
   try {
     const { bankId, entries } = req.body;
     
@@ -742,7 +743,7 @@ router.post('/process-manual', authMiddleware, async (req, res) => {
 });
 
 // Call external API
-router.post('/call-api', authMiddleware, validate(processingSchemas.callApi), async (req, res) => {
+router.post('/call-api', authMiddleware, forceBankId, validate(processingSchemas.callApi), async (req, res) => {
   try {
     const { bankId, url, method, headers, body, authType, authToken, dataPath } = req.body;
 
