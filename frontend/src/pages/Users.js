@@ -172,7 +172,7 @@ const UsersPage = () => {
                   </td>
                   <td>
                     <div className="actions">
-                      {!isBankAdmin && (
+                      {(!isBankAdmin || user.role === 'bank') && (
                         <>
                           <button className="btn-icon" onClick={() => handleEdit(user)} title="Modifier">
                             <Edit2 size={16} />

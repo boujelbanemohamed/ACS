@@ -133,7 +133,10 @@ router.post('/', authMiddleware, (req, res, next) => {
 });
 
 // PUT - Modifier un utilisateur
-router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
+router.put('/:id', authMiddleware, (req, res, next) => {
+  if (req.user.role === 'super_admin' || req.user.role === 'bank_admin') return next();
+  return res.status(403).json({ success: false, message: 'Accès non autorisé' });
+}, async (req, res) => {
   try {
     const { username, email, password, role, bankId, phone, isActive } = req.body;
 
@@ -141,6 +144,20 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
     const oldUser = await db.query('SELECT * FROM users WHERE id = $1', [req.params.id]);
     if (oldUser.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
+    }
+
+    // bank_admin : restrictions
+    if (req.user.role === 'bank_admin') {
+      if (oldUser.rows[0].bank_id !== req.user.bank_id) {
+        return res.status(403).json({ success: false, message: 'Utilisateur non rattaché à votre banque' });
+      }
+      if (oldUser.rows[0].role === 'super_admin' || oldUser.rows[0].role === 'bank_admin') {
+        return res.status(403).json({ success: false, message: 'Vous ne pouvez pas modifier cet utilisateur' });
+      }
+      if (role && (role !== 'bank' && role !== 'bank_admin')) {
+        return res.status(403).json({ success: false, message: 'Role non autorisé' });
+      }
+      req.body.bankId = req.user.bank_id;
     }
 
     let query = `UPDATE users SET 
@@ -151,7 +168,7 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
       phone = COALESCE($5, phone),
       is_active = COALESCE($6, is_active)`;
     
-    let params = [username, email, role, bankId, phone, isActive];
+    let params = [username, email, role, req.body.bankId || bankId, phone, isActive];
     let paramIndex = 7;
 
     if (password) {
@@ -175,7 +192,10 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
 });
 
 // DELETE - Supprimer un utilisateur
-router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
+router.delete('/:id', authMiddleware, (req, res, next) => {
+  if (req.user.role === 'super_admin' || req.user.role === 'bank_admin') return next();
+  return res.status(403).json({ success: false, message: 'Accès non autorisé' });
+}, async (req, res) => {
   try {
     // Ne pas permettre de supprimer son propre compte
     if (parseInt(req.params.id) === req.user.id) {
@@ -186,6 +206,19 @@ router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res)
     }
 
     const oldUser = await db.query('SELECT * FROM users WHERE id = $1', [req.params.id]);
+    if (oldUser.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
+    }
+
+    // bank_admin : ne peut supprimer que les bank user de sa banque
+    if (req.user.role === 'bank_admin') {
+      if (oldUser.rows[0].bank_id !== req.user.bank_id) {
+        return res.status(403).json({ success: false, message: 'Utilisateur non rattaché à votre banque' });
+      }
+      if (oldUser.rows[0].role === 'super_admin' || oldUser.rows[0].role === 'bank_admin') {
+        return res.status(403).json({ success: false, message: 'Vous ne pouvez pas supprimer cet utilisateur' });
+      }
+    }
     
     const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING id', [req.params.id]);
 

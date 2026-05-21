@@ -13,8 +13,9 @@ const Layout = () => {
     navigate('/login');
   };
 
-  const isAdmin = user?.role === 'super_admin';
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'bank_admin';
   const isBank = user?.role === 'bank';
+  const isSuperAdmin = user?.role === 'super_admin';
 
   return (
     <div className="layout">
@@ -72,30 +73,32 @@ const Layout = () => {
             <span>Journal d'activité</span>
           </NavLink>
 
-          {isAdmin && (
-            <>
-              <NavLink to="/users" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                <Users size={20} />
-                <span>Utilisateurs</span>
-              </NavLink>
+              {isAdmin && (
+                <NavLink to="/users" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                  <Users size={20} />
+                  <span>Utilisateurs</span>
+                </NavLink>
+              )}
 
-              <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                <Clock size={20} />
-                <span>Scan Automatique</span>
-              </NavLink>
-              {user?.role === 'super_admin' && (
+              {isSuperAdmin && (
+                <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                  <Clock size={20} />
+                  <span>Scan Automatique</span>
+                </NavLink>
+              )}
+              {isSuperAdmin && (
                 <NavLink to="/notifications" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
                   <Mail size={20} />
                   <span>Notifications</span>
                 </NavLink>
               )}
-              <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                <Activity size={20} />
-                <span>Monitoring</span>
-              </NavLink>
-            </>
-          )}
-        </nav>
+              {isSuperAdmin && (
+                <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                  <Activity size={20} />
+                  <span>Monitoring</span>
+                </NavLink>
+              )}
+            </nav>
 
         <div className="sidebar-footer">
           <div className="footer-actions">
