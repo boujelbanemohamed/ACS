@@ -117,6 +117,9 @@ const UsersPage = () => {
     if (role === 'super_admin') {
       return <span className="role-badge super-admin"><Shield size={14} /> Super Admin</span>;
     }
+    if (role === 'bank_admin') {
+      return <span className="role-badge bank-admin"><Shield size={14} /> Admin Banque</span>;
+    }
     return <span className="role-badge bank"><Building2 size={14} /> Banque</span>;
   };
 
@@ -241,6 +244,7 @@ const UsersPage = () => {
                     onChange={(e) => setFormData({...formData, role: e.target.value})}
                   >
                     <option value="super_admin">Super Admin</option>
+                    <option value="bank_admin">Admin Banque</option>
                     <option value="bank">Banque</option>
                   </select>
                 </div>
@@ -256,13 +260,13 @@ const UsersPage = () => {
                 </div>
               </div>
 
-              {formData.role === 'bank' && (
+              {(formData.role === 'bank' || formData.role === 'bank_admin') && (
                 <div className="form-group">
                   <label>Banque associee *</label>
                   <select
                     value={formData.bankId}
                     onChange={(e) => setFormData({...formData, bankId: e.target.value})}
-                    required={formData.role === 'bank'}
+                    required={formData.role === 'bank' || formData.role === 'bank_admin'}
                   >
                     <option value="">Selectionnez une banque</option>
                     {banks.map(bank => (

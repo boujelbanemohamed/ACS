@@ -108,6 +108,11 @@
   color: #92400e;
 }
 
+.role-badge.bank-admin {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
 .role-badge.bank {
   background: #dbeafe;
   color: #1e40af;

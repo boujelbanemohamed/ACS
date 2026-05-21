@@ -71,8 +71,8 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       });
     }
 
-    // Si role = bank, bankId est requis
-    if (role === 'bank' && !bankId) {
+    // Si role = bank ou bank_admin, bankId est requis
+    if ((role === 'bank' || role === 'bank_admin') && !bankId) {
       return res.status(400).json({
         success: false,
         message: 'Une banque doit etre associee pour un utilisateur de type banque'
