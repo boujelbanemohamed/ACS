@@ -228,7 +228,18 @@ const UsersPage = () => {
               </div>
 
               <div className="form-row">
-                {!isBankAdmin && (
+                {isBankAdmin ? (
+                  <div className="form-group">
+                    <label>Role *</label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({...formData, role: e.target.value})}
+                    >
+                      <option value="bank_admin">Admin Banque</option>
+                      <option value="bank">Banque</option>
+                    </select>
+                  </div>
+                ) : (
                   <div className="form-group">
                     <label>Role *</label>
                     <select

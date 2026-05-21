@@ -82,9 +82,9 @@ router.post('/', authMiddleware, (req, res, next) => {
       });
     }
 
-    // bank_admin peut uniquement créer des bank user pour sa banque
+    // bank_admin peut créer des bank et bank_admin pour sa banque
     if (req.user.role === 'bank_admin') {
-      if (role && role !== 'bank') {
+      if (role && role !== 'bank' && role !== 'bank_admin') {
         return res.status(403).json({
           success: false,
           message: 'Vous pouvez uniquement créer des utilisateurs de type Banque'
