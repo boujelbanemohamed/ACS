@@ -66,7 +66,7 @@ const userSchemas = {
       .messages({
         'string.min': 'Le mot de passe doit avoir au moins 6 caractères'
       }),
-    role: Joi.string().valid('super_admin', 'bank').default('bank'),
+    role: Joi.string().valid('super_admin', 'bank', 'bank_admin').default('bank'),
     bankId: Joi.number().integer().allow(null),
     phone: Joi.string().max(20).allow(null, '')
   }),
@@ -75,7 +75,7 @@ const userSchemas = {
     username: Joi.string().min(3).max(100),
     email: Joi.string().email(),
     password: Joi.string().min(6).max(100).allow(null, ''),
-    role: Joi.string().valid('super_admin', 'bank'),
+    role: Joi.string().valid('super_admin', 'bank', 'bank_admin'),
     bankId: Joi.number().integer().allow(null),
     phone: Joi.string().max(20).allow(null, ''),
     isActive: Joi.boolean()

@@ -72,7 +72,7 @@ const filterByBank = (req, res, next) => {
     return next();
   }
 
-  if (req.user.role === 'bank' && req.user.bank_id) {
+  if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
     req.query.bankId = req.user.bank_id;
     req.bankFilter = req.user.bank_id;
   }
@@ -88,7 +88,7 @@ const forceBankId = (req, res, next) => {
     });
   }
 
-  if (req.user.role === 'bank' && req.user.bank_id) {
+  if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
     req.body.bankId = req.user.bank_id;
   }
 

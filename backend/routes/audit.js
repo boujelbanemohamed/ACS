@@ -19,10 +19,18 @@ router.get('/', authMiddleware, async (req, res) => {
     let params = [];
     let paramIndex = 1;
 
-    if (req.user.role !== 'super_admin') {
+    if (req.user.role === 'super_admin') {
+      // super_admin voit tout
+    } else if (req.user.role === 'bank_admin') {
+      // bank_admin voit toute sa banque
       whereClause.push(`al.bank_id = $${paramIndex}`);
       params.push(req.user.bank_id);
       paramIndex++;
+    } else {
+      // bank (user) voit seulement ses propres actions
+      whereClause.push(`al.bank_id = $${paramIndex} AND al.user_id = $${paramIndex + 1}`);
+      params.push(req.user.bank_id, req.user.id);
+      paramIndex += 2;
     }
 
     if (action) {
