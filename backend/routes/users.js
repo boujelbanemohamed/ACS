@@ -14,7 +14,10 @@ router.get('/', authMiddleware, (req, res, next) => {
 }, async (req, res) => {
   try {
     let query;
+    let countQuery;
     let params = [];
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const offset = parseInt(req.query.offset) || 0;
 
     if (req.user.role === 'super_admin') {
       query = `
@@ -24,7 +27,10 @@ router.get('/', authMiddleware, (req, res, next) => {
         FROM users u
         LEFT JOIN banks b ON u.bank_id = b.id
         ORDER BY u.created_at DESC
+        LIMIT $1 OFFSET $2
       `;
+      countQuery = 'SELECT COUNT(*) as total FROM users';
+      params = [limit, offset];
     } else {
       query = `
         SELECT u.id, u.username, u.email, u.role, u.bank_id, u.is_active, 
@@ -34,12 +40,25 @@ router.get('/', authMiddleware, (req, res, next) => {
         LEFT JOIN banks b ON u.bank_id = b.id
         WHERE u.bank_id = $1
         ORDER BY u.created_at DESC
+        LIMIT $2 OFFSET $3
       `;
-      params = [req.user.bank_id];
+      countQuery = 'SELECT COUNT(*) as total FROM users WHERE bank_id = $1';
+      params = [req.user.bank_id, limit, offset];
     }
 
-    const result = await db.query(query, params);
-    res.json({ success: true, data: result.rows });
+    const [result, countResult] = await Promise.all([
+      db.query(query, params),
+      db.query(countQuery, req.user.role === 'super_admin' ? [] : [req.user.bank_id])
+    ]);
+    res.json({
+      success: true,
+      data: result.rows,
+      pagination: {
+        total: parseInt(countResult.rows[0].total),
+        limit,
+        offset
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

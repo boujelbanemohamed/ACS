@@ -139,21 +139,34 @@ router.post('/send-all', authMiddleware, superAdminOnly, async (req, res) => {
 router.get('/logs', authMiddleware, async (req, res) => {
   try {
     const { bankId } = req.query;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
     const offset = parseInt(req.query.offset) || 0;
     let query = 'SELECT nl.*, b.name as bank_name FROM notification_logs nl LEFT JOIN banks b ON nl.bank_id = b.id';
+    let countQuery = 'SELECT COUNT(*) as total FROM notification_logs nl LEFT JOIN banks b ON nl.bank_id = b.id';
     const params = [];
+    const countParams = [];
     if (req.user.role === 'bank') {
       query += ' WHERE nl.bank_id = $1';
+      countQuery += ' WHERE nl.bank_id = $1';
       params.push(req.user.bank_id);
+      countParams.push(req.user.bank_id);
     } else if (bankId) {
       query += ' WHERE nl.bank_id = $1';
+      countQuery += ' WHERE nl.bank_id = $1';
       params.push(bankId);
+      countParams.push(bankId);
     }
     query += ' ORDER BY nl.sent_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
     params.push(limit, offset);
-    const result = await db.query(query, params);
-    res.json({ success: true, data: result.rows });
+    const [result, countResult] = await Promise.all([
+      db.query(query, params),
+      db.query(countQuery, countParams)
+    ]);
+    res.json({
+      success: true,
+      data: result.rows,
+      pagination: { total: parseInt(countResult.rows[0].total), limit, offset }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Erreur serveur' });
   }

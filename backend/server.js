@@ -2,6 +2,17 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+// Sentry (APM) — activé via SENTRY_DSN
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('@sentry/node');
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0.1,
+  });
+  console.log('Sentry APM initialisé');
+}
+
 const db = require('./config/database');
 const authRoutes = require('./routes/auth');
 const banksRoutes = require('./routes/banks');
@@ -24,10 +35,14 @@ const compression = require('compression');
 const morgan = require('morgan');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/auth');
-const { checkRole } = require('./middleware/roleMiddleware');
+const { checkRole, checkFeature } = require('./middleware/roleMiddleware');
 const { maskResponseData } = require('./services/encryptionService');
 
 if (!process.env.PAN_ENCRYPTION_KEY) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('ERREUR CRITIQUE: PAN_ENCRYPTION_KEY non configurée en production!');
+    process.exit(1);
+  }
   console.warn('⚠️  PAN_ENCRYPTION_KEY non configurée - le PAN est stocké en clair dans la DB');
   console.warn('   Définissez une clé AES-256 sécurisée pour la production.');
 }
@@ -89,6 +104,22 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth/login', authLimiter);
 
+// Production error sanitizer — masque les messages d'erreur interne dans les réponses 5xx
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    const originalJson = res.json.bind(res);
+    res.json = function (body) {
+      if (res.statusCode >= 500 && body) {
+        body.message = 'Erreur serveur interne';
+        delete body.error;
+        delete body.stack;
+      }
+      return originalJson(body);
+    };
+  }
+  next();
+});
+
 // PAN masking middleware - masque automatiquement tous les PAN dans les réponses JSON
 app.use((req, res, next) => {
   const originalJson = res.json.bind(res);
@@ -103,23 +134,23 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/banks', banksRoutes);
-app.use('/api/processing', processingRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/records', recordsRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/xml-logs', xmlLogsRoutes);
-app.use('/api/history', historyRoutes);
+app.use('/api/banks', authMiddleware, checkFeature('banks'), banksRoutes);
+app.use('/api/processing', authMiddleware, checkFeature('processing'), processingRoutes);
+app.use('/api/dashboard', authMiddleware, checkFeature('dashboard'), dashboardRoutes);
+app.use('/api/records', authMiddleware, checkFeature('records'), recordsRoutes);
+app.use('/api/settings', authMiddleware, checkFeature('settings'), settingsRoutes);
+app.use('/api/xml-logs', authMiddleware, checkFeature('xml_logs'), xmlLogsRoutes);
+app.use('/api/history', authMiddleware, checkFeature('history'), historyRoutes);
 app.use('/api/v1', publicApiRoutes);
-app.use('/api/record-history', recordHistoryRoutes);
-app.use('/api/api-keys', apiKeysRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/enrollment', enrollmentRoutes);
-app.use('/api/notifications', notificationsRoutes);
-app.use('/api/scanner', require('./routes/scanner'));
-app.use('/api/monitoring', require('./routes/monitoring'));
-app.use('/api/audit-logs', require('./routes/audit'));
-app.use('/api/role-features', require('./routes/roleFeatures'));
+app.use('/api/record-history', authMiddleware, checkFeature('history'), recordHistoryRoutes);
+app.use('/api/api-keys', authMiddleware, checkFeature('api_keys'), apiKeysRoutes);
+app.use('/api/users', authMiddleware, checkFeature('users'), usersRoutes);
+app.use('/api/enrollment', authMiddleware, checkFeature('enrollment'), enrollmentRoutes);
+app.use('/api/notifications', authMiddleware, checkFeature('notifications'), notificationsRoutes);
+app.use('/api/scanner', authMiddleware, checkFeature('cron'), require('./routes/scanner'));
+app.use('/api/monitoring', authMiddleware, checkFeature('monitoring'), require('./routes/monitoring'));
+app.use('/api/audit-logs', authMiddleware, checkFeature('audit_logs'), require('./routes/audit'));
+app.use('/api/role-features', authMiddleware, require('./routes/roleFeatures'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
@@ -133,14 +164,19 @@ app.get('/api/health', async (req, res) => {
   } catch (error) {
     res.status(503).json({
       success: false,
-      message: 'Erreur de connexion a la base de donnees',
-      error: error.message
+      message: process.env.NODE_ENV === 'production' ? 'Erreur de connexion a la base de donnees' : error.message
     });
   }
 });
 
 // 404 handler
 app.use(notFoundHandler);
+
+// Sentry error handler (must be before the global error handler)
+if (process.env.SENTRY_DSN) {
+  const Sentry = require('@sentry/node');
+  app.use(Sentry.Handlers.errorHandler());
+}
 
 // Error handler global
 app.use(errorHandler);

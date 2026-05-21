@@ -6,60 +6,77 @@ const router = express.Router();
 
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const { bankId } = req.query;
+    const { bankId, dateFrom, dateTo } = req.query;
     let bankFilterId = bankId ? parseInt(bankId) : null;
+    const hasDateFilter = dateFrom || dateTo;
 
-    if (req.user.role === 'bank' && req.user.bank_id) {
+    if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
       bankFilterId = req.user.bank_id;
     }
 
-    const totalBanks = await db.query(
+    const bankClause = bankFilterId ? ' AND bank_id = $1' : '';
+    const bankParams = bankFilterId ? [bankFilterId] : [];
+
+    const dateClause = (column, offset = 0) => {
+      let clause = '';
+      const params = [];
+      if (dateFrom) {
+        clause += ` AND ${column} >= $${params.length + 1 + offset}`;
+        params.push(dateFrom);
+      }
+      if (dateTo) {
+        clause += ` AND ${column} <= $${params.length + 1 + offset}`;
+        params.push(dateTo + ' 23:59:59');
+      }
+      return { clause, params };
+    };
+
+    const totalBanksQ = await db.query(
       bankFilterId
         ? 'SELECT COUNT(*) FROM banks WHERE is_active = true AND id = $1'
         : 'SELECT COUNT(*) FROM banks WHERE is_active = true',
-      bankFilterId ? [bankFilterId] : []
+      bankParams
     );
 
-    const totalRecords = await db.query(
-      bankFilterId
-        ? 'SELECT COUNT(*) FROM processed_records WHERE bank_id = $1'
-        : 'SELECT COUNT(*) FROM processed_records',
-      bankFilterId ? [bankFilterId] : []
+    const { clause: recClause, params: recParams } = dateClause('processed_at', bankParams.length);
+    const totalRecordsQ = await db.query(
+      `SELECT COUNT(*) FROM processed_records WHERE 1=1${bankClause}${recClause}`,
+      [...bankParams, ...recParams]
     );
 
-    const todayFiles = await db.query(
-      bankFilterId
-        ? 'SELECT COUNT(*) FROM file_logs WHERE DATE(processed_at) = CURRENT_DATE AND bank_id = $1'
-        : 'SELECT COUNT(*) FROM file_logs WHERE DATE(processed_at) = CURRENT_DATE',
-      bankFilterId ? [bankFilterId] : []
+    let todayFilesQ;
+    if (hasDateFilter) {
+      const { clause: fileClause, params: fileParams } = dateClause('processed_at', bankParams.length);
+      todayFilesQ = await db.query(
+        `SELECT COUNT(*) FROM file_logs WHERE 1=1${bankClause}${fileClause}`,
+        [...bankParams, ...fileParams]
+      );
+    } else {
+      todayFilesQ = await db.query(
+        `SELECT COUNT(*) FROM file_logs WHERE DATE(processed_at) = CURRENT_DATE${bankClause}`,
+        bankParams
+      );
+    }
+
+    const { clause: errClause, params: errParams } = dateClause('ve.created_at', bankParams.length);
+    const pendingErrorsQ = await db.query(
+      `SELECT COUNT(*) FROM validation_errors ve
+       JOIN file_logs fl ON ve.file_log_id = fl.id
+       WHERE ve.is_resolved = false${bankFilterId ? ' AND fl.bank_id = $1' : ''}${errClause}`,
+      [...bankParams, ...errParams]
     );
 
-    const pendingErrors = await db.query(
-      bankFilterId
-        ? `SELECT COUNT(*) FROM validation_errors ve 
-           JOIN file_logs fl ON ve.file_log_id = fl.id 
-           WHERE ve.is_resolved = false AND fl.bank_id = $1`
-        : `SELECT COUNT(*) FROM validation_errors ve 
-           JOIN file_logs fl ON ve.file_log_id = fl.id 
-           WHERE ve.is_resolved = false`,
-      bankFilterId ? [bankFilterId] : []
+    const { clause: actClause, params: actParams } = dateClause('fl.processed_at', bankParams.length);
+    const recentActivityQ = await db.query(
+      `SELECT fl.*, b.name as bank_name, b.code as bank_code
+       FROM file_logs fl
+       JOIN banks b ON fl.bank_id = b.id
+       WHERE 1=1${bankFilterId ? ' AND fl.bank_id = $1' : ''}${actClause}
+       ORDER BY fl.processed_at DESC LIMIT 10`,
+      [...bankParams, ...actParams]
     );
 
-    const recentActivity = await db.query(
-      bankFilterId
-        ? `SELECT fl.*, b.name as bank_name, b.code as bank_code
-           FROM file_logs fl
-           JOIN banks b ON fl.bank_id = b.id
-           WHERE fl.bank_id = $1
-           ORDER BY fl.processed_at DESC LIMIT 10`
-        : `SELECT fl.*, b.name as bank_name, b.code as bank_code
-           FROM file_logs fl
-           JOIN banks b ON fl.bank_id = b.id
-           ORDER BY fl.processed_at DESC LIMIT 10`,
-      bankFilterId ? [bankFilterId] : []
-    );
-
-    const bankStats = await db.query(
+    const bankStatsQ = await db.query(
       bankFilterId
         ? `SELECT b.id, b.name, b.code,
            COUNT(DISTINCT pr.id) as total_records,
@@ -81,18 +98,18 @@ router.get('/', authMiddleware, async (req, res) => {
            LEFT JOIN file_logs fl ON fl.bank_id = b.id
            WHERE b.is_active = true
            GROUP BY b.id, b.name, b.code ORDER BY b.name`,
-      bankFilterId ? [bankFilterId] : []
+      bankParams
     );
 
     res.json({
       success: true,
       data: {
-        totalBanks: parseInt(totalBanks.rows[0].count),
-        totalRecords: parseInt(totalRecords.rows[0].count),
-        todayFiles: parseInt(todayFiles.rows[0].count),
-        pendingErrors: parseInt(pendingErrors.rows[0].count),
-        recentActivity: recentActivity.rows,
-        bankStats: bankStats.rows
+        totalBanks: parseInt(totalBanksQ.rows[0].count),
+        totalRecords: parseInt(totalRecordsQ.rows[0].count),
+        todayFiles: parseInt(todayFilesQ.rows[0].count),
+        pendingErrors: parseInt(pendingErrorsQ.rows[0].count),
+        recentActivity: recentActivityQ.rows,
+        bankStats: bankStatsQ.rows,
       }
     });
   } catch (error) {

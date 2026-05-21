@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Building2, FileText, CheckCircle, Clock, Database, Activity, AlertTriangle, Zap, BarChart3, ArrowRight, RefreshCw, Inbox, ChevronRight } from 'lucide-react';
+import { Building2, FileText, CheckCircle, Clock, Database, Activity, AlertTriangle, Zap, BarChart3, ArrowRight, RefreshCw, Inbox, ChevronRight, Calendar, Filter } from 'lucide-react';
 import api from '../services/api';
 import './Dashboard.css';
 
@@ -37,15 +37,21 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([]);
   const [bankStatistics, setBankStatistics] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [showFilter, setShowFilter] = useState(false);
 
-  useEffect(() => {
-    if (user) fetchDashboardData();
-  }, [user]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
+    setLoading(true);
     try {
-      const bp = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
-      const res = await api.get('/dashboard' + bp);
+      const params = new URLSearchParams();
+      if (user?.role !== 'super_admin' && user?.bank_id) {
+        params.set('bankId', user.bank_id);
+      }
+      if (showFilter && dateFrom) params.set('dateFrom', dateFrom);
+      if (showFilter && dateTo) params.set('dateTo', dateTo);
+      const qs = params.toString();
+      const res = await api.get('/dashboard' + (qs ? '?' + qs : ''));
       if (res.data.success) {
         const d = res.data.data;
         setStats({
@@ -62,6 +68,18 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
+  }, [user, dateFrom, dateTo, showFilter]);
+
+  useEffect(() => {
+    if (user) fetchDashboardData();
+  }, [user, fetchDashboardData]);
+
+  const toggleFilter = () => {
+    if (showFilter) {
+      setDateFrom('');
+      setDateTo('');
+    }
+    setShowFilter(!showFilter);
   };
 
   if (loading) {
@@ -130,6 +148,31 @@ const Dashboard = () => {
             </div>
           );
         })}
+      </div>
+
+      {/* Date Filter */}
+      <div className="dashboard-filter">
+        <button className={`filter-toggle ${showFilter ? 'active' : ''}`} onClick={toggleFilter}>
+          <Filter size={16} /> Filtre Date {showFilter ? '' : ''}
+          {showFilter && <span className="filter-active">actif</span>}
+        </button>
+        {showFilter && (
+          <div className="filter-inputs">
+            <div className="filter-group">
+              <Calendar size={14} />
+              <label>Du</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            </div>
+            <div className="filter-group">
+              <Calendar size={14} />
+              <label>Au</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            </div>
+            <button className="filter-apply" onClick={fetchDashboardData}>
+              <RefreshCw size={14} /> Appliquer
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Content Grid */}

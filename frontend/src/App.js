@@ -18,6 +18,7 @@ import Users from './pages/Users';
 import Profile from './pages/Profile';
 import AuditLogs from './pages/AuditLogs';
 import RoleFeatures from './pages/RoleFeatures';
+import ChangePassword from './pages/ChangePassword';
 import './App.css';
 
 const PrivateRoute = ({ children }) => {
@@ -38,6 +39,11 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/change-password" element={
+            <PrivateRoute>
+              <ChangePassword />
+            </PrivateRoute>
+          } />
           
           <Route path="/" element={
             <PrivateRoute>

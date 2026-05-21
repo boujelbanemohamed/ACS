@@ -32,7 +32,11 @@ const Login = () => {
     setLoading(false);
     
     if (result.success) {
-      navigate('/dashboard');
+      if (result.must_change_password) {
+        navigate('/change-password');
+      } else {
+        navigate('/dashboard');
+      }
     } else {
       setError(result.error);
     }

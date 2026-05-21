@@ -1,5 +1,12 @@
 -- Database initialization script
 
+-- Schema migrations tracking
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Users table for authentication
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
@@ -243,9 +250,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     username VARCHAR(100),
+    user_role VARCHAR(20),
     action VARCHAR(50) NOT NULL,
     table_name VARCHAR(100),
     record_id INTEGER,
+    bank_id INTEGER REFERENCES banks(id) ON DELETE SET NULL,
     old_data JSONB,
     new_data JSONB,
     ip_address VARCHAR(50),
@@ -291,8 +300,8 @@ ON CONFLICT (key) DO NOTHING;
 
 -- Insert default admin user (password: Admin@123)
 -- Hash genere avec bcrypt rounds=10
-INSERT INTO users (username, password, email, role, is_active) 
-VALUES ('admin', '$2a$10$v57TI8GSY9ZdFccfJUYV8OUgb1sGwVt2q5HaycS8kR7l6XaOnxzzq', 'admin@banking.com', 'super_admin', true)
+INSERT INTO users (username, password, email, role, is_active, must_change_password) 
+VALUES ('admin', '$2a$10$v57TI8GSY9ZdFccfJUYV8OUgb1sGwVt2q5HaycS8kR7l6XaOnxzzq', 'admin@banking.com', 'super_admin', true, true)
 ON CONFLICT (username) DO NOTHING;
 
 -- Insert sample banks
@@ -398,4 +407,13 @@ SELECT
 FROM record_history rh
 JOIN banks b ON rh.bank_id = b.id
 ORDER BY rh.processed_at DESC;
+
+-- Migration: add missing columns to existing audit_logs table
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_role VARCHAR(20);
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS bank_id INTEGER REFERENCES banks(id) ON DELETE SET NULL;
+
+-- Migration: password change enforcement
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+UPDATE users SET must_change_password = true, password_changed_at = NULL WHERE username = 'admin' AND must_change_password IS NULL;
 

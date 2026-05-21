@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: banking_user
+          POSTGRES_PASSWORD: banking_password
+          POSTGRES_DB: banking_db
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd pg_isready -U banking_user -d banking_db
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - run: npm ci --omit=dev
+
+      - run: npm ci
+        working-directory: ./frontend
+
+      - name: Run backend tests
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 15432
+          DB_NAME: banking_db
+          DB_USER: banking_user
+          DB_PASSWORD: banking_password
+          JWT_SECRET: test_jwt_secret_key_32_characters_long!
+          PAN_ENCRYPTION_KEY: test-pan-key-32chars!!
+          PORT: 5000
+          CORS_ORIGIN: http://localhost:3000
+        run: npm test
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Lint backend
+        working-directory: ./backend
+        run: |
+          npm ci --omit=dev
+          npx eslint . --ext .js || echo "Lint warnings (non-blocking)"
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build

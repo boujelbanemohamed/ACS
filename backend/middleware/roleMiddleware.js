@@ -1,3 +1,6 @@
+const db = require('../config/database');
+const roleFeaturesService = require('../services/roleFeaturesService');
+
 const checkRole = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -95,10 +98,56 @@ const forceBankId = (req, res, next) => {
   next();
 };
 
+const checkFeature = (featureName) => {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false, message: 'Non authentifié'
+      });
+    }
+    if (req.user.role === 'super_admin') {
+      return next();
+    }
+    try {
+      const features = await roleFeaturesService.getEffectiveFeatures(
+        req.user.id, req.user.role, req.user.bank_id
+      );
+      if (!features[featureName]) {
+        return res.status(403).json({
+          success: false, message: 'Accès refusé : fonctionnalité non autorisée'
+        });
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+};
+
+const isSuperAdminOrBankAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Non authentifié'
+    });
+  }
+
+  if (req.user.role === 'super_admin' || req.user.role === 'bank_admin') {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: 'Accès réservé aux administrateurs'
+  });
+};
+
 module.exports = {
   checkRole,
   checkBankAccess,
   isSuperAdmin,
+  isSuperAdminOrBankAdmin,
   filterByBank,
-  forceBankId
+  forceBankId,
+  checkFeature
 };

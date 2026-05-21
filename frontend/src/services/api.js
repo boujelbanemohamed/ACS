@@ -21,11 +21,17 @@ api.interceptors.request.use(
 );
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.config.url === '/auth/login' && response.data?.data?.must_change_password) {
+      localStorage.setItem('must_change_password', 'true');
+    }
+    return response;
+  },
   (error) => {
     if (error.response && error.response.status === 401 && !window.location.pathname.includes('/login')) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
+      localStorage.removeItem("must_change_password");
       window.location.href = "/login";
     }
     return Promise.reject(error);
@@ -36,7 +42,7 @@ export const authAPI = {
   login: (credentials) => api.post("/auth/login", credentials),
   register: (userData) => api.post("/auth/register", userData),
   getMe: () => api.get("/auth/me"),
-  changePassword: (passwords) => api.post("/auth/change-password", passwords),
+  changePassword: (passwords) => api.put("/auth/change-password", passwords),
 };
 
 export const banksAPI = {

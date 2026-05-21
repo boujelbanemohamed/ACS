@@ -59,12 +59,20 @@ router.get('/stats', authMiddleware, isSuperAdmin, async (req, res) => {
 // GET - Logs d'une API Key
 router.get('/:id/logs', authMiddleware, isSuperAdmin, async (req, res) => {
   try {
-    const { limit = 50, offset = 0 } = req.query;
-    const result = await db.query(
-      `SELECT * FROM api_logs WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-      [req.params.id, limit, offset]
-    );
-    res.json({ success: true, data: result.rows });
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const offset = parseInt(req.query.offset) || 0;
+    const [result, countResult] = await Promise.all([
+      db.query(
+        `SELECT * FROM api_logs WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+        [req.params.id, limit, offset]
+      ),
+      db.query('SELECT COUNT(*) as total FROM api_logs WHERE api_key_id = $1', [req.params.id])
+    ]);
+    res.json({
+      success: true,
+      data: result.rows,
+      pagination: { total: parseInt(countResult.rows[0].total), limit, offset }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -175,7 +175,94 @@
   color: #6b7280;
 }
 
-/* ── Content Grid ── */
+  /* ── Date Filter ── */
+  .dashboard-filter {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    font-size: 13px;
+    color: #495057;
+    transition: all 0.2s;
+  }
+
+  .filter-toggle:hover {
+    background: #f8f9fa;
+  }
+
+  .filter-toggle.active {
+    border-color: #667eea;
+    color: #667eea;
+    background: #f0f0ff;
+  }
+
+  .filter-active {
+    font-size: 10px;
+    background: #667eea;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .filter-inputs {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+  }
+
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #6c757d;
+    font-size: 13px;
+  }
+
+  .filter-group input[type="date"] {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 13px;
+    color: #1a1a2e;
+  }
+
+  .filter-apply {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    background: #667eea;
+    color: white;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s;
+  }
+
+  .filter-apply:hover {
+    background: #5a6fd6;
+  }
+
+  /* ── Content Grid ── */
 .content-grid {
   display: grid;
   grid-template-columns: 1.6fr 1fr;

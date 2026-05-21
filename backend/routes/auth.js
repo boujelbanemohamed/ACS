@@ -7,8 +7,11 @@ const emailService = require('../services/emailService');
 
 const { authSchemas, validate } = require('../utils/validators');
 const auditService = require('../services/auditService');
+const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
+
+const PASSWORD_EXPIRY_DAYS = parseInt(process.env.PASSWORD_EXPIRY_DAYS, 10) || 90;
 
 // Login avec bcrypt
 router.post('/login', validate(authSchemas.login), async (req, res) => {
@@ -48,13 +51,18 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
     await db.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
     await auditService.log(user.id, user.username, user.role, 'LOGIN_SUCCESS', 'users', user.id, null, null, { user: { id: user.id, username: user.username, role: user.role, bank_id: user.bank_id }, ip: req.ip, connection: req.connection });
 
+    const passwordExpired = user.password_changed_at && (
+      new Date(user.password_changed_at).getTime() + (PASSWORD_EXPIRY_DAYS * 24 * 60 * 60 * 1000) < Date.now()
+    );
+
     const token = jwt.sign(
       { 
         id: user.id, 
         username: user.username, 
         email: user.email,
         role: user.role,
-        bank_id: user.bank_id
+        bank_id: user.bank_id,
+        must_change_password: user.must_change_password || false
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE || '24h' }
@@ -73,7 +81,9 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
           bank_id: user.bank_id,
           bank_name: user.bank_name,
           bank_code: user.bank_code
-        }
+        },
+        must_change_password: user.must_change_password || false,
+        password_expired: passwordExpired
       }
     });
   } catch (error) {
@@ -83,6 +93,87 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
       message: 'Erreur lors de la connexion',
       error: error.message
     });
+  }
+});
+
+// Changement de mot de passe (utilisateur connecté)
+router.put('/change-password', authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Mot de passe actuel et nouveau mot de passe requis' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'Le nouveau mot de passe doit contenir au moins 8 caractères' });
+    }
+
+    if (newPassword.length > 128) {
+      return res.status(400).json({ success: false, message: 'Le mot de passe est trop long' });
+    }
+
+    const userResult = await db.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+    }
+
+    const isValid = await bcrypt.compare(currentPassword, userResult.rows[0].password);
+    if (!isValid) {
+      await auditService.log(req.user.id, req.user.username, req.user.role, 'CHANGE_PASSWORD_FAILED', 'users', req.user.id, null, { reason: 'wrong_current_password' }, req);
+      return res.status(400).json({ success: false, message: 'Mot de passe actuel incorrect' });
+    }
+
+    const samePassword = await bcrypt.compare(newPassword, userResult.rows[0].password);
+    if (samePassword) {
+      return res.status(400).json({ success: false, message: 'Le nouveau mot de passe doit être différent de l\'ancien' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await db.query(
+      'UPDATE users SET password = $1, must_change_password = false, password_changed_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [hashedPassword, req.user.id]
+    );
+
+    await auditService.log(req.user.id, req.user.username, req.user.role, 'CHANGE_PASSWORD_SUCCESS', 'users', req.user.id, null, null, req);
+
+    res.json({ success: true, message: 'Mot de passe changé avec succès' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors du changement de mot de passe'
+    });
+  }
+});
+
+// Vérifier si le mot de passe est expiré
+router.get('/password-status', authMiddleware, async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT must_change_password, password_changed_at FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
+    }
+    const user = result.rows[0];
+    const passwordExpired = user.password_changed_at && (
+      new Date(user.password_changed_at).getTime() + (PASSWORD_EXPIRY_DAYS * 24 * 60 * 60 * 1000) < Date.now()
+    );
+    res.json({
+      success: true,
+      data: {
+        must_change_password: user.must_change_password || false,
+        password_expired: !!passwordExpired,
+        password_changed_at: user.password_changed_at,
+        password_expires_days: PASSWORD_EXPIRY_DAYS
+      }
+    });
+  } catch (error) {
+    console.error('Password status error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de la vérification' });
   }
 });
 
@@ -162,7 +253,7 @@ router.post('/reset-password', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     await db.query(
-      'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
+      'UPDATE users SET password = $1, must_change_password = false, password_changed_at = CURRENT_TIMESTAMP, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
       [hashedPassword, userResult.rows[0].id]
     );
 

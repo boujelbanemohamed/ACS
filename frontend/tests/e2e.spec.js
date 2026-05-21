@@ -4,7 +4,7 @@ const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'Admin@123';
 const BANK_USER = 'bankuser';
 const BANK_PASS = 'Bank1234!';
-const API_BASE = process.env.API_URL || 'http://localhost:5001';
+const API_BASE = process.env.API_URL || 'http://localhost:8000';
 
 test.describe('ACS Banking CSV Processor - Tests E2E', () => {
 
@@ -598,5 +598,510 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
     });
 
   });
+
+test.describe('Banques - CRUD Complet', () => {
+
+  test('super_admin cree une banque', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/banks`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        code: 'E2E', name: 'Banque E2E Test',
+        source_url: '/data/banks/E2E/source',
+        destination_url: '/data/banks/E2E/destination',
+        old_url: '/data/banks/E2E/archive',
+        xml_output_url: '/data/banks/E2E/xml'
+      }
+    });
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.code).toBe('E2E');
+  });
+
+  test('super_admin modifie une banque', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.put(`${API_BASE}/api/banks/1`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { name: 'Banque de Tunisie (Modifiée)' }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.name).toContain('Modifiée');
+  });
+
+  test('super_admin supprime la banque E2E', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const list = await request.get(`${API_BASE}/api/banks`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const banks = (await list.json()).data || [];
+    const e2eBank = banks.find(b => b.code === 'E2E');
+    if (!e2eBank) return; // already cleaned up
+
+    const res = await request.delete(`${API_BASE}/api/banks/${e2eBank.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('bank user ne peut pas creer de banque (confirmation)', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: BANK_USER, password: BANK_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/banks`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { code: 'XSS', name: 'X', source_url: '/x', destination_url: '/x', old_url: '/x' }
+    });
+    expect(res.status()).toBe(403);
+  });
+
+});
+
+test.describe('Utilisateurs - CRUD Complet', () => {
+
+  test('super_admin cree un utilisateur bank_admin', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/users`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        username: `e2e_admin_${Date.now()}`,
+        email: `e2e_admin_${Date.now()}@test.com`,
+        password: 'Test1234!',
+        role: 'bank_admin',
+        bankId: 1
+      }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.role).toBe('bank_admin');
+  });
+
+  test('super_admin cree un utilisateur bank', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/users`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        username: `e2e_bank_${Date.now()}`,
+        email: `e2e_bank_${Date.now()}@test.com`,
+        password: 'Test1234!',
+        role: 'bank',
+        bankId: 1
+      }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.role).toBe('bank');
+  });
+
+  test('super_admin recupere un utilisateur par ID', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/users/1`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data.id).toBe(1);
+  });
+
+  test('bank user ne peut pas creer un utilisateur', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: BANK_USER, password: BANK_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/users`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { username: 'hacker', email: 'h@h.com', password: 'Test1234!', role: 'bank', bank_id: 1 }
+    });
+    expect(res.status()).toBe(403);
+  });
+
+});
+
+test.describe('API Keys - Gestion Complete', () => {
+
+  test('super_admin cree une cle API', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { bank_id: 1, name: `E2E Test Key ${Date.now()}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveProperty('api_key');
+    expect(body.data).toHaveProperty('id');
+  });
+
+  test('super_admin liste les cles API', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  test('super_admin consulte les logs d une cle API', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const list = await request.get(`${API_BASE}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const keys = (await list.json()).data || [];
+    if (keys.length === 0) return;
+
+    const res = await request.get(`${API_BASE}/api/api-keys/${keys[0].id}/logs`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('super_admin supprime les cles API E2E', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const list = await request.get(`${API_BASE}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const keys = (await list.json()).data || [];
+    for (const key of keys.filter(k => k.name && k.name.startsWith('E2E'))) {
+      await request.delete(`${API_BASE}/api/api-keys/${key.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    }
+    // verify deletion
+    const after = await request.get(`${API_BASE}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const remaining = (await after.json()).data || [];
+    expect(remaining.filter(k => k.name && k.name.startsWith('E2E')).length).toBe(0);
+  });
+
+  test('bank user ne peut pas creer de cle API', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: BANK_USER, password: BANK_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { bank_id: 1, name: 'hack' }
+    });
+    expect(res.status()).toBe(403);
+  });
+
+});
+
+test.describe('Traitement - Telechargement et Erreurs', () => {
+
+  test('recupere le template CSV', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/processing/template`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('csv');
+  });
+
+  test('telecharge un fichier traite', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const logs = await request.get(`${API_BASE}/api/processing/logs?limit=1`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const logData = (await logs.json()).data || [];
+    if (logData.length === 0) return;
+
+    const res = await request.get(`${API_BASE}/api/processing/download/${logData[0].id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+  });
+
+  test('recupere les erreurs de traitement', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const logs = await request.get(`${API_BASE}/api/processing/logs?limit=5`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const logData = (await logs.json()).data || [];
+    const withErrors = logData.find(l => l.error_count > 0);
+    if (!withErrors) return;
+
+    const res = await request.get(`${API_BASE}/api/processing/errors/${withErrors.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('valide une saisie manuelle avant soumission', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.post(`${API_BASE}/api/processing/validate-manual`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        bankId: 1,
+        entries: [{ pan: '4000056655665556', firstName: 'Test', lastName: 'Valid', expiry: '12/28', phone: '21699123456', behaviour: 'otp', action: 'create' }]
+      }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+});
+
+test.describe('Enrolement - Upload Rapport', () => {
+
+  test('upload d un rapport d enrolement XML', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const xml = '<?xml version="1.0"?><Package><cardRegistryRecordProcessingResult id="1" status="OK" /></Package>';
+
+    const res = await request.post(`${API_BASE}/api/enrollment/upload`, {
+      headers: { Authorization: `Bearer ${token}` },
+      multipart: {
+        bankId: '1',
+        file: { name: 'enrollment_test.xml', mimeType: 'application/xml', buffer: Buffer.from(xml) }
+      }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+});
+
+test.describe('Parametres - Mise a jour', () => {
+
+  test('super_admin met a jour un parametre', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.put(`${API_BASE}/api/settings/CRON_SCHEDULE`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { value: '0 */5 * * *' }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('bank user ne peut pas modifier les parametres', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: BANK_USER, password: BANK_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.put(`${API_BASE}/api/settings/CRON_SCHEDULE`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { value: '* * * * *' }
+    });
+    expect(res.status()).toBe(403);
+  });
+
+});
+
+test.describe('Permissions - Ecriture Features Roles', () => {
+
+  test('super_admin active une feature pour bank_admin', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.put(`${API_BASE}/api/role-features/role/bank_admin/processing`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { enabled: true }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('super_admin desactive une feature pour une banque', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.put(`${API_BASE}/api/role-features/bank/1/processing`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { enabled: false }
+    });
+    expect([200, 201]).toContain(res.status());
+  });
+
+  test('super_admin supprime l override banque', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.delete(`${API_BASE}/api/role-features/bank/1/processing`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+  });
+
+  test('bank user ne peut pas modifier les features', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: BANK_USER, password: BANK_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.put(`${API_BASE}/api/role-features/role/bank/processing`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { enabled: true }
+    });
+    expect(res.status()).toBe(403);
+  });
+
+});
+
+test.describe('Journal - Recherche et Statistiques', () => {
+
+  test('recherche dans l historique des enregistrements', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/record-history/search?q=JEAN`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('statistiques de l historique', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/record-history/stats`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('top erreurs de traitement', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/record-history/top-errors`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('corrections de l historique', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/record-history/corrections`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  test('timeline de l historique', async ({ request }) => {
+    const login = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: ADMIN_USER, password: ADMIN_PASS }
+    });
+    const { token } = (await login.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/record-history/timeline/7`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+});
 
 });

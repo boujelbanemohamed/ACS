@@ -6,19 +6,23 @@ import api from '../services/api';
 import './Layout.css';
 
 const Layout = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, mustChangePassword } = useAuth();
   const navigate = useNavigate();
   const [features, setFeatures] = useState({});
 
   const isSuperAdmin = user?.role === 'super_admin';
 
   useEffect(() => {
+    if (mustChangePassword) {
+      navigate('/change-password', { replace: true });
+      return;
+    }
     if (!isSuperAdmin) {
       api.get('/role-features/me').then(res => {
         setFeatures(res.data.data || {});
       }).catch(() => {});
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, mustChangePassword, navigate]);
 
   const handleLogout = () => {
     logout();
@@ -121,7 +125,7 @@ const Layout = () => {
             </NavLink>
           )}
 
-          {isSuperAdmin && (
+          {(isSuperAdmin || (user?.role === 'bank_admin' && hasFeature('permissions'))) && (
             <NavLink to="/role-features" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Shield size={20} />
               <span>Permissions</span>

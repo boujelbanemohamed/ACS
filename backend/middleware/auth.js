@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 
 const authMiddleware = async (req, res, next) => {
+  if (req.user) return next();
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
 

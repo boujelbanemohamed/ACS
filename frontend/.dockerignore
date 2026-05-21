@@ -4,7 +4,6 @@ node_modules
 *.md
 .gitignore
 Dockerfile
-nginx.conf
 playwright.config.js
 tests/
 playwright-report/
