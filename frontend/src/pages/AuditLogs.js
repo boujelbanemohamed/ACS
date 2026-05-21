@@ -35,6 +35,14 @@ const ACTION_LABELS = {
   EXPORT_RECORDS: 'Export enregistrements',
   DECRYPT_PAN: 'Déchiffrement PAN',
   RESOLVE_ERROR: 'Erreur résolue',
+  UPLOAD_FILE: 'Upload fichier CSV',
+  PROCESS_URL: 'Traitement par URL',
+  PROCESS_MANUAL: 'Saisie manuelle',
+  CALL_API: 'Appel API externe',
+  REPROCESS_FILE: 'Retraitement fichier',
+  DOWNLOAD_FILE: 'Téléchargement fichier',
+  UPLOAD_ENROLLMENT: 'Import rapport enrôlement',
+  PUBLIC_API_REGISTER: 'Inscription via API publique',
 };
 
 const ACTION_COLORS = {
@@ -68,6 +76,14 @@ const ACTION_COLORS = {
   EXPORT_RECORDS: 'badge-info',
   DECRYPT_PAN: 'badge-danger',
   RESOLVE_ERROR: 'badge-success',
+  UPLOAD_FILE: 'badge-success',
+  PROCESS_URL: 'badge-success',
+  PROCESS_MANUAL: 'badge-success',
+  CALL_API: 'badge-success',
+  REPROCESS_FILE: 'badge-warning',
+  DOWNLOAD_FILE: 'badge-info',
+  UPLOAD_ENROLLMENT: 'badge-info',
+  PUBLIC_API_REGISTER: 'badge-success',
 };
 
 const AuditLogs = () => {

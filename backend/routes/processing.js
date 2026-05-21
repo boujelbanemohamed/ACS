@@ -172,6 +172,9 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
       );
     }
 
+    const urlStatus = result.success ? 'SUCCESS' : 'PARTIAL';
+    await auditService.logAction('PROCESS_URL', { tableName: 'file_logs', recordId: result.fileLogId, newData: { bankId, status: urlStatus, totalRows: result.validRecords.length } }, req);
+
     res.json({
       success: result.success,
       message: result.success 
@@ -275,11 +278,12 @@ router.post('/upload', authMiddleware, upload.single('file'), forceBankId, valid
       }
     }
 
-    // Clean up uploaded file
+    const uploadStatus = errors.filter(e => e.severity === 'error').length === 0 ? 'SUCCESS' : 'PARTIAL';
+    await auditService.logAction('UPLOAD_FILE', { tableName: 'file_logs', recordId: fileLogId, newData: { bankId, status: uploadStatus, fileName: req.file.originalname, totalRows: stats.totalRows } }, req);
+
     try {
       await fsPromises.unlink(req.file.path);
     } catch (e) {
-      // ignore cleanup errors
     }
 
     res.json({
@@ -487,16 +491,15 @@ router.get('/download/:fileLogId', authMiddleware, async (req, res) => {
       fileLog.file_name
     ]);
 
-    // Generate corrected CSV
+    await auditService.logAction('DOWNLOAD_FILE', { tableName: 'file_logs', recordId: req.params.fileLogId, newData: { bankId: fileLog.bank_id, fileName: fileLog.file_name } }, req);
+
     const outputPath = path.join('/tmp', `corrected_${fileLog.file_name}`);
     await csvProcessor.generateCorrectedCSV(recordsResult.rows, outputPath);
 
-    // Send file
     res.download(outputPath, `corrected_${fileLog.file_name}`, (err) => {
       if (err) {
         console.error('Download error:', err);
       }
-      // Clean up
       if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
       }
@@ -539,6 +542,8 @@ router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
       fileLog.original_path,
       fileLog.file_name
     );
+
+    await auditService.logAction('REPROCESS_FILE', { tableName: 'file_logs', recordId: req.params.fileLogId, newData: { bankId: fileLog.bank_id, fileName: fileLog.file_name } }, req);
 
     res.json({
       success: result.success,
@@ -723,6 +728,8 @@ router.post('/process-manual', authMiddleware, forceBankId, async (req, res) => 
         }
       }
     }
+
+    await auditService.logAction('PROCESS_MANUAL', { tableName: 'file_logs', recordId: fileLogId, newData: { bankId, entriesCount: entries.length, fileName: `${fileName}.csv` } }, req);
 
     res.json({
       success: true,
@@ -912,6 +919,8 @@ router.post('/call-api', authMiddleware, forceBankId, validate(processingSchemas
         console.error('Save records / history error:', e.message);
       }
     }
+
+    await auditService.logAction('CALL_API', { tableName: 'file_logs', recordId: fileLogId, newData: { bankId, url, totalRows: responseData.length, validRows: mappedRows.length } }, req);
 
     res.json({
       success: true,

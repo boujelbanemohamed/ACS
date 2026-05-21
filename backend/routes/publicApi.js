@@ -5,6 +5,8 @@ const CSVProcessor = require('../services/csvProcessor');
 const csvProcessor = new CSVProcessor();
 const xmlGenerator = require('../services/xmlGenerator');
 
+const auditService = require('../services/auditService');
+
 const router = express.Router();
 
 const apiKeyRateLimits = new Map();
@@ -358,6 +360,8 @@ router.post('/cards/register', apiAuthMiddleware, apiRateLimiter, async (req, re
         [bank.id, fileLogId, xmlFileName, xmlResult.filePath || bank.xml_output_url, validCards.length, xmlEntriesCount, 'success']
       );
     }
+
+    await auditService.log(null, req.apiKey?.name || 'API', 'api', 'PUBLIC_API_REGISTER', 'file_logs', fileLogId, null, { bankCode, cardsCount: validCards.length }, req);
 
     const response = {
       success: true,

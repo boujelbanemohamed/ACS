@@ -4,6 +4,7 @@ const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleMiddleware');
 const enrollmentService = require('../services/enrollmentService');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -40,6 +41,8 @@ router.post('/upload', authMiddleware, checkRole('super_admin'), upload.single('
       bankId ? parseInt(bankId) : null, 
       fileName
     );
+    
+    await auditService.logAction('UPLOAD_ENROLLMENT', { tableName: 'enrollment_logs', newData: { bankId, fileName, status: result.success ? 'SUCCESS' : 'ERROR' } }, req);
     
     res.json(result);
   } catch (error) {
