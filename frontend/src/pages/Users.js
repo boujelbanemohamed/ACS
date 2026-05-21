@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, Trash2, Shield, Building2, Check, X, RefreshCw, Search, Key } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Shield, Building2, RefreshCw, Search } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import './Users.css';
@@ -84,15 +84,6 @@ const UsersPage = () => {
       fetchUsers();
     } catch (error) {
       alert('Erreur: ' + (error.response?.data?.message || error.message));
-    }
-  };
-
-  const handleToggleActive = async (user) => {
-    try {
-      await api.put('/users/' + user.id, { isActive: !user.is_active });
-      fetchUsers();
-    } catch (error) {
-      alert('Erreur: ' + error.message);
     }
   };
 
@@ -262,38 +253,13 @@ const UsersPage = () => {
                 </div>
               </div>
 
-              {(!isBankAdmin && (formData.role === 'bank' || formData.role === 'bank_admin')) && (
+              {!isBankAdmin && (formData.role === 'bank' || formData.role === 'bank_admin') && (
                 <div className="form-group">
                   <label>Banque associee *</label>
                   <select
                     value={formData.bankId}
                     onChange={(e) => setFormData({...formData, bankId: e.target.value})}
-                    required={formData.role === 'bank' || formData.role === 'bank_admin'}
-                  >
-                    <option value="super_admin">Super Admin</option>
-                    <option value="bank_admin">Admin Banque</option>
-                    <option value="bank">Banque</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label>Telephone</label>
-                  <input
-                    type="text"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    placeholder="+216..."
-                  />
-                </div>
-              </div>
-
-              {(formData.role === 'bank' || formData.role === 'bank_admin') && (
-                <div className="form-group">
-                  <label>Banque associee *</label>
-                  <select
-                    value={formData.bankId}
-                    onChange={(e) => setFormData({...formData, bankId: e.target.value})}
-                    required={formData.role === 'bank' || formData.role === 'bank_admin'}
+                    required
                   >
                     <option value="">Selectionnez une banque</option>
                     {banks.map(bank => (
