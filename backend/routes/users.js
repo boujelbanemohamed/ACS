@@ -7,17 +7,38 @@ const auditService = require('../services/auditService');
 
 const router = express.Router();
 
-// GET - Liste des utilisateurs (super_admin seulement)
-router.get('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
+// GET - Liste des utilisateurs
+router.get('/', authMiddleware, (req, res, next) => {
+  if (req.user.role === 'super_admin' || req.user.role === 'bank_admin') return next();
+  return res.status(403).json({ success: false, message: 'Accès non autorisé' });
+}, async (req, res) => {
   try {
-    const result = await db.query(`
-      SELECT u.id, u.username, u.email, u.role, u.bank_id, u.is_active, 
-             u.last_login, u.phone, u.created_at,
-             b.name as bank_name, b.code as bank_code
-      FROM users u
-      LEFT JOIN banks b ON u.bank_id = b.id
-      ORDER BY u.created_at DESC
-    `);
+    let query;
+    let params = [];
+
+    if (req.user.role === 'super_admin') {
+      query = `
+        SELECT u.id, u.username, u.email, u.role, u.bank_id, u.is_active, 
+               u.last_login, u.phone, u.created_at,
+               b.name as bank_name, b.code as bank_code
+        FROM users u
+        LEFT JOIN banks b ON u.bank_id = b.id
+        ORDER BY u.created_at DESC
+      `;
+    } else {
+      query = `
+        SELECT u.id, u.username, u.email, u.role, u.bank_id, u.is_active, 
+               u.last_login, u.phone, u.created_at,
+               b.name as bank_name, b.code as bank_code
+        FROM users u
+        LEFT JOIN banks b ON u.bank_id = b.id
+        WHERE u.bank_id = $1
+        ORDER BY u.created_at DESC
+      `;
+      params = [req.user.bank_id];
+    }
+
+    const result = await db.query(query, params);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -47,7 +68,10 @@ router.get('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
 });
 
 // POST - Créer un utilisateur
-router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
+router.post('/', authMiddleware, (req, res, next) => {
+  if (req.user.role === 'super_admin' || req.user.role === 'bank_admin') return next();
+  return res.status(403).json({ success: false, message: 'Accès non autorisé' });
+}, async (req, res) => {
   try {
     const { username, email, password, role, bankId, phone } = req.body;
 
@@ -55,6 +79,27 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       return res.status(400).json({ 
         success: false, 
         message: 'Username, email et password requis' 
+      });
+    }
+
+    // bank_admin peut uniquement créer des bank user pour sa banque
+    if (req.user.role === 'bank_admin') {
+      if (role && role !== 'bank') {
+        return res.status(403).json({
+          success: false,
+          message: 'Vous pouvez uniquement créer des utilisateurs de type Banque'
+        });
+      }
+      req.body.bankId = req.user.bank_id;
+    }
+
+    const finalBankId = req.body.bankId || bankId;
+
+    // Si role = bank ou bank_admin, bankId est requis
+    if ((role === 'bank' || role === 'bank_admin') && !finalBankId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Une banque doit etre associee pour un utilisateur de type banque'
       });
     }
 
@@ -71,21 +116,13 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       });
     }
 
-    // Si role = bank ou bank_admin, bankId est requis
-    if ((role === 'bank' || role === 'bank_admin') && !bankId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Une banque doit etre associee pour un utilisateur de type banque'
-      });
-    }
-
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const result = await db.query(`
       INSERT INTO users (username, email, password, role, bank_id, phone)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, username, email, role, bank_id, phone, created_at
-    `, [username, email, hashedPassword, role || 'bank', bankId || null, phone || null]);
+    `, [username, email, hashedPassword, role || 'bank', finalBankId || null, phone || null]);
 
     await auditService.logAction('CREATE_USER', { tableName: 'users', recordId: result.rows[0].id, newData: result.rows[0] }, req);
 

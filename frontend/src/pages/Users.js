@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Edit2, Trash2, Shield, Building2, Check, X, RefreshCw, Search, Key } from 'lucide-react';
 import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import './Users.css';
 
 const UsersPage = () => {
+  const { user: currentUser } = useAuth();
+  const isBankAdmin = currentUser?.role === 'bank_admin';
   const [users, setUsers] = useState([]);
   const [banks, setBanks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -178,19 +181,16 @@ const UsersPage = () => {
                   </td>
                   <td>
                     <div className="actions">
-                      <button className="btn-icon" onClick={() => handleEdit(user)} title="Modifier">
-                        <Edit2 size={16} />
-                      </button>
-                      <button 
-                        className="btn-icon" 
-                        onClick={() => handleToggleActive(user)}
-                        title={user.is_active ? 'Desactiver' : 'Activer'}
-                      >
-                        {user.is_active ? <X size={16} /> : <Check size={16} />}
-                      </button>
-                      <button className="btn-icon btn-danger" onClick={() => handleDelete(user.id)} title="Supprimer">
-                        <Trash2 size={16} />
-                      </button>
+                      {!isBankAdmin && (
+                        <>
+                          <button className="btn-icon" onClick={() => handleEdit(user)} title="Modifier">
+                            <Edit2 size={16} />
+                          </button>
+                          <button className="btn-icon" onClick={() => handleDelete(user.id)} title="Supprimer">
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -237,11 +237,38 @@ const UsersPage = () => {
               </div>
 
               <div className="form-row">
+                {!isBankAdmin && (
+                  <div className="form-group">
+                    <label>Role *</label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({...formData, role: e.target.value})}
+                    >
+                      <option value="super_admin">Super Admin</option>
+                      <option value="bank_admin">Admin Banque</option>
+                      <option value="bank">Banque</option>
+                    </select>
+                  </div>
+                )}
+
                 <div className="form-group">
-                  <label>Role *</label>
+                  <label>Telephone</label>
+                  <input
+                    type="text"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                    placeholder="+216XXXXXXXX"
+                  />
+                </div>
+              </div>
+
+              {(!isBankAdmin && (formData.role === 'bank' || formData.role === 'bank_admin')) && (
+                <div className="form-group">
+                  <label>Banque associee *</label>
                   <select
-                    value={formData.role}
-                    onChange={(e) => setFormData({...formData, role: e.target.value})}
+                    value={formData.bankId}
+                    onChange={(e) => setFormData({...formData, bankId: e.target.value})}
+                    required={formData.role === 'bank' || formData.role === 'bank_admin'}
                   >
                     <option value="super_admin">Super Admin</option>
                     <option value="bank_admin">Admin Banque</option>
