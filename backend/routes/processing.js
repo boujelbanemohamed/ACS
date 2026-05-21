@@ -12,6 +12,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { forceBankId } = require('../middleware/roleMiddleware');
 const { processingSchemas, validate } = require('../utils/validators');
 const { encrypt, decrypt, hashPan } = require('../services/encryptionService');
+const auditService = require('../services/auditService');
 
 const ALLOWED_API_DOMAINS = (process.env.ALLOWED_API_DOMAINS || '').split(',').filter(Boolean);
 
@@ -366,6 +367,8 @@ router.patch('/errors/:errorId/resolve', authMiddleware, async (req, res) => {
         message: 'Erreur non trouvée'
       });
     }
+
+    await auditService.logAction('RESOLVE_ERROR', { tableName: 'validation_errors', recordId: req.params.errorId, newData: { correctedValue } }, req);
 
     res.json({
       success: true,

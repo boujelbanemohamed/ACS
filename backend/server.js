@@ -118,6 +118,7 @@ app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/scanner', require('./routes/scanner'));
 app.use('/api/monitoring', require('./routes/monitoring'));
+app.use('/api/audit-logs', require('./routes/audit'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {

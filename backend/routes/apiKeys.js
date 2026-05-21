@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole, filterByBank, isSuperAdmin } = require('../middleware/roleMiddleware');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -95,12 +96,14 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       ]
     );
 
+    await auditService.logAction('CREATE_API_KEY', { tableName: 'api_keys', recordId: result.rows[0].id, newData: { name, institution, bankId } }, req);
+
     res.json({
       success: true,
       message: 'API Key creee avec succes',
       data: {
         ...result.rows[0],
-        api_key: apiKey // Montrer la clé complète une seule fois
+        api_key: apiKey
       }
     });
   } catch (error) {
@@ -131,6 +134,8 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
       return res.status(404).json({ success: false, message: 'API Key non trouvee' });
     }
 
+    await auditService.logAction('UPDATE_API_KEY', { tableName: 'api_keys', recordId: req.params.id, newData: result.rows[0] }, req);
+
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -140,12 +145,15 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
 // DELETE - Supprimer une API Key
 router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
+    const oldKey = await db.query('SELECT * FROM api_keys WHERE id = $1', [req.params.id]);
     await db.query('DELETE FROM api_logs WHERE api_key_id = $1', [req.params.id]);
     const result = await db.query('DELETE FROM api_keys WHERE id = $1 RETURNING id', [req.params.id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'API Key non trouvee' });
     }
+
+    await auditService.logAction('DELETE_API_KEY', { tableName: 'api_keys', recordId: req.params.id, oldData: oldKey.rows[0] }, req);
 
     res.json({ success: true, message: 'API Key supprimee' });
   } catch (error) {
@@ -163,9 +171,7 @@ router.post('/:id/regenerate', authMiddleware, checkRole('super_admin'), async (
       [newApiKey, req.params.id]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'API Key non trouvee' });
-    }
+    await auditService.logAction('REGENERATE_API_KEY', { tableName: 'api_keys', recordId: req.params.id }, req);
 
     res.json({
       success: true,

@@ -3,6 +3,7 @@ const db = require('../config/database');
 const cronService = require('../services/cronService');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleMiddleware');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -13,6 +14,7 @@ router.get('/status', authMiddleware, (req, res) => {
 router.post('/trigger', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const results = await cronService.run();
+    await auditService.logAction('TRIGGER_SCAN', { tableName: 'scan_logs' }, req);
     res.json({ success: true, message: 'Scan terminé', data: results });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Erreur scan' });

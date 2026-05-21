@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { isSuperAdmin } = require('../middleware/roleMiddleware');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -79,6 +80,8 @@ router.put('/:key', authMiddleware, isSuperAdmin, async (req, res) => {
 
     const result = await db.query(query, [key, value]);
 
+    await auditService.logAction('UPDATE_SETTING', { tableName: 'settings', recordId: result.rows[0]?.id, newData: { key, value } }, req);
+
     res.json({
       success: true,
       data: result.rows[0],
@@ -107,6 +110,8 @@ router.post('/bulk', authMiddleware, isSuperAdmin, async (req, res) => {
         DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP
       `, [key, value]);
     }
+
+    await auditService.logAction('BULK_UPDATE_SETTINGS', { tableName: 'settings', newData: { settings } }, req);
 
     res.json({
       success: true,

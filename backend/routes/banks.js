@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole, filterByBank } = require('../middleware/roleMiddleware');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -102,6 +103,8 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       is_active !== undefined ? is_active : true
     ]);
 
+    await auditService.logAction('CREATE_BANK', { tableName: 'banks', recordId: result.rows[0].id, newData: result.rows[0] }, req);
+
     res.status(201).json({
       success: true,
       message: 'Banque creee avec succes',
@@ -164,6 +167,9 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
       });
     }
 
+    const oldBank = await db.query('SELECT * FROM banks WHERE id = $1', [req.params.id]);
+    await auditService.logAction('UPDATE_BANK', { tableName: 'banks', recordId: req.params.id, oldData: oldBank.rows[0], newData: result.rows[0] }, req);
+
     res.json({
       success: true,
       message: 'Banque mise a jour avec succes',
@@ -191,6 +197,8 @@ router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res)
         message: 'Banque non trouvee'
       });
     }
+
+    await auditService.logAction('DELETE_BANK', { tableName: 'banks', recordId: req.params.id, oldData: result.rows[0] }, req);
 
     res.json({
       success: true,

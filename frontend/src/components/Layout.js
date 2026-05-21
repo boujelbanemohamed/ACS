@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import './Layout.css';
 
@@ -66,6 +66,11 @@ const Layout = () => {
             </NavLink>
           )}
         
+
+          <NavLink to="/audit-logs" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <ScrollText size={20} />
+            <span>Journal d'activité</span>
+          </NavLink>
 
           {isAdmin && (
             <>

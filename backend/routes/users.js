@@ -3,24 +3,9 @@ const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole } = require('../middleware/roleMiddleware');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
-
-// Fonction d'audit log (enregistre les actions utilisateurs)
-const auditLog = async (userId, action, tableName, recordId, oldData, newData, req) => {
-  try {
-    await db.query(
-      `INSERT INTO audit_logs (user_id, username, action, table_name, record_id, old_data, new_data, ip_address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [userId, req?.user?.username || 'SYSTEM', action, tableName, recordId,
-       oldData ? JSON.stringify(oldData) : null,
-       newData ? JSON.stringify(newData) : null,
-       req?.ip || 'unknown']
-    );
-  } catch (error) {
-    console.error('Audit log error:', error);
-  }
-};
 
 // GET - Liste des utilisateurs (super_admin seulement)
 router.get('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
@@ -102,7 +87,7 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       RETURNING id, username, email, role, bank_id, phone, created_at
     `, [username, email, hashedPassword, role || 'bank', bankId || null, phone || null]);
 
-    await auditLog(req.user.id, 'CREATE_USER', 'users', result.rows[0].id, null, result.rows[0], req);
+    await auditService.logAction('CREATE_USER', { tableName: 'users', recordId: result.rows[0].id, newData: result.rows[0] }, req);
 
     res.json({ success: true, message: 'Utilisateur cree', data: result.rows[0] });
   } catch (error) {
@@ -144,7 +129,7 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
 
     const result = await db.query(query, params);
 
-    await auditLog(req.user.id, 'UPDATE_USER', 'users', req.params.id, oldUser.rows[0], result.rows[0], req);
+    await auditService.logAction('UPDATE_USER', { tableName: 'users', recordId: req.params.id, oldData: oldUser.rows[0], newData: result.rows[0] }, req);
 
     res.json({ success: true, message: 'Utilisateur modifie', data: result.rows[0] });
   } catch (error) {
@@ -171,7 +156,7 @@ router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res)
       return res.status(404).json({ success: false, message: 'Utilisateur non trouve' });
     }
 
-    await auditLog(req.user.id, 'DELETE_USER', 'users', req.params.id, oldUser.rows[0], null, req);
+    await auditService.logAction('DELETE_USER', { tableName: 'users', recordId: req.params.id, oldData: oldUser.rows[0] }, req);
 
     res.json({ success: true, message: 'Utilisateur supprime' });
   } catch (error) {
@@ -222,8 +207,15 @@ router.put('/me/profile', authMiddleware, async (req, res) => {
       RETURNING id, username, email, phone
     `, [email, phone, req.user.id]);
 
-    res.json({ success: true, message: 'Profil mis a jour', data: result.rows[0] });
+  const changes = {};
+  if (email) changes.email = email;
+  if (phone) changes.phone = phone;
+  if (newPassword) changes.password_changed = true;
+  await auditService.logAction('UPDATE_PROFILE', { tableName: 'users', recordId: req.user.id, newData: changes }, req);
+
+  res.json({ success: true, message: 'Profil mis a jour', data: result.rows[0] });
   } catch (error) {
+    console.error('Profile update error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

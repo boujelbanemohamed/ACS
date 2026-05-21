@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const emailService = require('../services/emailService');
 const { authMiddleware } = require('../middleware/auth');
+const auditService = require('../services/auditService');
 
 // Import cronService
 const cronService = require('../services/cronService');
@@ -42,6 +43,7 @@ router.put('/smtp', authMiddleware, superAdminOnly, async (req, res) => {
     } else {
       await db.query('INSERT INTO smtp_config (host, port, secure, username, password, from_email, from_name, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [host, port, secure, username, password, from_email, from_name, enabled]);
     }
+    await auditService.logAction('UPDATE_SMTP_CONFIG', { tableName: 'smtp_config', newData: { host, port, from_email, enabled } }, req);
     res.json({ success: true, message: 'Configuration SMTP mise a jour' });
   } catch (error) {
     console.error('Error updating SMTP config:', error);
@@ -51,6 +53,7 @@ router.put('/smtp', authMiddleware, superAdminOnly, async (req, res) => {
 
 router.post('/smtp/test', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await auditService.logAction('TEST_SMTP', { tableName: 'smtp_config' }, req);
     const result = await emailService.testConnection();
     res.json(result);
   } catch (error) {
@@ -83,6 +86,7 @@ router.post('/emails/:bankId', authMiddleware, superAdminOnly, async (req, res) 
       return res.status(400).json({ success: false, message: 'Cet email existe deja' });
     }
     const result = await db.query('INSERT INTO bank_notification_emails (bank_id, email) VALUES ($1, $2) RETURNING *', [bankId, email]);
+    await auditService.logAction('ADD_NOTIFICATION_EMAIL', { tableName: 'bank_notification_emails', recordId: result.rows[0]?.id, newData: { bankId, email } }, req);
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -91,7 +95,9 @@ router.post('/emails/:bankId', authMiddleware, superAdminOnly, async (req, res) 
 
 router.delete('/emails/:id', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    const oldEmail = await db.query('SELECT * FROM bank_notification_emails WHERE id = $1', [req.params.id]);
     await db.query('DELETE FROM bank_notification_emails WHERE id = $1', [req.params.id]);
+    await auditService.logAction('DELETE_NOTIFICATION_EMAIL', { tableName: 'bank_notification_emails', recordId: req.params.id, oldData: oldEmail.rows[0] }, req);
     res.json({ success: true, message: 'Email supprime' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -101,6 +107,7 @@ router.delete('/emails/:id', authMiddleware, superAdminOnly, async (req, res) =>
 router.put('/emails/:id/toggle', authMiddleware, superAdminOnly, async (req, res) => {
   try {
     const result = await db.query('UPDATE bank_notification_emails SET is_active = NOT is_active WHERE id = $1 RETURNING *', [req.params.id]);
+    await auditService.logAction('TOGGLE_NOTIFICATION_EMAIL', { tableName: 'bank_notification_emails', recordId: req.params.id, newData: { is_active: result.rows[0]?.is_active } }, req);
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -110,6 +117,7 @@ router.put('/emails/:id/toggle', authMiddleware, superAdminOnly, async (req, res
 router.post('/send/:bankId', authMiddleware, superAdminOnly, async (req, res) => {
   try {
     const reportDate = req.body.date ? new Date(req.body.date) : new Date();
+    await auditService.logAction('SEND_REPORT', { tableName: 'notification_logs', newData: { bankId: req.params.bankId } }, req);
     const result = await emailService.sendDailyReport(parseInt(req.params.bankId), reportDate);
     res.json(result);
   } catch (error) {
@@ -120,6 +128,7 @@ router.post('/send/:bankId', authMiddleware, superAdminOnly, async (req, res) =>
 router.post('/send-all', authMiddleware, superAdminOnly, async (req, res) => {
   try {
     const reportDate = req.body.date ? new Date(req.body.date) : new Date();
+    await auditService.logAction('SEND_ALL_REPORTS', { tableName: 'notification_logs' }, req);
     const result = await emailService.sendAllDailyReports(reportDate);
     res.json(result);
   } catch (error) {
@@ -186,7 +195,9 @@ router.put('/cron-config', authMiddleware, superAdminOnly, async (req, res) => {
     
     // Redemarrer le cron avec la nouvelle config
     cronService.startDailyReportTask();
-    
+
+    await auditService.logAction('UPDATE_CRON_CONFIG', { tableName: 'settings', newData: { schedule: cronService.dailyReportSchedule, enabled: cronService.dailyReportEnabled } }, req);
+
     res.json({
       success: true,
       message: 'Configuration du cron mise a jour',

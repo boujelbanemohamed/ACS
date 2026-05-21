@@ -16,6 +16,7 @@ import History from './pages/History';
 import ApiTester from './pages/ApiTester';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
+import AuditLogs from './pages/AuditLogs';
 import './App.css';
 
 const PrivateRoute = ({ children }) => {
@@ -54,6 +55,7 @@ function App() {
             <Route path="profile" element={<Profile />} />
             <Route path="notifications" element={<Notifications />} />
             <Route path="monitoring" element={<Monitor />} />
+            <Route path="audit-logs" element={<AuditLogs />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

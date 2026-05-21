@@ -6,6 +6,7 @@ const db = require('../config/database');
 const emailService = require('../services/emailService');
 
 const { authSchemas, validate } = require('../utils/validators');
+const auditService = require('../services/auditService');
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
     const result = await db.query(query, [username]);
 
     if (result.rows.length === 0) {
+      await auditService.log(null, username, null, 'LOGIN_FAILED', 'users', null, null, { reason: 'user_not_found' }, req);
       return res.status(401).json({
         success: false,
         message: 'Identifiants invalides'
@@ -26,9 +28,8 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
 
     const user = result.rows[0];
 
-    // Comparaison avec bcrypt
-    // Vérifier si le compte est actif
     if (user.is_active === false) {
+      await auditService.log(user.id, user.username, user.role, 'LOGIN_FAILED', 'users', user.id, null, { reason: 'account_disabled' }, req);
       return res.status(401).json({
         success: false,
         message: 'Compte desactive. Contactez l\'administrateur.'
@@ -37,14 +38,15 @@ router.post('/login', validate(authSchemas.login), async (req, res) => {
 
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
+      await auditService.log(user.id, user.username, user.role, 'LOGIN_FAILED', 'users', user.id, null, { reason: 'wrong_password' }, req);
       return res.status(401).json({
         success: false,
         message: 'Identifiants invalides'
       });
     }
 
-    // Mettre à jour last_login
     await db.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+    await auditService.log(user.id, user.username, user.role, 'LOGIN_SUCCESS', 'users', user.id, null, null, { user: { id: user.id, username: user.username, role: user.role, bank_id: user.bank_id }, ip: req.ip, connection: req.connection });
 
     const token = jwt.sign(
       { 
@@ -126,6 +128,8 @@ router.post('/forgot-password', async (req, res) => {
 
     await emailService.sendEmail(user.email, 'Réinitialisation de mot de passe - ACS Banking', htmlContent, textContent);
 
+    await auditService.log(user.id, user.username, user.role, 'FORGOT_PASSWORD', 'users', user.id, null, null, req);
+
     res.json({ success: true, message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -161,6 +165,8 @@ router.post('/reset-password', async (req, res) => {
       'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
       [hashedPassword, userResult.rows[0].id]
     );
+
+    await auditService.log(userResult.rows[0].id, null, null, 'RESET_PASSWORD', 'users', userResult.rows[0].id, null, null, req);
 
     res.json({ success: true, message: 'Mot de passe réinitialisé avec succès' });
   } catch (error) {
