@@ -1,9 +1,9 @@
 const db = require('../config/database');
 
 class AuditService {
-  async log(userId, username, userRole, action, tableName, recordId, oldData, newData, req) {
+  async log(userId, username, userRole, action, tableName, recordId, oldData, newData, req, explicitBankId) {
     try {
-      const bankId = req?.user?.bank_id || null;
+      const bankId = explicitBankId !== undefined ? explicitBankId : (req?.user?.bank_id || null);
       await db.query(
         `INSERT INTO audit_logs (user_id, username, user_role, action, table_name, record_id, bank_id, old_data, new_data, ip_address)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -18,10 +18,11 @@ class AuditService {
   }
 
   async logAction(action, details, req) {
+    const bankId = details?.newData?.bankId || details?.bankId;
     await this.log(
       req?.user?.id, req?.user?.username, req?.user?.role,
       action, details?.tableName, details?.recordId,
-      details?.oldData, details?.newData, req
+      details?.oldData, details?.newData, req, bankId
     );
   }
 }
