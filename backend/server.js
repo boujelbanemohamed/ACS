@@ -119,6 +119,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/scanner', require('./routes/scanner'));
 app.use('/api/monitoring', require('./routes/monitoring'));
 app.use('/api/audit-logs', require('./routes/audit'));
+app.use('/api/role-features', require('./routes/roleFeatures'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
@@ -155,6 +156,7 @@ const startServer = async () => {
     if (process.env.NODE_ENV !== 'test') {
       await cronService.createTable();
       cronService.init();
+      await require('./services/roleFeaturesService').seedDefaults();
     }
     
     server = app.listen(PORT, () => {

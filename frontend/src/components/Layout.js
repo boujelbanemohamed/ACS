@@ -1,21 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 import './Layout.css';
 
 const Layout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [features, setFeatures] = useState({});
+
+  const isSuperAdmin = user?.role === 'super_admin';
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      api.get('/role-features/me').then(res => {
+        setFeatures(res.data.data || {});
+      }).catch(() => {});
+    }
+  }, [isSuperAdmin]);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  const isAdmin = user?.role === 'super_admin' || user?.role === 'bank_admin';
-  const isBank = user?.role === 'bank';
-  const isSuperAdmin = user?.role === 'super_admin';
+  const hasFeature = (feature) => {
+    if (isSuperAdmin) return true;
+    return features[feature] !== false;
+  };
 
   return (
     <div className="layout">
@@ -31,74 +44,90 @@ const Layout = () => {
             <span>Dashboard</span>
           </NavLink>
 
-          {isAdmin && (
+          {hasFeature('banks') && (user?.role === 'super_admin' || user?.role === 'bank_admin') && (
             <NavLink to="/banks" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Building2 size={20} />
               <span>Banques</span>
             </NavLink>
           )}
 
-          {isBank && (
+          {hasFeature('banks') && user?.role === 'bank' && (
             <NavLink to="/banks" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Building2 size={20} />
               <span>Ma Banque</span>
             </NavLink>
           )}
 
-          <NavLink to="/processing" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <FileText size={20} />
-            <span>Traitement</span>
-          </NavLink>
+          {hasFeature('processing') && (
+            <NavLink to="/processing" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <FileText size={20} />
+              <span>Traitement</span>
+            </NavLink>
+          )}
 
-          <NavLink to="/records" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <Database size={20} />
-            <span>Enregistrements</span>
-          </NavLink>
+          {hasFeature('records') && (
+            <NavLink to="/records" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Database size={20} />
+              <span>Enregistrements</span>
+            </NavLink>
+          )}
 
-          <NavLink to="/history" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <HistoryIcon size={20} />
-            <span>Historique</span>
-          </NavLink>
+          {hasFeature('history') && (
+            <NavLink to="/history" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <HistoryIcon size={20} />
+              <span>Historique</span>
+            </NavLink>
+          )}
 
-          {isAdmin && (
+          {isSuperAdmin && hasFeature('api_tester') && (
             <NavLink to="/api-tester" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Terminal size={20} />
               <span>Test API</span>
             </NavLink>
           )}
-        
 
-          <NavLink to="/audit-logs" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <ScrollText size={20} />
-            <span>Journal d'activité</span>
-          </NavLink>
+          {hasFeature('audit_logs') && (
+            <NavLink to="/audit-logs" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <ScrollText size={20} />
+              <span>Journal d'activité</span>
+            </NavLink>
+          )}
 
-              {isAdmin && (
-                <NavLink to="/users" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                  <Users size={20} />
-                  <span>Utilisateurs</span>
-                </NavLink>
-              )}
+          {hasFeature('users') && (user?.role === 'super_admin' || user?.role === 'bank_admin') && (
+            <NavLink to="/users" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Users size={20} />
+              <span>Utilisateurs</span>
+            </NavLink>
+          )}
 
-              {isSuperAdmin && (
-                <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                  <Clock size={20} />
-                  <span>Scan Automatique</span>
-                </NavLink>
-              )}
-              {isSuperAdmin && (
-                <NavLink to="/notifications" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                  <Mail size={20} />
-                  <span>Notifications</span>
-                </NavLink>
-              )}
-              {isSuperAdmin && (
-                <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-                  <Activity size={20} />
-                  <span>Monitoring</span>
-                </NavLink>
-              )}
-            </nav>
+          {isSuperAdmin && hasFeature('cron') && (
+            <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Clock size={20} />
+              <span>Scan Automatique</span>
+            </NavLink>
+          )}
+
+          {isSuperAdmin && hasFeature('notifications') && (
+            <NavLink to="/notifications" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Mail size={20} />
+              <span>Notifications</span>
+            </NavLink>
+          )}
+
+          {isSuperAdmin && hasFeature('monitoring') && (
+            <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Activity size={20} />
+              <span>Monitoring</span>
+            </NavLink>
+          )}
+
+          {isSuperAdmin && (
+            <NavLink to="/role-features" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Shield size={20} />
+              <span>Permissions</span>
+            </NavLink>
+          )}
+        </nav>
 
         <div className="sidebar-footer">
           <div className="footer-actions">
