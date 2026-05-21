@@ -194,7 +194,7 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
 });
 
 // Upload and process CSV file manually
-router.post('/upload', authMiddleware, forceBankId, upload.single('file'), validate(processingSchemas.upload), async (req, res) => {
+router.post('/upload', authMiddleware, upload.single('file'), forceBankId, validate(processingSchemas.upload), async (req, res) => {
   try {
     const { bankId } = req.body;
 
