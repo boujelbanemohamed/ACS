@@ -300,12 +300,9 @@ describe('Auth Routes', () => {
       db.query
         .mockResolvedValueOnce({ rows: [user] })
         .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: 1 }] })
         .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ ...user, password: hashedNew, bank_name: null, bank_code: null }] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [] });
 
       const forgotRes = await request(createTestApp())
@@ -333,12 +330,9 @@ describe('Auth Routes', () => {
       db.query
         .mockResolvedValueOnce({ rows: [user] })
         .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: 2 }] })
         .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ ...user, password: hashedNew, bank_name: 'Bank', bank_code: 'BK' }] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [] });
 
       const forgotRes = await request(createTestApp())
@@ -365,12 +359,9 @@ describe('Auth Routes', () => {
       db.query
         .mockResolvedValueOnce({ rows: [user] })
         .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: 3 }] })
         .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ ...user, password: hashedNew, bank_name: 'Bank A', bank_code: 'BA' }] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [] });
 
       const forgotRes = await request(createTestApp())
