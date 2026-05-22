@@ -85,6 +85,15 @@ describe('Users Routes', () => {
         .set('x-test-role', 'bank');
       expect(res.status).toBe(403);
     });
+
+    it('returns 500 on database error for list', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/users')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('GET /api/users/:id', () => {
@@ -112,6 +121,15 @@ describe('Users Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'bank');
       expect(res.status).toBe(403);
+    });
+
+    it('returns 500 on database error for get by id', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/users/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 
@@ -182,6 +200,26 @@ describe('Users Routes', () => {
         .set('x-test-role', 'bank');
       expect(res.status).toBe(403);
     });
+
+    it('rejects bank role without bankId', async () => {
+      const res = await request(createTestApp())
+        .post('/api/users')
+        .send({ username: 'bankuser', email: 'b@test.com', password: 'Pass1234', role: 'bank' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('banque');
+    });
+
+    it('returns 500 on database error during user creation', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .post('/api/users')
+        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass1234' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('PUT /api/users/:id', () => {
@@ -217,6 +255,60 @@ describe('Users Routes', () => {
         .set('x-test-role', 'bank_admin')
         .set('x-test-bank-id', '3');
       expect(res.status).toBe(403);
+    });
+
+    it('bank_admin cannot update super_admin role', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 2, username: 'admin', role: 'super_admin', bank_id: 3, password: 'hash' }] });
+      const res = await request(createTestApp())
+        .put('/api/users/2')
+        .send({ username: 'updated' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '3');
+      expect(res.status).toBe(403);
+    });
+
+    it('bank_admin cannot set unauthorized role', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 2, username: 'bankuser', role: 'bank', bank_id: 3, password: 'hash' }] });
+      const res = await request(createTestApp())
+        .put('/api/users/2')
+        .send({ role: 'super_admin' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '3');
+      expect(res.status).toBe(403);
+    });
+
+    it('updates with password change', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 2, username: 'old', role: 'bank', bank_id: 1, password: 'hash' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 2, username: 'updated', role: 'bank', bank_id: 1 }] });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .put('/api/users/2')
+        .send({ username: 'updated', password: 'NewPass123!' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('blocks bank user from updating users', async () => {
+      const res = await request(createTestApp())
+        .put('/api/users/2')
+        .send({ username: 'hack' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 500 on database error during update', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .put('/api/users/2')
+        .send({ username: 'x' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 
@@ -262,6 +354,33 @@ describe('Users Routes', () => {
         .set('x-test-bank-id', '3');
       expect(res.status).toBe(403);
     });
+
+    it('bank_admin cannot delete user from another bank', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 20, username: 'other', role: 'bank', bank_id: 9 }] });
+      const res = await request(createTestApp())
+        .delete('/api/users/20')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '3');
+      expect(res.status).toBe(403);
+    });
+
+    it('blocks bank user from deleting', async () => {
+      const res = await request(createTestApp())
+        .delete('/api/users/2')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 500 on database error during deletion', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .delete('/api/users/2')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('GET /api/users/me/profile', () => {
@@ -274,13 +393,20 @@ describe('Users Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.data).toBeDefined();
     });
+
+    it('returns 500 on database error for profile', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/users/me/profile')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('PUT /api/users/me/profile', () => {
-    it('updates own profile', async () => {
+    it('updates own profile without password', async () => {
       db.query
-        .mockResolvedValueOnce({ rows: [{ id: 1, password: 'hash' }] })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: 1, username: 'admin', email: 'new@test.com', phone: '21699123456' }] });
       auditService.logAction.mockResolvedValue();
       const res = await request(createTestApp())
@@ -289,6 +415,43 @@ describe('Users Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
+      expect(res.body.data.email).toBe('new@test.com');
+    });
+
+    it('updates own profile with new password', async () => {
+      const oldHash = await bcrypt.hash('OldPass123!', 10);
+      db.query
+        .mockResolvedValueOnce({ rows: [{ password: oldHash }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: 1, username: 'admin', email: 'a@test.com', phone: '21699123456' }] });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .put('/api/users/me/profile')
+        .send({ email: 'a@test.com', newPassword: 'NewPass123!', currentPassword: 'OldPass123!' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects profile update with wrong current password', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ password: 'hash_of_actual_pass' }] });
+      const res = await request(createTestApp())
+        .put('/api/users/me/profile')
+        .send({ newPassword: 'NewPass123!', currentPassword: 'WrongPass' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('incorrect');
+    });
+
+    it('returns 500 on database error during profile update', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const res = await request(createTestApp())
+        .put('/api/users/me/profile')
+        .send({ email: 'test@test.com' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 });

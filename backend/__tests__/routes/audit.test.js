@@ -122,6 +122,61 @@ describe('Audit Routes', () => {
       expect(db.query.mock.calls[0][0]).toContain('al.created_at <=');
     });
 
+    it('filters by username', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] })
+        .mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/audit-logs?username=admin')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(db.query.mock.calls[0][0]).toContain('al.username ILIKE');
+    });
+
+    it('filters by userRole', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] })
+        .mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/audit-logs?userRole=super_admin')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(db.query.mock.calls[0][0]).toContain('al.user_role');
+    });
+
+    it('filters by bankId', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] })
+        .mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/audit-logs?bankId=2')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(db.query.mock.calls[0][0]).toContain('al.bank_id');
+    });
+
+    it('filters by tableName', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] })
+        .mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/audit-logs?tableName=users')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(db.query.mock.calls[0][0]).toContain('al.table_name');
+    });
+
+    it('sorts ascending when sort=asc', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] })
+        .mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/audit-logs?sort=asc')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(db.query.mock.calls[1][0]).toContain('ORDER BY al.created_at ASC');
+    });
+
     it('caps limit at 500', async () => {
       db.query
         .mockResolvedValueOnce({ rows: [{ count: '0' }] })
@@ -160,6 +215,15 @@ describe('Audit Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'bank');
       expect(res.status).toBe(403);
+    });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/audit-logs/actions')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 });

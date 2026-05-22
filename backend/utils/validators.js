@@ -133,7 +133,8 @@ const processingSchemas = {
     method: Joi.string().valid('GET', 'POST', 'PUT', 'DELETE').default('GET'),
     authType: Joi.string().valid('bearer', 'basic', 'apikey').allow(null, ''),
     authToken: Joi.string().allow(null, ''),
-    dataPath: Joi.string().allow(null, '')
+    dataPath: Joi.string().allow(null, ''),
+    body: Joi.object().pattern(Joi.string(), Joi.any()).allow(null)
   })
 };
 

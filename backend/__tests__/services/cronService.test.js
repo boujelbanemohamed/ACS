@@ -174,6 +174,26 @@ describe('CronService', () => {
       expect(result.errors.length).toBeGreaterThan(0);
       expect(cronService.isScanning).toBe(false);
     });
+
+    it('handles enrollment scan failure gracefully', async () => {
+      const bank = { id: 1, name: 'Enroll Bank', is_active: true, enrollment_report_url: 'file:///reports' };
+      db.query.mockResolvedValue({ rows: [bank] });
+      jest.spyOn(cronService, 'scanEnrollmentReports').mockRejectedValue(new Error('Enroll fail'));
+      cronService.logResult = jest.fn();
+
+      const result = await cronService.run();
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0].error).toContain('Enrollment scan');
+    });
+
+    it('handles outer catch on db query failure', async () => {
+      db.query.mockRejectedValue(new Error('DB fail'));
+      cronService.logResult = jest.fn();
+
+      const result = await cronService.run();
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(cronService.isScanning).toBe(false);
+    });
   });
 
   describe('scanEnrollmentReports()', () => {
@@ -230,6 +250,45 @@ describe('CronService', () => {
       expect(result.filesFound).toBe(2);
       expect(result.filesProcessed).toBe(2);
       expect(remoteFileService.moveFile).toHaveBeenCalled();
+    });
+
+    it('handles processResult success=false', async () => {
+      const bank = { id: 1, name: 'Test', enrollment_report_url: 'file:///reports' };
+      remoteFileService.isRemote.mockReturnValue(false);
+      fs.access.mockResolvedValue();
+      fs.readdir.mockResolvedValue(['report1.xml']);
+      db.query.mockResolvedValue({ rows: [] });
+      enrollmentService.processEnrollmentReport.mockResolvedValue({ success: false, message: 'Invalid data' });
+
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(result.filesFound).toBe(1);
+      expect(result.filesProcessed).toBe(0);
+      expect(result.errors.length).toBe(1);
+    });
+
+    it('handles inner file processing error', async () => {
+      const bank = { id: 1, name: 'Test', enrollment_report_url: 'file:///reports' };
+      remoteFileService.isRemote.mockReturnValue(false);
+      fs.access.mockResolvedValue();
+      fs.readdir.mockResolvedValue(['report1.xml']);
+      db.query.mockResolvedValue({ rows: [] });
+      enrollmentService.processEnrollmentReport.mockRejectedValue(new Error('Processing error'));
+
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(result.filesFound).toBe(1);
+      expect(result.filesProcessed).toBe(0);
+      expect(result.errors.length).toBe(1);
+    });
+
+    it('handles outer catch on directory listing failure', async () => {
+      const bank = { id: 1, name: 'Test', enrollment_report_url: 'file:///reports' };
+      remoteFileService.isRemote.mockReturnValue(false);
+      fs.access.mockResolvedValue();
+      fs.readdir.mockRejectedValue(new Error('Permission denied'));
+
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(result.filesFound).toBe(0);
+      expect(result.errors.length).toBe(1);
     });
   });
 

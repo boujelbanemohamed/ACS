@@ -125,4 +125,59 @@ router.get('/health', authMiddleware, superAdminOnly, async (req, res) => {
   }
 });
 
+router.get('/debug', authMiddleware, superAdminOnly, async (req, res) => {
+  try {
+    const [
+      unresolvedValidations,
+      fileProcessingErrors,
+      apiCallErrors,
+      xmlGenerationErrors,
+      scanErrors,
+      notificationErrors,
+      rejectedRecords,
+      enrollmentErrors,
+      topFieldErrors,
+      recentFileErrors,
+      recentScanLogs
+    ] = await Promise.all([
+      db.query(`SELECT COUNT(*)::int as count FROM validation_errors WHERE is_resolved = false`),
+      db.query(`SELECT status, COUNT(*)::int as count, COALESCE(SUM(invalid_rows), 0)::int as invalid_rows, COALESCE(SUM(duplicate_rows), 0)::int as duplicate_rows FROM file_logs WHERE status IN ('error','validation_error') GROUP BY status ORDER BY count DESC`),
+      db.query(`SELECT COUNT(*)::int as total, COUNT(DISTINCT endpoint)::int as endpoints FROM api_logs WHERE response_status >= 400`),
+      db.query(`SELECT COUNT(*)::int as total FROM xml_logs WHERE status = 'error'`),
+      db.query(`SELECT COUNT(*)::int as total, COALESCE(SUM(errors_count), 0)::int as scan_errors FROM scan_logs WHERE errors_count > 0`),
+      db.query(`SELECT COUNT(*)::int as total FROM notification_logs WHERE status = 'error'`),
+      db.query(`SELECT COUNT(*)::int as total FROM record_history WHERE status = 'REJECTED'`),
+      db.query(`SELECT COUNT(*)::int as total FROM enrollment_logs WHERE error_count > 0`),
+      db.query(`SELECT rhd.error_type, rhd.error_message, rhd.field_name, COUNT(*)::int as count FROM record_history_details rhd WHERE rhd.is_valid = false GROUP BY rhd.error_type, rhd.error_message, rhd.field_name ORDER BY count DESC LIMIT 20`),
+      db.query(`SELECT fl.id, fl.file_name, fl.status, fl.bank_id, fl.error_details, fl.invalid_rows, fl.processed_at, b.code as bank_code, COALESCE(( SELECT json_agg(json_build_object('field', ve.field_name, 'value', ve.field_value, 'message', ve.error_message, 'severity', ve.severity, 'row', ve.row_number, 'resolved', ve.is_resolved)) FROM validation_errors ve WHERE ve.file_log_id = fl.id ORDER BY ve.row_number, ve.field_name LIMIT 15 ), '[]'::json) as validation_errors, COALESCE(( SELECT json_agg(json_build_object('field', rhd.field_name, 'value', rhd.field_value, 'message', rhd.error_message, 'severity', rhd.severity, 'type', rhd.error_type)) FROM record_history rh JOIN record_history_details rhd ON rhd.history_id = rh.id WHERE (rh.file_log_id = fl.id OR (rh.file_name = fl.file_name AND rh.bank_id = fl.bank_id)) AND rhd.is_valid = false LIMIT 15 ), '[]'::json) as record_history_errors FROM file_logs fl LEFT JOIN banks b ON fl.bank_id = b.id WHERE fl.status IN ('error','validation_error') ORDER BY fl.processed_at DESC LIMIT 20`),
+      db.query(`SELECT id, scan_time, errors_count, errors_detail FROM scan_logs WHERE errors_count > 0 ORDER BY scan_time DESC LIMIT 10`)
+    ]);
+
+    const summary = {
+      unresolved_validation_errors: unresolvedValidations.rows[0]?.count || 0,
+      file_processing_errors: fileProcessingErrors.rows.reduce((acc, r) => acc + r.count, 0),
+      api_call_errors: apiCallErrors.rows[0]?.total || 0,
+      xml_generation_errors: xmlGenerationErrors.rows[0]?.total || 0,
+      scan_errors_total: scanErrors.rows[0]?.total || 0,
+      failed_notifications: notificationErrors.rows[0]?.total || 0,
+      rejected_records: rejectedRecords.rows[0]?.total || 0,
+      enrollment_errors: enrollmentErrors.rows[0]?.total || 0,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        summary,
+        file_errors_by_status: fileProcessingErrors.rows,
+        top_field_validation_errors: topFieldErrors.rows,
+        recent_file_errors: recentFileErrors.rows,
+        recent_scan_errors: recentScanLogs.rows,
+      }
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

@@ -105,27 +105,30 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
-    const query = 'DELETE FROM processed_records WHERE id = $1 RETURNING *';
-    const result = await db.query(query, [req.params.id]);
+    const getQuery = 'SELECT pan, bank_id FROM processed_records WHERE id = $1';
+    const getResult = await db.query(getQuery, [req.params.id]);
 
-    if (result.rows.length === 0) {
+    if (getResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Enregistrement non trouvé'
       });
     }
 
-    await auditService.logAction('DELETE_RECORD', { tableName: 'processed_records', recordId: req.params.id, oldData: { bank_id: result.rows[0].bank_id } }, req);
+    const decrypted = decrypt(getResult.rows[0].pan);
 
-    await auditService.logAction('DECRYPT_PAN', { tableName: 'processed_records' }, req);
+    const delQuery = 'DELETE FROM processed_records WHERE id = $1 RETURNING *';
+    await db.query(delQuery, [req.params.id]);
+
+    await auditService.logAction('DELETE_RECORD', { tableName: 'processed_records', recordId: req.params.id, oldData: { bank_id: getResult.rows[0].bank_id } }, req);
 
     res.json({
       success: true,
       data: { decrypted_pan: decrypted, masked_pan: maskPan(decrypted) }
     });
   } catch (error) {
-    console.error('Decrypt PAN error:', error);
-    res.status(500).json({ success: false, message: 'Erreur de déchiffrement' });
+    console.error('Delete record error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de la suppression' });
   }
 });
 

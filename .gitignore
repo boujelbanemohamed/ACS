@@ -43,6 +43,11 @@ frontend/build/
 # Secrets (contenant des vraies clés)
 .env.dockerproduit
 
+# Coverage
+coverage/
+backend/coverage/
+frontend/coverage/
+
 # Playwright test artifacts
 playwright-report/
 test-results/

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Database, Mail, Clock, Server, CheckCircle, XCircle, AlertTriangle, RefreshCw, Cpu, HardDrive, Settings } from 'lucide-react';
+import { Activity, Database, Mail, Clock, Server, CheckCircle, XCircle, AlertTriangle, RefreshCw, Cpu, HardDrive, Settings, Bug, ChevronDown, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import './Monitor.css';
@@ -11,6 +11,9 @@ const Monitor = () => {
   const [error, setError] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(15000);
+  const [debugData, setDebugData] = useState(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugExpanded, setDebugExpanded] = useState(false);
 
   const fetchHealth = async () => {
     try {
@@ -21,6 +24,18 @@ const Monitor = () => {
       setError(err.response?.data?.message || 'Erreur de chargement');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchDebug = async () => {
+    try {
+      setDebugLoading(true);
+      const response = await api.get('/monitoring/debug');
+      setDebugData(response.data.data);
+    } catch (err) {
+      console.error('Debug fetch error:', err);
+    } finally {
+      setDebugLoading(false);
     }
   };
 
@@ -93,6 +108,9 @@ const Monitor = () => {
           )}
           <button className="btn btn-secondary" onClick={() => { setLoading(true); fetchHealth(); }}>
             <RefreshCw size={16} /> Actualiser
+          </button>
+          <button className={'btn btn-debug ' + (debugExpanded ? 'active' : '')} onClick={() => { setDebugExpanded(!debugExpanded); if (!debugData) fetchDebug(); }}>
+            <Bug size={16} /> Debug
           </button>
         </div>
       </div>
@@ -243,6 +261,170 @@ const Monitor = () => {
               </div>
             </div>
           </div>
+
+          {debugExpanded && (
+            <div className="debug-section">
+              <div className="debug-header">
+                <h2><Bug size={20} /> Diagnostic des erreurs</h2>
+                <button className="btn btn-secondary btn-sm" onClick={fetchDebug} disabled={debugLoading}>
+                  <RefreshCw size={14} className={debugLoading ? 'spin' : ''} /> Actualiser
+                </button>
+              </div>
+
+              {debugLoading && !debugData ? (
+                <div className="debug-loading">Chargement du diagnostic...</div>
+              ) : debugData ? (
+                <>
+                  <div className="debug-summary">
+                    <div className={'debug-card ' + (debugData.summary.unresolved_validation_errors > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.unresolved_validation_errors}</span>
+                      <span className="debug-card-label">Erreurs de validation non résolues</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.file_processing_errors > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.file_processing_errors}</span>
+                      <span className="debug-card-label">Fichiers en erreur</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.api_call_errors > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.api_call_errors}</span>
+                      <span className="debug-card-label">Appels API en échec</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.xml_generation_errors > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.xml_generation_errors}</span>
+                      <span className="debug-card-label">Générations XML en échec</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.rejected_records > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.rejected_records}</span>
+                      <span className="debug-card-label">Enregistrements rejetés</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.failed_notifications > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.failed_notifications}</span>
+                      <span className="debug-card-label">Notifications échouées</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.scan_errors_total > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.scan_errors_total}</span>
+                      <span className="debug-card-label">Scans en échec</span>
+                    </div>
+                    <div className={'debug-card ' + (debugData.summary.enrollment_errors > 0 ? 'has-errors' : 'ok')}>
+                      <span className="debug-card-value">{debugData.summary.enrollment_errors}</span>
+                      <span className="debug-card-label">Rapports d'enrôlement en erreur</span>
+                    </div>
+                  </div>
+
+                  {debugData.top_field_validation_errors.length > 0 && (
+                    <div className="debug-table-section">
+                      <h3>Erreurs de validation les plus fréquentes</h3>
+                      <table className="debug-table">
+                        <thead>
+                          <tr>
+                            <th>Champ</th>
+                            <th>Type d'erreur</th>
+                            <th>Message</th>
+                            <th>Occurrences</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {debugData.top_field_validation_errors.map((err, i) => (
+                            <tr key={i}>
+                              <td><code>{err.field_name}</code></td>
+                              <td><span className={'error-badge error-' + (err.error_type || 'unknown').toLowerCase()}>{err.error_type || 'N/A'}</span></td>
+                              <td className="error-message-cell">{err.error_message}</td>
+                              <td className="count-cell">{err.count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {debugData.recent_file_errors.length > 0 && (
+                    <div className="debug-table-section">
+                      <h3>Fichiers récents en erreur</h3>
+                      <table className="debug-table">
+                        <thead>
+                          <tr>
+                            <th>Fichier</th>
+                            <th>Banque</th>
+                            <th>Statut</th>
+                            <th>Lignes invalides</th>
+                            <th>Date</th>
+                            <th>Détails</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {debugData.recent_file_errors.map((f, i) => {
+                            const errors = f.validation_errors && f.validation_errors.length > 0 ? f.validation_errors : (f.record_history_errors && f.record_history_errors.length > 0 ? f.record_history_errors : null);
+                            return (
+                            <tr key={i}>
+                              <td>{f.file_name}</td>
+                              <td>{f.bank_code || 'N/A'}</td>
+                              <td><span className={'error-badge error-' + (f.status === 'error' ? 'fatal' : 'warning')}>{f.status === 'error' ? 'Erreur' : 'Erreur validation'}</span></td>
+                              <td className="count-cell">{f.invalid_rows || 0}</td>
+                              <td className="date-cell">{f.processed_at ? new Date(f.processed_at).toLocaleDateString('fr-FR') : '—'}</td>
+                              <td className="error-details-cell">
+                                {errors ? (
+                                  <div className="validation-errors-list">
+                                    {errors.map((ve, vi) => (
+                                      <div key={vi} className={'validation-error-item ' + (ve.resolved ? 'resolved' : '')}>
+                                        <div className="ve-header">
+                                          <span className={'error-badge error-' + (ve.severity === 'error' ? 'fatal' : 'warning')}>{ve.severity === 'error' ? 'Erreur' : 'Warning'}</span>
+                                          <span className="ve-field"><code>{ve.field}</code></span>
+                                          {ve.row && <span className="ve-row">Ligne {ve.row}</span>}
+                                          {ve.resolved && <span className="ve-resolved">Résolue</span>}
+                                        </div>
+                                        <div className="ve-body">
+                                          <div className="ve-message">{ve.message}</div>
+                                          {ve.value && <div className="ve-value">Valeur reçue : <code>{ve.value}</code></div>}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : f.error_details ? (
+                                  <div className="validation-errors-list">
+                                    <div className="validation-error-item">
+                                      <div className="ve-body">
+                                        <div className="ve-message">{f.error_details}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="validation-errors-list">
+                                    <div className="validation-error-item">
+                                      <div className="ve-body">
+                                        <div className="ve-message">{f.invalid_rows} ligne(s) invalide(s) — {f.status === 'validation_error' ? 'Erreur de validation' : 'Erreur de traitement'}</div>
+                                        <div className="ve-value">Aucun détail enregistré dans la base pour ce fichier</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {debugData.file_errors_by_status.length > 0 && (
+                    <div className="debug-table-section">
+                      <h3>Répartition des erreurs fichier</h3>
+                      <div className="debug-stats-row">
+                        {debugData.file_errors_by_status.map((s, i) => (
+                          <div key={i} className={'debug-stat-card ' + (s.status === 'error' ? 'stat-error' : 'stat-warning')}>
+                            <span className="stat-label">{s.status === 'error' ? 'Erreurs fatales' : 'Erreurs de validation'}</span>
+                            <span className="stat-value">{s.count} fichiers</span>
+                            <span className="stat-sub">{s.invalid_rows} lignes invalides, {s.duplicate_rows} doublons</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="debug-empty">Cliquez sur "Actualiser" pour charger le diagnostic.</div>
+              )}
+            </div>
+          )}
         </>
       ) : null}
     </div>

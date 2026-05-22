@@ -80,6 +80,15 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'bank');
       expect(res.status).toBe(403);
     });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/notifications/smtp')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('PUT /api/notifications/smtp', () => {
@@ -108,6 +117,29 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
     });
+
+    it('updates SMTP config with new password', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1 }] })
+        .mockResolvedValueOnce({});
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .put('/api/notifications/smtp')
+        .send({ host: 'smtp.new.com', port: 587, secure: false, username: 'user', password: 'newpass', from_email: 'noreply@new.com', from_name: 'ACS', enabled: true })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .put('/api/notifications/smtp')
+        .send({ host: 'smtp.new.com', port: 587, secure: false, username: 'user', from_email: 'noreply@new.com', from_name: 'ACS', enabled: true })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('POST /api/notifications/smtp/test', () => {
@@ -119,6 +151,16 @@ describe('Notifications Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
+    });
+
+    it('returns 500 when testConnection throws', async () => {
+      auditService.logAction.mockResolvedValue();
+      mockEmailService.testConnection.mockRejectedValue(new Error('Connection failed'));
+      const res = await request(createTestApp())
+        .post('/api/notifications/smtp/test')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 
@@ -140,6 +182,15 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'bank')
         .set('x-test-bank-id', '1');
       expect(res.status).toBe(403);
+    });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/notifications/emails/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 
@@ -175,6 +226,19 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(400);
     });
+
+    it('returns 500 on database error', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockRejectedValueOnce(new Error('DB error'));
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .post('/api/notifications/emails/1')
+        .send({ email: 'new@bank.com' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('DELETE /api/notifications/emails/:id', () => {
@@ -189,6 +253,15 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
     });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .delete('/api/notifications/emails/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('PUT /api/notifications/emails/:id/toggle', () => {
@@ -200,6 +273,15 @@ describe('Notifications Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
+    });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .put('/api/notifications/emails/1/toggle')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 
@@ -213,6 +295,16 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
     });
+
+    it('returns 500 when sendDailyReport throws', async () => {
+      auditService.logAction.mockResolvedValue();
+      mockEmailService.sendDailyReport.mockRejectedValue(new Error('Send failed'));
+      const res = await request(createTestApp())
+        .post('/api/notifications/send/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('POST /api/notifications/send-all', () => {
@@ -224,6 +316,16 @@ describe('Notifications Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
+    });
+
+    it('returns 500 when sendAllDailyReports throws', async () => {
+      auditService.logAction.mockResolvedValue();
+      mockEmailService.sendAllDailyReports.mockRejectedValue(new Error('Send all failed'));
+      const res = await request(createTestApp())
+        .post('/api/notifications/send-all')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 
@@ -252,6 +354,27 @@ describe('Notifications Routes', () => {
       expect(res.status).toBe(200);
       expect(db.query.mock.calls[0][0]).toContain('WHERE nl.bank_id = $1');
     });
+
+    it('filters logs by bankId query param for super_admin', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] });
+      const res = await request(createTestApp())
+        .get('/api/notifications/logs?bankId=2')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+      expect(db.query.mock.calls[0][0]).toContain('WHERE nl.bank_id = $1');
+    });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+      const res = await request(createTestApp())
+        .get('/api/notifications/logs')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('GET /api/notifications/cron-config', () => {
@@ -262,6 +385,30 @@ describe('Notifications Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
       expect(res.body.data.schedule).toBe('0 8 * * *');
+    });
+
+    it('returns 500 on unexpected error', async () => {
+      const origSchedule = mockCronService.dailyReportSchedule;
+      Object.defineProperty(mockCronService, 'dailyReportSchedule', {
+        get: () => { throw new Error('getter error'); },
+        configurable: true
+      });
+      const res = await request(createTestApp())
+        .get('/api/notifications/cron-config')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+      Object.defineProperty(mockCronService, 'dailyReportSchedule', {
+        value: origSchedule, writable: true, configurable: true
+      });
+    });
+
+    it('blocks non-super_admin', async () => {
+      const res = await request(createTestApp())
+        .get('/api/notifications/cron-config')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
     });
   });
 
@@ -284,6 +431,16 @@ describe('Notifications Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(400);
+    });
+
+    it('returns 500 on unexpected error', async () => {
+      auditService.logAction.mockRejectedValue(new Error('Audit error'));
+      const res = await request(createTestApp())
+        .put('/api/notifications/cron-config')
+        .send({ schedule: '0 9 * * *', enabled: true })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 });

@@ -4,6 +4,22 @@ const bcrypt = require('bcryptjs');
 
 jest.mock('../../config/database');
 jest.mock('../../services/auditService');
+jest.mock('../../middleware/auth', () => ({
+  authMiddleware: (req, res, next) => {
+    if (req.headers['x-test-role-president']) {
+      req.user = {
+        id: parseInt(req.headers['x-test-id'] || '1'),
+        username: req.headers['x-test-username'] || 'admin',
+        role: req.headers['x-test-role-president'],
+        bank_id: parseInt(req.headers['x-test-bank-id'] || '0') || null,
+        email: req.headers['x-test-email'] || 'admin@test.com'
+      };
+    } else {
+      req.user = { id: 1, username: 'admin', role: 'super_admin', bank_id: null, email: 'admin@test.com' };
+    }
+    next();
+  }
+}));
 jest.mock('../../services/emailService', () => ({
   sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'test-id' })
 }));
@@ -286,6 +302,165 @@ describe('Auth Routes', () => {
         .send({ password: 'NewPass123!' });
 
       expect(res.status).toBe(400);
+    });
+  });
+
+    describe('GET /api/auth/password-status', () => {
+    it('returns password status for authenticated user', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ must_change_password: true, password_changed_at: null }] });
+
+      const res = await request(createTestApp())
+        .get('/api/auth/password-status')
+        .set('Authorization', 'Bearer token');
+      expect(res.status).toBe(200);
+      expect(res.body.data.must_change_password).toBe(true);
+      expect(res.body.data.password_expired).toBe(false);
+    });
+
+    it('returns password expired when beyond 90 days', async () => {
+      const oldDate = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000);
+      db.query.mockResolvedValueOnce({ rows: [{ must_change_password: false, password_changed_at: oldDate }] });
+
+      const res = await request(createTestApp())
+        .get('/api/auth/password-status')
+        .set('Authorization', 'Bearer token');
+      expect(res.status).toBe(200);
+      expect(res.body.data.password_expired).toBe(true);
+    });
+
+    it('returns 404 when user not found', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .get('/api/auth/password-status')
+        .set('Authorization', 'Bearer token');
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 500 on database error', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB error'));
+
+      const res = await request(createTestApp())
+        .get('/api/auth/password-status')
+        .set('Authorization', 'Bearer token');
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+    });
+  });
+
+  describe('PUT /api/auth/change-password', () => {
+    it('changes password successfully', async () => {
+      const oldHash = await bcrypt.hash('OldPass123!', 10);
+      db.query
+        .mockResolvedValueOnce({ rows: [{ password: oldHash }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'OldPass123!', newPassword: 'NewPass456!' });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it('rejects missing fields', async () => {
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'OldPass123!' });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects short password (< 8 chars)', async () => {
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'OldPass123!', newPassword: 'Short1' });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects overly long password (> 128 chars)', async () => {
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'OldPass123!', newPassword: 'A'.repeat(129) });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects wrong current password', async () => {
+      const oldHash = await bcrypt.hash('RealPass123!', 10);
+      db.query.mockResolvedValueOnce({ rows: [{ password: oldHash }] });
+
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'WrongPass123!', newPassword: 'NewPass456!' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('incorrect');
+    });
+
+    it('rejects same password as current', async () => {
+      const oldHash = await bcrypt.hash('SamePass123!', 10);
+      db.query.mockResolvedValueOnce({ rows: [{ password: oldHash }] });
+
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'SamePass123!', newPassword: 'SamePass123!' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('diff');
+    });
+
+    it('returns 404 when user not found in DB', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'OldPass123!', newPassword: 'NewPass456!' });
+      expect(res.status).toBe(404);
+    });
+
+    it('change-password returns 500 on database crash', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB crash'));
+
+      const res = await request(createTestApp())
+        .put('/api/auth/change-password')
+        .set('Authorization', 'Bearer token')
+        .send({ currentPassword: 'OldPass123!', newPassword: 'NewPass456!' });
+      expect(res.status).toBe(500);
+    });
+  });
+
+  describe('Error catch blocks for existing endpoints', () => {
+    it('login returns 500 on database crash', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB crash'));
+
+      const res = await request(createTestApp())
+        .post('/api/auth/login')
+        .send({ username: 'admin', password: 'test1234' });
+      expect(res.status).toBe(500);
+    });
+
+    it('forgot-password returns 500 on email service crash', async () => {
+      emailService.sendEmail.mockRejectedValueOnce(new Error('SMTP down'));
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, username: 'admin', email: 'admin@test.com', role: 'super_admin' }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .post('/api/auth/forgot-password')
+        .send({ email: 'admin@test.com' });
+      expect(res.status).toBe(500);
+    });
+
+    it('reset-password returns 500 on database crash', async () => {
+      db.query.mockRejectedValueOnce(new Error('DB crash'));
+
+      const res = await request(createTestApp())
+        .post('/api/auth/reset-password')
+        .send({ token: 'some-token', password: 'NewPass123!' });
+      expect(res.status).toBe(500);
     });
   });
 

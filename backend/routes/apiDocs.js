@@ -170,6 +170,7 @@ const endpoints = {
     basePath: '/api/monitoring',
     endpoints: [
       { method: 'GET', path: '/health', description: 'État de santé complet (base de données, SMTP, disque, mémoire, uptime).', auth: 'jwt', roles: ['super_admin'] },
+      { method: 'GET', path: '/debug', description: 'Diagnostic des erreurs : validation, fichiers, API, XML, scans, notifications, rejets, enrôlement.', auth: 'jwt', roles: ['super_admin'] },
     ]
   },
   auditLogs: {

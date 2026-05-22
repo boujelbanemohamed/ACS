@@ -180,6 +180,24 @@ describe('EmailService', () => {
       expect(result.success).toBe(false);
       expect(result.message).toContain('Aucun email configuré');
     });
+
+    it('fails when getDailyStats returns null', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Test Bank' }] });
+      db.query.mockResolvedValueOnce({ rows: [{ email: 'admin@bank.com' }] });
+      jest.spyOn(emailService, 'getDailyStats').mockResolvedValue(null);
+
+      const result = await emailService.sendDailyReport(1);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('statistiques');
+    });
+
+    it('fails on database error in outer catch', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+
+      const result = await emailService.sendDailyReport(1);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('DB error');
+    });
   });
 
   describe('sendAllDailyReports()', () => {
