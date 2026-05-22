@@ -3,6 +3,7 @@ const request = require('supertest');
 const bcrypt = require('bcryptjs');
 
 jest.mock('../../config/database');
+jest.mock('../../services/auditService');
 jest.mock('../../services/emailService', () => ({
   sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'test-id' })
 }));
