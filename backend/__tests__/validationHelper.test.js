@@ -173,6 +173,33 @@ describe('validationHelper', () => {
       expect(result.isValid).toBe(false);
       expect(result.errorCount).toBeGreaterThanOrEqual(1);
     });
+
+    it('flags PAN with non-digit characters', () => {
+      const result = validateRowForHistory({ ...validRow, pan: '123456789012345A' });
+      const r = result.results.find(x => x.field === 'pan');
+      expect(r.isValid).toBe(false);
+      expect(r.errorType).toBe('FORMAT');
+    });
+
+    it('flags invalid month in expiry', () => {
+      const result = validateRowForHistory({ ...validRow, expiry: '13/28' });
+      const r = result.results.find(x => x.field === 'expiry');
+      expect(r.isValid).toBe(false);
+      expect(r.errorMessage).toContain('Mois');
+    });
+
+    it('flags phone with wrong digit count', () => {
+      const result = validateRowForHistory({ ...validRow, phone: '21612345' });
+      const r = result.results.find(x => x.field === 'phone');
+      expect(r.isValid).toBe(false);
+    });
+
+    it('flags phone with non-Tunisian prefix (11 digits but not 216)', () => {
+      const result = validateRowForHistory({ ...validRow, phone: '33612345678' });
+      const r = result.results.find(x => x.field === 'phone');
+      expect(r.isValid).toBe(false);
+      expect(r.errorType).toBe('FORMAT');
+    });
   });
 
   describe('luhnCheck', () => {

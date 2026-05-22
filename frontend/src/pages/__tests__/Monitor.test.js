@@ -6,6 +6,7 @@ const mockGet = jest.fn();
 const mockPost = jest.fn();
 const mockPut = jest.fn();
 const mockDelete = jest.fn();
+const mockNavigate = jest.fn();
 
 jest.mock('../../services/api', () => ({
   __esModule: true,
@@ -14,7 +15,7 @@ jest.mock('../../services/api', () => ({
 
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
-  useNavigate: () => jest.fn(),
+  useNavigate: () => mockNavigate,
 }));
 
 jest.mock('lucide-react', () => ({
@@ -50,6 +51,7 @@ const healthData = {
 let Monitor;
 beforeEach(() => {
   jest.clearAllMocks();
+  mockNavigate.mockClear();
   mockGet.mockResolvedValue({ data: { data: healthData } });
   Monitor = require('../Monitor').default;
 });
@@ -119,5 +121,40 @@ describe('Monitor', () => {
     fireEvent.click(screen.getByText('Auto'));
     fireEvent.click(screen.getByText('Auto'));
     expect(screen.getByText('15s')).toBeInTheDocument();
+  });
+
+  it('triggers navigation on SMTP config button click', async () => {
+    render(<MemoryRouter><Monitor /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Monitoring Plateforme')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('Configurer SMTP'));
+    expect(mockNavigate).toHaveBeenCalledWith('/notifications');
+  });
+
+  it('toggles auto-refresh checkbox state', async () => {
+    render(<MemoryRouter><Monitor /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Monitoring Plateforme')).toBeInTheDocument(); });
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox.checked).toBe(true);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+  });
+
+  it('displays system uptime and memory details', async () => {
+    render(<MemoryRouter><Monitor /></MemoryRouter>);
+    await waitFor(() => {
+      expect(screen.getByText('Uptime: 5d 12h')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Utilisée: 256MB')).toBeInTheDocument();
+    expect(screen.getByText('Allouée: 512MB')).toBeInTheDocument();
+  });
+
+  it('shows cron schedule, next run, and last scan details', async () => {
+    render(<MemoryRouter><Monitor /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Monitoring Plateforme')).toBeInTheDocument(); });
+    await waitFor(() => {
+      expect(screen.getByText(/Toutes les 5 min/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Prochaine exécution/)).toBeInTheDocument();
+    expect(screen.getByText(/Dernier scan/)).toBeInTheDocument();
   });
 });

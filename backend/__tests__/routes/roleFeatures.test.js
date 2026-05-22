@@ -125,6 +125,17 @@ describe('Role Features Routes', () => {
       expect(res.status).toBe(200);
       expect(roleFeaturesService.setUserFeature).toHaveBeenCalledWith(10, 'settings', false);
     });
+
+    it('returns 404 when user not found', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      const res = await request(createTestApp())
+        .put('/api/role-features/user/999/settings')
+        .send({ enabled: true })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '3');
+      expect(res.status).toBe(404);
+    });
   });
 
   describe('DELETE /api/role-features/bank/:bankId/:feature', () => {
@@ -148,6 +159,16 @@ describe('Role Features Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
       expect(roleFeaturesService.deleteUserFeature).toHaveBeenCalledWith(10, 'settings');
+    });
+
+    it('returns 404 when user not found', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      const res = await request(createTestApp())
+        .delete('/api/role-features/user/999/settings')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '3');
+      expect(res.status).toBe(404);
     });
   });
 
@@ -186,6 +207,17 @@ describe('Role Features Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(1);
     });
+
+    it('filters by bankId for super_admin', async () => {
+      db.query.mockResolvedValue({ rows: [] });
+      const res = await request(createTestApp())
+        .get('/api/role-features/users?bankId=2')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+      expect(db.query.mock.calls[0][0]).toContain('u.bank_id = $1');
+      expect(db.query.mock.calls[0][1]).toEqual([2]);
+    });
   });
 
   describe('GET /api/role-features/bank/:bankId', () => {
@@ -209,6 +241,110 @@ describe('Role Features Routes', () => {
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
       expect(res.body.data.settings).toBe(true);
+    });
+  });
+
+  describe('Error handling - 500 errors', () => {
+    it('GET /me returns 500 on service error', async () => {
+      roleFeaturesService.getEffectiveFeatures.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .get('/api/role-features/me')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(500);
+    });
+
+    it('GET / returns 500 on service error', async () => {
+      roleFeaturesService.getAll.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .get('/api/role-features')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('GET /users returns 500 on db error', async () => {
+      db.query.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .get('/api/role-features/users')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('GET /bank/:bankId returns 500 on db error', async () => {
+      db.query.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .get('/api/role-features/bank/5')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('GET /banks returns 500 on db error', async () => {
+      db.query.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .get('/api/role-features/banks')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('PUT /role/:role/:feature returns 500 on service error', async () => {
+      roleFeaturesService.setRoleFeature.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .put('/api/role-features/role/bank_admin/dashboard')
+        .send({ enabled: false })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('PUT /bank/:bankId/:feature returns 500 on service error', async () => {
+      roleFeaturesService.setBankFeature.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .put('/api/role-features/bank/5/users')
+        .send({ enabled: true })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('PUT /user/:userId/:feature returns 500 on service error', async () => {
+      roleFeaturesService.setUserFeature.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .put('/api/role-features/user/10/settings')
+        .send({ enabled: false })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('DELETE /bank/:bankId/:feature returns 500 on service error', async () => {
+      roleFeaturesService.deleteBankFeature.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .delete('/api/role-features/bank/5/users')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('DELETE /user/:userId/:feature returns 500 on service error', async () => {
+      roleFeaturesService.deleteUserFeature.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .delete('/api/role-features/user/10/settings')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
+    });
+
+    it('POST /reset returns 500 on service error', async () => {
+      roleFeaturesService.resetDefaults.mockRejectedValue(new Error('fail'));
+      const res = await request(createTestApp())
+        .post('/api/role-features/reset')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(500);
     });
   });
 

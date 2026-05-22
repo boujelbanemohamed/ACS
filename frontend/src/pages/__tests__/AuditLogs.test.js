@@ -137,4 +137,57 @@ describe('AuditLogs', () => {
     await waitFor(() => { expect(screen.getByText('Journal d\'activité')).toBeInTheDocument(); });
     expect(screen.getByText('Aucune activité enregistrée')).toBeInTheDocument();
   });
+
+  it('refetches logs when filter action is changed and Filtrer is clicked', async () => {
+    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+    mockGet.mockImplementation((url) => {
+      if (url === '/audit-logs/actions') return Promise.resolve({ data: { data: actionsData } });
+      if (url === '/audit-logs') {
+        return Promise.resolve({ data: { data: auditLogsData, total: 2 } });
+      }
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><AuditLogs /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Journal d\'activité')).toBeInTheDocument(); });
+    const actionSelect = screen.getByDisplayValue('Toutes les actions');
+    fireEvent.change(actionSelect, { target: { value: 'LOGIN_SUCCESS' } });
+    fireEvent.click(screen.getByText('Filtrer'));
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalledWith('/audit-logs', expect.objectContaining({
+        params: expect.objectContaining({ action: 'LOGIN_SUCCESS' })
+      }));
+    });
+  });
+
+  it('applies date range filters when Filtrer is clicked', async () => {
+    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+    mockGet.mockImplementation((url) => {
+      if (url === '/audit-logs/actions') return Promise.resolve({ data: { data: actionsData } });
+      if (url === '/audit-logs') return Promise.resolve({ data: { data: auditLogsData, total: 2 } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    const { container } = render(<MemoryRouter><AuditLogs /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Journal d\'activité')).toBeInTheDocument(); });
+    const dateInputs = container.querySelectorAll('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: '2025-01-01' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2025-01-31' } });
+    fireEvent.click(screen.getByText('Filtrer'));
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalledWith('/audit-logs', expect.objectContaining({
+        params: expect.objectContaining({ dateFrom: '2025-01-01', dateTo: '2025-01-31' })
+      }));
+    });
+  });
+
+  it('shows detail preview for log entries with new_data', async () => {
+    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+    mockGet.mockImplementation((url) => {
+      if (url === '/audit-logs/actions') return Promise.resolve({ data: { data: actionsData } });
+      if (url === '/audit-logs') return Promise.resolve({ data: { data: auditLogsData, total: 2 } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><AuditLogs /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Journal d\'activité')).toBeInTheDocument(); });
+    expect(screen.getByText(/key/)).toBeInTheDocument();
+  });
 });

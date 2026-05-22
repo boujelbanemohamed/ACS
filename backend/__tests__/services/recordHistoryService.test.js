@@ -332,6 +332,16 @@ describe('RecordHistoryService', () => {
       expect(result.limit).toBe(25);
       expect(result.offset).toBe(50);
     });
+
+    it('filters by hasErrors=true', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] });
+
+      await recordHistoryService.searchHistory({ limit: 10, offset: 0, hasErrors: true });
+
+      expect(db.query.mock.calls[0][0]).toContain('total_errors > 0');
+    });
   });
 
   describe('getStats', () => {

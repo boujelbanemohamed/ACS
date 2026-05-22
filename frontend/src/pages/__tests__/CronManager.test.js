@@ -117,4 +117,30 @@ describe('CronManager', () => {
     render(<MemoryRouter><CronManager /></MemoryRouter>);
     await waitFor(() => { expect(screen.getByText('Scan Automatique')).toBeInTheDocument(); });
   });
+
+  it('triggers scan API call when Scan button is clicked', async () => {
+    mockPost.mockResolvedValue({ data: { success: true } });
+    render(<MemoryRouter><CronManager /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Scan Automatique')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('Scan'));
+    await waitFor(() => { expect(mockPost).toHaveBeenCalledWith('/scanner/trigger'); });
+  });
+
+  it('changes cron schedule when a preset is selected', async () => {
+    render(<MemoryRouter><CronManager /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Scan Automatique')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('Config'));
+    const presetSelect = screen.getByDisplayValue('Toutes les 5 min');
+    fireEvent.change(presetSelect, { target: { value: '0 * * * *' } });
+    const customInput = screen.getByPlaceholderText('*/5 * * * *');
+    expect(customInput.value).toBe('0 * * * *');
+  });
+
+  it('toggles cron enabled/disabled via toggle button', async () => {
+    mockPut.mockResolvedValue({ data: { success: true } });
+    render(<MemoryRouter><CronManager /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Scan Automatique')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByRole('button', { name: 'Activé' }));
+    await waitFor(() => { expect(mockPut).toHaveBeenCalledWith('/settings/cron_enabled', { value: 'false' }); });
+  });
 });

@@ -75,6 +75,20 @@ describe('History Routes', () => {
       expect(db.query.mock.calls[0][0]).toContain('bank_id = $');
     });
 
+    it('filters by bankFilter for bank_admin', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] });
+      const res = await request(createTestApp())
+        .get('/api/history')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '3');
+      expect(res.status).toBe(200);
+      expect(db.query.mock.calls[0][0]).toContain('AND fl.bank_id');
+      expect(db.query.mock.calls[0][1]).toContain(3);
+    });
+
     it('filters by status', async () => {
       db.query
         .mockResolvedValueOnce({ rows: [] })

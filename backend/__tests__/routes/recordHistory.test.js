@@ -151,6 +151,15 @@ describe('Record History Routes', () => {
 
       expect(recordHistoryService.getTopErrors).toHaveBeenCalledWith(null, 5);
     });
+
+    it('forces bank_id for bank role', async () => {
+      recordHistoryService.getTopErrors.mockResolvedValueOnce([]);
+      await request(createTestApp())
+        .get('/api/record-history/top-errors')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '3');
+      expect(recordHistoryService.getTopErrors).toHaveBeenCalledWith(3, 10);
+    });
   });
 
   describe('GET /api/record-history/pan/:bankId/:pan', () => {
@@ -235,6 +244,14 @@ describe('Record History Routes', () => {
       expect(hashPan).toHaveBeenCalledWith('1234567890123456');
       expect(db.query.mock.calls[0][1][0]).toBe('hashed_pan_value');
     });
+
+    it('accepts bankId query param for super_admin', async () => {
+      hashPan.mockReturnValueOnce('hashed');
+      db.query.mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/record-history/pan-lookup?pan=1234567890123456&bankId=2');
+      expect(db.query.mock.calls[0][0]).toContain('AND rh.bank_id = $2');
+    });
   });
 
   describe('GET /api/record-history/corrections', () => {
@@ -256,6 +273,22 @@ describe('Record History Routes', () => {
         .get('/api/record-history/corrections?bankId=3');
 
       expect(db.query.mock.calls[0][0]).toContain('bank_id = $1');
+    });
+
+    it('forces bank_id for bank role', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/record-history/corrections')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '3');
+      expect(db.query.mock.calls[0][0]).toContain('bank_id = $1');
+    });
+
+    it('filters by bankId for super_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/record-history/corrections?bankId=5');
+      expect(db.query.mock.calls[0][1][0]).toBe(5);
     });
   });
 
@@ -279,6 +312,22 @@ describe('Record History Routes', () => {
         .get('/api/record-history/timeline/7');
 
       expect(db.query.mock.calls[0][1][0]).toBe('7 days');
+    });
+
+    it('forces bank_id for bank role', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/record-history/timeline/30')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '3');
+      expect(db.query.mock.calls[0][1]).toContain(3);
+    });
+
+    it('filters by bankId for super_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      await request(createTestApp())
+        .get('/api/record-history/timeline/30?bankId=5');
+      expect(db.query.mock.calls[0][1]).toContain(5);
     });
   });
 

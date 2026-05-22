@@ -277,10 +277,23 @@ describe('Public API Routes', () => {
       const res = await request(createTestApp())
         .post('/api/v1/cards/validate')
         .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/20' }] });
+        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/25' }] });
 
       expect(res.status).toBe(200);
       expect(res.body.data.invalidCards.length).toBeGreaterThan(0);
+    });
+
+    it('rejects invalid expiry format in validate', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [validKeyRow] })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ rows: [{ id: 1, code: 'BANK01' }] });
+      const res = await request(createTestApp())
+        .post('/api/v1/cards/validate')
+        .set(authHeader())
+        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: 'bad' }] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.invalidCards[0].errors[0].message).toContain('Format expiry');
     });
 
     it('returns 500 on database error in validate', async () => {
@@ -407,6 +420,45 @@ describe('Public API Routes', () => {
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('SERVER_ERROR');
+    });
+
+    it('rejects invalid month in register', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [validKeyRow] })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
+      const res = await request(createTestApp())
+        .post('/api/v1/cards/register')
+        .set(authHeader())
+        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '13/28' }] });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('NO_VALID_CARDS');
+    });
+
+    it('rejects invalid year in register', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [validKeyRow] })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
+      const res = await request(createTestApp())
+        .post('/api/v1/cards/register')
+        .set(authHeader())
+        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/99' }] });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('NO_VALID_CARDS');
+    });
+
+    it('rejects expired card in register', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [validKeyRow] })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
+      const res = await request(createTestApp())
+        .post('/api/v1/cards/register')
+        .set(authHeader())
+        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/25' }] });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('NO_VALID_CARDS');
     });
   });
 
