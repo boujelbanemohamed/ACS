@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText, Shield } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText, Shield, BookOpen } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './Layout.css';
@@ -129,6 +129,13 @@ const Layout = () => {
             <NavLink to="/role-features" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Shield size={20} />
               <span>Permissions</span>
+            </NavLink>
+          )}
+
+          {isSuperAdmin && (
+            <NavLink to="/api-docs" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <BookOpen size={20} />
+              <span>Documentation API</span>
             </NavLink>
           )}
         </nav>

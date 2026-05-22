@@ -18,6 +18,7 @@ import Users from './pages/Users';
 import Profile from './pages/Profile';
 import AuditLogs from './pages/AuditLogs';
 import RoleFeatures from './pages/RoleFeatures';
+import ApiDocs from './pages/ApiDocs';
 import ChangePassword from './pages/ChangePassword';
 import './App.css';
 
@@ -64,6 +65,7 @@ function App() {
             <Route path="monitoring" element={<Monitor />} />
             <Route path="audit-logs" element={<AuditLogs />} />
             <Route path="role-features" element={<RoleFeatures />} />
+            <Route path="api-docs" element={<ApiDocs />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

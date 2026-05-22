@@ -43,7 +43,8 @@ jest.mock('../middleware/auth', () => ({
 }));
 jest.mock('../middleware/roleMiddleware', () => ({
   checkRole: jest.fn(() => (req, res, next) => next()),
-  checkFeature: jest.fn(() => (req, res, next) => next())
+  checkFeature: jest.fn(() => (req, res, next) => next()),
+  isSuperAdmin: jest.fn((req, res, next) => next())
 }));
 
 const mockErrorHandler = jest.fn((err, req, res, next) => {

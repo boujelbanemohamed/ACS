@@ -28,6 +28,7 @@ const apiKeysRoutes = require('./routes/apiKeys');
 const usersRoutes = require('./routes/users');
 const enrollmentRoutes = require('./routes/enrollment');
 const notificationsRoutes = require('./routes/notifications');
+const apiDocsRoutes = require('./routes/apiDocs');
 const cronService = require('./services/cronService');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
@@ -35,7 +36,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/auth');
-const { checkRole, checkFeature } = require('./middleware/roleMiddleware');
+const { checkRole, checkFeature, isSuperAdmin } = require('./middleware/roleMiddleware');
 const { maskResponseData } = require('./services/encryptionService');
 
 if (!process.env.PAN_ENCRYPTION_KEY) {
@@ -151,6 +152,7 @@ app.use('/api/scanner', authMiddleware, checkFeature('cron'), require('./routes/
 app.use('/api/monitoring', authMiddleware, checkFeature('monitoring'), require('./routes/monitoring'));
 app.use('/api/audit-logs', authMiddleware, checkFeature('audit_logs'), require('./routes/audit'));
 app.use('/api/role-features', authMiddleware, require('./routes/roleFeatures'));
+app.use('/api/api-docs', authMiddleware, isSuperAdmin, apiDocsRoutes);
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {

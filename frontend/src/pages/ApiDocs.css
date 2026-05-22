@@ -1,0 +1,381 @@
+.api-docs-page {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.api-docs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.api-docs-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 4px 0;
+}
+
+.api-docs-subtitle {
+  color: #666;
+  font-size: 14px;
+  margin: 0;
+  max-width: 600px;
+  line-height: 1.5;
+}
+
+.api-docs-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.api-version {
+  background: #e0e7ff;
+  color: #4338ca;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.api-base-url {
+  background: #f3f4f6;
+  color: #374151;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.api-docs-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 16px;
+}
+
+.api-docs-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: #1a1a2e;
+  background: transparent;
+}
+
+.api-docs-search input::placeholder {
+  color: #9ca3af;
+}
+
+.endpoint-count {
+  font-size: 12px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.api-docs-content {
+  display: flex;
+  gap: 24px;
+}
+
+.api-docs-nav {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.api-nav-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: #374151;
+  transition: all 0.15s;
+  width: 100%;
+}
+
+.api-nav-item:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.api-nav-item.active {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #4338ca;
+  font-weight: 600;
+}
+
+.nav-item-count {
+  background: #e5e7eb;
+  color: #6b7280;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.api-nav-item.active .nav-item-count {
+  background: #c7d2fe;
+  color: #4338ca;
+}
+
+.api-docs-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.api-group {
+  margin-bottom: 24px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.api-group-header {
+  padding: 20px 24px;
+  cursor: pointer;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.api-group-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.group-description {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.group-base-path {
+  background: #f3f4f6;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.endpoint-list {
+  padding: 8px;
+}
+
+.endpoint-card {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: all 0.15s;
+}
+
+.endpoint-card:hover {
+  border-color: #e5e7eb;
+  background: #fafafa;
+}
+
+.endpoint-card.expanded {
+  border-color: #e5e7eb;
+  background: #fafafa;
+}
+
+.endpoint-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.method-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 5px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: monospace;
+  min-width: 50px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.endpoint-path {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1a1a2e;
+  min-width: 200px;
+}
+
+.endpoint-desc {
+  flex: 1;
+  font-size: 13px;
+  color: #6b7280;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.auth-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.auth-jwt {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.auth-apikey {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.auth-none {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.endpoint-roles {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.expand-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.endpoint-details {
+  padding: 0 12px 12px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 4px;
+}
+
+.detail-section {
+  margin-top: 12px;
+}
+
+.detail-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 6px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-pre {
+  background: #1a1a2e;
+  color: #e5e7eb;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: monospace;
+  overflow-x: auto;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.detail-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.detail-table td:first-child {
+  font-weight: 600;
+  color: #374151;
+  width: 160px;
+}
+
+.detail-table td:last-child {
+  color: #6b7280;
+}
+
+.detail-table tr:last-child td {
+  border-bottom: none;
+}
+
+.no-results {
+  text-align: center;
+  padding: 60px 20px;
+  color: #9ca3af;
+}
+
+@media (max-width: 768px) {
+  .api-docs-content {
+    flex-direction: column;
+  }
+  .api-docs-nav {
+    width: 100%;
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .api-docs-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .endpoint-summary {
+    flex-wrap: wrap;
+  }
+  .endpoint-path {
+    min-width: 0;
+  }
+  .endpoint-desc {
+    width: 100%;
+    order: 10;
+  }
+}
