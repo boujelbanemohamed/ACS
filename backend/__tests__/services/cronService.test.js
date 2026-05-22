@@ -1,159 +1,340 @@
+jest.mock('node-cron');
 jest.mock('../../config/database');
+jest.mock('../../services/fileScanner');
+jest.mock('../../services/enrollmentService');
+jest.mock('../../services/emailService');
+jest.mock('../../utils/remoteFileService');
+jest.mock('fs', () => {
+  const actual = jest.requireActual('fs');
+  return {
+    ...actual,
+    promises: {
+      access: jest.fn(),
+      readdir: jest.fn(),
+      mkdir: jest.fn(),
+      rename: jest.fn(),
+    }
+  };
+});
 
+const cron = require('node-cron');
 const db = require('../../config/database');
-const { CronService } = require('../../services/cronService');
+const FileScanner = require('../../services/fileScanner');
+const enrollmentService = require('../../services/enrollmentService');
+const emailService = require('../../services/emailService');
+const remoteFileService = require('../../utils/remoteFileService');
+const fs = require('fs').promises;
+
+const CronService = require('../../services/cronService');
 
 describe('CronService', () => {
+  let cronService;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    cron.schedule.mockReturnValue({ stop: jest.fn() });
+    cron.validate.mockReturnValue(true);
+    db.query.mockResolvedValue({ rows: [] });
+    FileScanner.mockClear();
+    cronService = new CronService.CronService();
   });
 
   describe('constructor', () => {
-    it('creates default schedules from env', () => {
-      process.env.CRON_SCHEDULE = '*/10 * * * *';
+    it('sets default values', () => {
+      expect(cronService.schedule).toBe('*/5 * * * *');
+      expect(cronService.enabled).toBe(true);
+      expect(cronService.isScanning).toBe(false);
+      expect(cronService.lastScanTime).toBeNull();
+    });
+
+    it('reads env overrides', () => {
+      const oldSchedule = process.env.CRON_SCHEDULE;
+      const oldReport = process.env.REPORT_CRON;
+      process.env.CRON_SCHEDULE = '0 * * * *';
       process.env.REPORT_CRON = '0 9 * * *';
-      const service = new CronService();
-      expect(service.schedule).toBe('*/10 * * * *');
-      expect(service.dailyReportSchedule).toBe('0 9 * * *');
-    });
-
-    it('defaults to 5-minute scan when no env', () => {
-      delete process.env.CRON_SCHEDULE;
-      delete process.env.REPORT_CRON;
-      const service = new CronService();
-      expect(service.schedule).toBe('*/5 * * * *');
-      expect(service.dailyReportSchedule).toBe('0 8 * * *');
+      const svc = new CronService.CronService();
+      expect(svc.schedule).toBe('0 * * * *');
+      expect(svc.dailyReportSchedule).toBe('0 9 * * *');
+      if (oldSchedule === undefined) delete process.env.CRON_SCHEDULE; else process.env.CRON_SCHEDULE = oldSchedule;
+      if (oldReport === undefined) delete process.env.REPORT_CRON; else process.env.REPORT_CRON = oldReport;
     });
   });
 
-  describe('describeCron', () => {
-    it('describes every 5 minutes', () => {
-      const service = new CronService();
-      expect(service.describeCron('*/5 * * * *')).toContain('5');
+  describe('init()', () => {
+    it('starts scan and report tasks with default settings', async () => {
+      const scanSpy = jest.spyOn(cronService, 'startScanTask').mockImplementation(() => {});
+      const reportSpy = jest.spyOn(cronService, 'startReportTask').mockImplementation(() => {});
+      await cronService.init();
+      expect(scanSpy).toHaveBeenCalled();
+      expect(reportSpy).toHaveBeenCalled();
     });
 
-    it('describes daily at 8 AM', () => {
-      const service = new CronService();
-      expect(service.describeCron('0 8 * * *')).toContain('8h');
+    it('loads cron settings from database if available', async () => {
+      db.query.mockResolvedValue({
+        rows: [
+          { key: 'cron_schedule', value: '0 */2 * * *' },
+          { key: 'cron_enabled', value: 'false' }
+        ]
+      });
+      await cronService.init();
+      expect(cronService.schedule).toBe('0 */2 * * *');
+      expect(cronService.enabled).toBe(false);
     });
 
-    it('returns the expression for unrecognized pattern', () => {
-      const service = new CronService();
-      expect(service.describeCron('* * * * *')).toContain('*');
-    });
-  });
-
-  describe('getStatus', () => {
-    it('returns default status before init', () => {
-      const service = new CronService();
-      const status = service.getStatus();
-      expect(status).toHaveProperty('isScanning');
-      expect(status).toHaveProperty('enabled');
-      expect(status).toHaveProperty('schedule');
-      expect(status).toHaveProperty('lastScan');
-    });
-  });
-
-  describe('logResult', () => {
-    it('inserts scan result into DB', async () => {
-      db.query.mockResolvedValue({ rows: [] });
-
-      const service = new CronService();
-      const result = { banksScanned: 2, filesFound: 5, filesProcessed: 3, enrollmentFilesFound: 1, enrollmentFilesProcessed: 1, errors: [] };
-      await service.logResult(result);
-
-      expect(db.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO scan_logs'),
-        expect.arrayContaining([2, 5, 3])
-      );
-    });
-
-    it('creates scan_logs table on 42P01 error', async () => {
-      const pgError = new Error('relation does not exist');
-      pgError.code = '42P01';
-      db.query
-        .mockRejectedValueOnce(pgError)
-        .mockResolvedValue({ rows: [] });
-
-      const service = new CronService();
-      await service.logResult({ banksScanned: 1, filesFound: 0, filesProcessed: 0, enrollmentFilesFound: 0, enrollmentFilesProcessed: 0, errors: [] });
-
-      expect(db.query).toHaveBeenCalledTimes(3);
-    });
-
-    it('handles unknown DB error', async () => {
-      db.query.mockRejectedValueOnce(new Error('connection refused'));
-
-      const service = new CronService();
-      await expect(service.logResult({ banksScanned: 1, filesFound: 0, filesProcessed: 0, enrollmentFilesFound: 0, enrollmentFilesProcessed: 0, errors: [] }))
-        .resolves.not.toThrow();
+    it('uses defaults when db query fails', async () => {
+      db.query.mockRejectedValue(new Error('DB error'));
+      const scanSpy = jest.spyOn(cronService, 'startScanTask').mockImplementation(() => {});
+      const reportSpy = jest.spyOn(cronService, 'startReportTask').mockImplementation(() => {});
+      await cronService.init();
+      expect(scanSpy).toHaveBeenCalled();
+      expect(reportSpy).toHaveBeenCalled();
     });
   });
 
-  describe('setEnabled', () => {
-    it('enables and starts scan', async () => {
-      db.query.mockResolvedValue({ rows: [] });
-      const service = new CronService();
-      service.startScanTask = jest.fn();
-
-      await service.setEnabled(true);
-
-      expect(service.enabled).toBe(true);
-      expect(service.startScanTask).toHaveBeenCalled();
-    });
-
-    it('disables and stops scan', async () => {
-      db.query.mockResolvedValue({ rows: [] });
-      const service = new CronService();
+  describe('startScanTask()', () => {
+    it('stops existing task before creating new one', () => {
       const stopMock = jest.fn();
-      service.scanTask = { stop: stopMock };
-
-      await service.setEnabled(false);
-
-      expect(service.enabled).toBe(false);
+      cronService.scanTask = { stop: stopMock };
+      cronService.startScanTask();
       expect(stopMock).toHaveBeenCalled();
-      expect(service.scanTask).toBeNull();
+      expect(cron.schedule).toHaveBeenCalled();
     });
 
-    it('upserts into settings table', async () => {
+    it('does not start if disabled', () => {
+      cronService.enabled = false;
+      cronService.startScanTask();
+      expect(cron.schedule).not.toHaveBeenCalled();
+    });
+
+    it('does not start if cron schedule is invalid', () => {
+      cron.validate.mockReturnValue(false);
+      cronService.startScanTask();
+      expect(cron.schedule).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateSchedule()', () => {
+    it('updates schedule and restarts task', () => {
+      const spy = jest.spyOn(cronService, 'startScanTask').mockImplementation(() => {});
+      cronService.updateSchedule('0 * * * *');
+      expect(cronService.schedule).toBe('0 * * * *');
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('throws on invalid schedule', async () => {
+      cron.validate.mockReturnValue(false);
+      await expect(cronService.updateSchedule('invalid')).rejects.toThrow('Invalid cron schedule');
+    });
+  });
+
+  describe('setEnabled()', () => {
+    it('sets enabled and updates database', async () => {
+      cronService.startScanTask = jest.fn();
+      cronService.scanTask = { stop: jest.fn() };
+      await cronService.setEnabled(true);
+      expect(cronService.enabled).toBe(true);
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'), ['true']);
+    });
+
+    it('stops scan task when disabled', async () => {
+      const stopMock = jest.fn();
+      cronService.scanTask = { stop: stopMock };
+      await cronService.setEnabled(false);
+      expect(stopMock).toHaveBeenCalled();
+      expect(cronService.scanTask).toBeNull();
+    });
+  });
+
+  describe('run()', () => {
+    it('returns null if already scanning', async () => {
+      cronService.isScanning = true;
+      const result = await cronService.run();
+      expect(result).toBeNull();
+    });
+
+    it('scans active banks and processes files', async () => {
+      const mockBank = { id: 1, name: 'Test Bank', is_active: true, enrollment_report_url: null, source_url: '/test' };
+      cronService.scanner.scanBank.mockResolvedValue({ filesFound: 3, filesProcessed: 2, errors: [] });
+      db.query.mockResolvedValue({ rows: [mockBank] });
+      cronService.logResult = jest.fn();
+
+      const result = await cronService.run();
+      expect(result.banksScanned).toBe(1);
+      expect(result.filesFound).toBe(3);
+      expect(result.filesProcessed).toBe(2);
+      expect(cronService.isScanning).toBe(false);
+    });
+
+    it('handles scan errors gracefully', async () => {
+      cronService.scanner.scanBank.mockRejectedValue(new Error('Scan failed'));
+      db.query.mockResolvedValue({ rows: [{ id: 1, name: 'Bad Bank', is_active: true, enrollment_report_url: null }] });
+      cronService.logResult = jest.fn();
+
+      const result = await cronService.run();
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(cronService.isScanning).toBe(false);
+    });
+  });
+
+  describe('scanEnrollmentReports()', () => {
+    it('returns empty result if no enrollment_report_url', async () => {
+      const result = await cronService.scanEnrollmentReports({ enrollment_report_url: null });
+      expect(result.filesFound).toBe(0);
+    });
+
+    it('scans local directory for XML files', async () => {
+      const bank = { id: 1, name: 'Test', enrollment_report_url: 'file:///reports' };
+      remoteFileService.isRemote.mockReturnValue(false);
+      fs.access.mockResolvedValue();
+      fs.readdir.mockResolvedValue(['report1.xml', 'report2.xml', 'notes.txt']);
       db.query.mockResolvedValue({ rows: [] });
-      const service = new CronService();
-      service.startScanTask = jest.fn();
+      enrollmentService.processEnrollmentReport.mockResolvedValue({ success: true, successCount: 2, errorCount: 0 });
 
-      await service.setEnabled(true);
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(result.filesFound).toBe(2);
+      expect(result.filesProcessed).toBe(2);
+    });
 
-      expect(db.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO settings'),
-        ['true']
+    it('skips already processed enrollment files', async () => {
+      const bank = { id: 1, name: 'Test', enrollment_report_url: 'file:///reports' };
+      remoteFileService.isRemote.mockReturnValue(false);
+      fs.access.mockResolvedValue();
+      fs.readdir.mockResolvedValue(['report1.xml']);
+      db.query.mockResolvedValue({ rows: [{ id: 1 }] });
+
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(result.filesFound).toBe(1);
+      expect(result.filesProcessed).toBe(0);
+    });
+
+    it('creates directory if it does not exist', async () => {
+      const bank = { id: 1, name: 'Test', enrollment_report_url: 'file:///newreports' };
+      remoteFileService.isRemote.mockReturnValue(false);
+      fs.access.mockRejectedValue(new Error('ENOENT'));
+      fs.mkdir.mockResolvedValue();
+
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(fs.mkdir).toHaveBeenCalled();
+      expect(result.filesFound).toBe(0);
+    });
+
+    it('handles SFTP remote enrollment', async () => {
+      const bank = { id: 1, name: 'SFTP Bank', enrollment_report_url: 'sftp://server/reports' };
+      remoteFileService.isRemote.mockReturnValue(true);
+      remoteFileService.listFiles.mockResolvedValue(['r1.xml', 'r2.xml']);
+      remoteFileService.readFile.mockResolvedValue('<xml>data</xml>');
+      db.query.mockResolvedValue({ rows: [] });
+      enrollmentService.processEnrollmentReportFromContent.mockResolvedValue({ success: true, successCount: 1, errorCount: 0 });
+
+      const result = await cronService.scanEnrollmentReports(bank);
+      expect(result.filesFound).toBe(2);
+      expect(result.filesProcessed).toBe(2);
+      expect(remoteFileService.moveFile).toHaveBeenCalled();
+    });
+  });
+
+  describe('logResult()', () => {
+    it('inserts scan log entry', async () => {
+      db.query.mockResolvedValue({ rows: [] });
+      const result = { startTime: new Date(), banksScanned: 2, filesFound: 5, filesProcessed: 4, enrollmentProcessed: 1, errors: ['err1'] };
+      await cronService.logResult(result);
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO scan_logs'), expect.any(Array));
+    });
+
+    it('creates table on 42P01 error and retries', async () => {
+      db.query
+        .mockRejectedValueOnce({ code: '42P01' })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] });
+      cronService.createTable = jest.fn().mockResolvedValue();
+      const result = { startTime: new Date(), banksScanned: 0, filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
+      await cronService.logResult(result);
+      expect(cronService.createTable).toHaveBeenCalled();
+    });
+
+    it('logs other db errors to console', async () => {
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const dbError = new Error('Some error');
+      Object.defineProperty(dbError, 'code', { value: null });
+      db.query.mockReset();
+      db.query.mockImplementation(() => Promise.reject(dbError));
+      const result = { startTime: new Date(), banksScanned: 0, filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
+      await cronService.logResult(result);
+      expect(consoleSpy).toHaveBeenCalledWith('Log error:', dbError);
+    });
+  });
+
+  describe('startReportTask()', () => {
+    it('schedules daily report cron', () => {
+      cronService.startReportTask();
+      expect(cron.schedule).toHaveBeenCalledWith(
+        '0 8 * * *',
+        expect.any(Function),
+        expect.objectContaining({ scheduled: true })
       );
     });
-  });
 
-  describe('updateSchedule', () => {
-    it('updates and restarts scan task', async () => {
-      db.query.mockResolvedValue({ rows: [] });
-
-      const service = new CronService();
-      service.startScanTask = jest.fn();
-
-      await service.updateSchedule('0 */2 * * *');
-
-      expect(service.schedule).toBe('0 */2 * * *');
-      expect(service.startScanTask).toHaveBeenCalled();
+    it('does not start if daily reports disabled', () => {
+      cronService.dailyReportEnabled = false;
+      cronService.startReportTask();
+      expect(cron.schedule).not.toHaveBeenCalled();
     });
 
-    it('rejects invalid cron expression', async () => {
-      const service = new CronService();
-      await expect(service.updateSchedule('invalid')).rejects.toThrow();
+    it('does not start if report schedule is invalid', () => {
+      cron.validate.mockReturnValue(false);
+      cronService.startReportTask();
+      expect(cron.schedule).not.toHaveBeenCalled();
     });
   });
 
-  describe('run', () => {
-    it('guards against concurrent runs', async () => {
-      const service = new CronService();
-      service.isScanning = true;
-      await service.run();
-      expect(db.query).not.toHaveBeenCalled();
+  describe('getStatus()', () => {
+    it('returns current status object', () => {
+      cronService.isScanning = true;
+      cronService.enabled = true;
+      cronService.schedule = '*/5 * * * *';
+      cronService.lastScanTime = new Date('2026-01-01T00:00:00Z');
+      const status = cronService.getStatus();
+      expect(status.isScanning).toBe(true);
+      expect(status.enabled).toBe(true);
+      expect(status.schedule).toBe('*/5 * * * *');
+      expect(status.lastScan).toEqual(new Date('2026-01-01T00:00:00Z'));
+    });
+  });
+
+  describe('describeCron()', () => {
+    it('returns human readable labels', () => {
+      expect(cronService.describeCron('*/1 * * * *')).toBe('Every minute');
+      expect(cronService.describeCron('*/5 * * * *')).toBe('Every 5 min');
+      expect(cronService.describeCron('0 8 * * 1-5')).toBe('Weekdays at 8h');
+    });
+
+    it('returns raw string for unknown schedules', () => {
+      expect(cronService.describeCron('custom_schedule')).toBe('custom_schedule');
+    });
+  });
+
+  describe('estimateNextScan()', () => {
+    it('returns null if disabled or no last scan', () => {
+      cronService.enabled = false;
+      expect(cronService.estimateNextScan()).toBeNull();
+      cronService.enabled = true;
+      cronService.lastScanTime = null;
+      expect(cronService.estimateNextScan()).toBeNull();
+    });
+
+    it('calculates next scan time from interval', () => {
+      cronService.enabled = true;
+      cronService.lastScanTime = new Date('2026-01-01T00:00:00Z');
+      cronService.schedule = '*/10 * * * *';
+      const next = cronService.estimateNextScan();
+      expect(next.getMinutes()).toBe(10);
+    });
+
+    it('returns null for non-interval schedules', () => {
+      cronService.enabled = true;
+      cronService.lastScanTime = new Date();
+      cronService.schedule = '0 8 * * *';
+      expect(cronService.estimateNextScan()).toBeNull();
     });
   });
 });
