@@ -1,3 +1,6 @@
+jest.mock('../config/database');
+
+const db = require('../config/database');
 const { validateRowForHistory, luhnCheck, createFieldValidation, FIELD_EXPECTATIONS } = require('../utils/validationHelper');
 
 describe('validationHelper', () => {
@@ -228,6 +231,24 @@ describe('validationHelper', () => {
         expect(FIELD_EXPECTATIONS[f].format).toBeDefined();
         expect(FIELD_EXPECTATIONS[f].description).toBeDefined();
       });
+    });
+  });
+
+  describe('checkDuplicate', () => {
+    it('returns true when record exists', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1 }] });
+      const { checkDuplicate } = require('../utils/validationHelper');
+      const result = await checkDuplicate(db, 1, '1234567890123456');
+      expect(result).toBe(true);
+      expect(db.query.mock.calls[0][1]).toContain(1);
+      expect(db.query.mock.calls[0][1]).toContain('1234567890123456');
+    });
+
+    it('returns false when no record', async () => {
+      db.query.mockResolvedValueOnce({ rows: [] });
+      const { checkDuplicate } = require('../utils/validationHelper');
+      const result = await checkDuplicate(db, 1, '0000000000000000');
+      expect(result).toBe(false);
     });
   });
 });

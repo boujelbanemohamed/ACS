@@ -463,6 +463,24 @@ describe('Processing Routes', () => {
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
     });
+
+    it('handles download callback cleanup', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 1, file_name: 'test.csv', status: 'success' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 1, pan: '4000056655665556', first_name: 'John', last_name: 'Doe' }] });
+
+      mockCsvProcessor.generateCorrectedCSV.mockImplementation(async (rows, outputPath) => {
+        const fs = require('fs');
+        fs.writeFileSync(outputPath, 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n');
+        return outputPath;
+      });
+
+      const res = await request(createTestApp())
+        .get('/api/processing/download/1')
+        .set('Authorization', 'Bearer test-token');
+
+      expect(res.status).toBe(200);
+    });
   });
 
   describe('POST /api/processing/reprocess/:fileLogId', () => {
@@ -1049,6 +1067,61 @@ describe('Processing Routes', () => {
         method: 'POST',
         data: expect.objectContaining({ firstName: 'John' })
       }));
+    });
+
+    it('blocks invalid URL format in call-api', async () => {
+      const res = await request(createTestApp())
+        .post('/api/processing/call-api')
+        .set('Authorization', 'Bearer test-token')
+        .send({ bankId: 1, url: 'not-a-valid-url', method: 'GET' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('returns validation error when phone is missing in API response data', async () => {
+      axios.mockResolvedValue({
+        data: [
+          { pan: '4000056655665556', expiry: '12/28' }
+        ]
+      });
+
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BA' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 50 }] });
+
+      const res = await request(createTestApp())
+        .post('/api/processing/call-api')
+        .set('Authorization', 'Bearer test-token')
+        .send({ bankId: 1, url: 'http://api.example.com/data', method: 'GET' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.stats.totalRows).toBe(1);
+      expect(res.body.data.stats.validRows).toBe(0);
+      expect(res.body.data.stats.invalidRows).toBe(1);
+      expect(res.body.data.errors[0].errors[0].field).toBe('phone');
+    });
+
+    it('handles history log error during call-api gracefully', async () => {
+      axios.mockResolvedValue({
+        data: [{ pan: '4000056655665556', expiry: '12/28', phone: '21699123456' }]
+      });
+
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BA' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 50 }] })
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BA' }] });
+
+      mockCsvProcessor.saveValidatedRecords.mockResolvedValue([{ id: 200, pan: '4000056655665556' }]);
+
+      const historyService = require('../../services/recordHistoryService');
+      historyService.logAttempt.mockRejectedValue(new Error('History write failed'));
+
+      const res = await request(createTestApp())
+        .post('/api/processing/call-api')
+        .set('Authorization', 'Bearer test-token')
+        .send({ bankId: 1, url: 'http://api.example.com/data', method: 'GET' });
+
+      expect(res.status).toBe(200);
     });
   });
 });

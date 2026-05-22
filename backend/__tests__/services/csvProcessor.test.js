@@ -903,6 +903,19 @@ describe('CSVProcessor', () => {
       expect(result.success).toBe(true);
       expect(fs.cpSync).not.toHaveBeenCalled();
     });
+
+    it('handles local source with SFTP archive', async () => {
+      remoteFileService.isRemote
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      remoteFileService.copyFromLocal.mockResolvedValue();
+      fs.existsSync.mockReturnValue(true);
+
+      const result = await processor.archiveOldFile('file:///source', 'sftp://archive', 'test.csv');
+
+      expect(result.success).toBe(true);
+      expect(remoteFileService.copyFromLocal).toHaveBeenCalled();
+    });
   });
 
   describe('generateCorrectedCSV', () => {

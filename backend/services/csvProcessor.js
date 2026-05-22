@@ -562,7 +562,7 @@ class CSVProcessor {
       };
     } catch (error) {
       console.error(`Failed to move file: ${error.message}`);
-      return { success: false, destinationPath: `${destinationUrl}/${fileName}` };
+      return { success: false, archivePath: `${archiveUrl}/${oldFileName}` };
     }
   }
 
