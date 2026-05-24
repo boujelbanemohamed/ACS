@@ -239,7 +239,7 @@ describe('Monitor', () => {
     });
   });
 
-  it('debug section: fetch error shows empty state and logs console.error', async () => {
+  it('debug section: fetch error shows error state with retry button', async () => {
     mockGet.mockImplementation((url) => {
       if (url.includes('/monitoring/debug')) return Promise.reject(new Error('Debug fetch error'));
       return Promise.resolve({ data: { data: healthData } });
@@ -248,8 +248,9 @@ describe('Monitor', () => {
     await waitFor(() => { expect(screen.getByText('Monitoring Plateforme')).toBeInTheDocument(); });
     fireEvent.click(screen.getByText('Debug'));
     await waitFor(() => {
-      expect(screen.getByText('Cliquez sur "Actualiser" pour charger le diagnostic.')).toBeInTheDocument();
+      expect(screen.getByText('Erreur de chargement du diagnostic')).toBeInTheDocument();
     });
+    expect(screen.getByText('Réessayer')).toBeInTheDocument();
     expect(console.error).toHaveBeenCalledWith('Debug fetch error:', expect.any(Error));
   });
 
@@ -304,6 +305,10 @@ describe('Monitor', () => {
         { status: 'error', count: 2, invalid_rows: 5, duplicate_rows: 1 },
         { status: 'validation_error', count: 1, invalid_rows: 3, duplicate_rows: 0 },
       ],
+      recent_scan_errors: [
+        { scan_time: '2025-01-14T08:00:00Z', errors_count: 3, errors_detail: 'Timeout sur le dossier SFTP' },
+        { scan_time: '2025-01-13T08:00:00Z', errors_count: 1, errors_detail: null },
+      ],
     };
     mockGet.mockImplementation((url) => {
       if (url.includes('/monitoring/debug')) return Promise.resolve({ data: { data: debugData } });
@@ -334,6 +339,8 @@ describe('Monitor', () => {
     expect(screen.getByText('Montant négatif')).toBeInTheDocument();
     expect(screen.getByText('Erreurs fatales')).toBeInTheDocument();
     expect(screen.getByText('Erreurs de validation')).toBeInTheDocument();
+    expect(screen.getByText('Erreurs de scan récentes')).toBeInTheDocument();
+    expect(screen.getByText('Timeout sur le dossier SFTP')).toBeInTheDocument();
   });
 
   it('onClick debug button toggles debug section when already loaded', async () => {
@@ -345,6 +352,7 @@ describe('Monitor', () => {
       },
       top_field_validation_errors: [],
       recent_file_errors: [],
+      recent_scan_errors: [],
       file_errors_by_status: [],
     };
     mockGet.mockImplementation((url) => {

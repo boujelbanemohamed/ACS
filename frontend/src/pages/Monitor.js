@@ -13,6 +13,7 @@ const Monitor = () => {
   const [refreshInterval, setRefreshInterval] = useState(15000);
   const [debugData, setDebugData] = useState(null);
   const [debugLoading, setDebugLoading] = useState(false);
+  const [debugError, setDebugError] = useState(null);
   const [debugExpanded, setDebugExpanded] = useState(false);
 
   const fetchHealth = async () => {
@@ -30,10 +31,12 @@ const Monitor = () => {
   const fetchDebug = async () => {
     try {
       setDebugLoading(true);
+      setDebugError(null);
       const response = await api.get('/monitoring/debug');
       setDebugData(response.data.data);
     } catch (err) {
       console.error('Debug fetch error:', err);
+      setDebugError(err.response?.data?.message || 'Erreur de chargement du diagnostic');
     } finally {
       setDebugLoading(false);
     }
@@ -273,8 +276,17 @@ const Monitor = () => {
 
               {debugLoading && !debugData ? (
                 <div className="debug-loading">Chargement du diagnostic...</div>
+              ) : debugError ? (
+                <div className="error-state">
+                  <XCircle size={48} />
+                  <p>{debugError}</p>
+                  <button className="btn btn-secondary" onClick={fetchDebug}>
+                    <RefreshCw size={16} /> Réessayer
+                  </button>
+                </div>
               ) : debugData ? (
                 <>
+                  {debugData.summary && (
                   <div className="debug-summary">
                     <div className={'debug-card ' + (debugData.summary.unresolved_validation_errors > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.unresolved_validation_errors}</span>
@@ -309,8 +321,9 @@ const Monitor = () => {
                       <span className="debug-card-label">Rapports d'enrôlement en erreur</span>
                     </div>
                   </div>
+                  )}
 
-                  {debugData.top_field_validation_errors.length > 0 && (
+                  {debugData.top_field_validation_errors && debugData.top_field_validation_errors.length > 0 && (
                     <div className="debug-table-section">
                       <h3>Erreurs de validation les plus fréquentes</h3>
                       <table className="debug-table">
@@ -336,7 +349,7 @@ const Monitor = () => {
                     </div>
                   )}
 
-                  {debugData.recent_file_errors.length > 0 && (
+                  {debugData.recent_file_errors && debugData.recent_file_errors.length > 0 && (
                     <div className="debug-table-section">
                       <h3>Fichiers récents en erreur</h3>
                       <table className="debug-table">
@@ -405,7 +418,7 @@ const Monitor = () => {
                     </div>
                   )}
 
-                  {debugData.file_errors_by_status.length > 0 && (
+                  {debugData.file_errors_by_status && debugData.file_errors_by_status.length > 0 && (
                     <div className="debug-table-section">
                       <h3>Répartition des erreurs fichier</h3>
                       <div className="debug-stats-row">
@@ -417,6 +430,30 @@ const Monitor = () => {
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {debugData.recent_scan_errors && debugData.recent_scan_errors.length > 0 && (
+                    <div className="debug-table-section">
+                      <h3>Erreurs de scan récentes</h3>
+                      <table className="debug-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Erreurs</th>
+                            <th>Détails</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {debugData.recent_scan_errors.map((s, i) => (
+                            <tr key={i}>
+                              <td className="date-cell">{new Date(s.scan_time).toLocaleString('fr-FR')}</td>
+                              <td className="count-cell">{s.errors_count}</td>
+                              <td className="error-details-cell">{s.errors_detail || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </>
