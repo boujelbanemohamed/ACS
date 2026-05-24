@@ -809,4 +809,131 @@ describe('Records', () => {
     fireEvent.click(screen.getByText('4000056655665556'));
     await waitFor(() => { expect(screen.getByText('Aucun historique disponible')).toBeInTheDocument(); });
   });
+
+  it('renders bank filter with bank-specific options for bank user', async () => {
+    useAuth.mockReturnValue({ user: { role: 'bank', bank_id: 1 } });
+    mockGet.mockImplementation((url) => {
+      if (url.startsWith('/banks')) return Promise.resolve({ data: { data: banksData } });
+      if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
+      if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
+      if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText('Banque de Tunisie')).toBeInTheDocument(); });
+    expect(screen.queryByText('Toutes les banques')).not.toBeInTheDocument();
+  });
+
+  it('sorts by ID column', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/records').length;
+    fireEvent.click(screen.getByText('ID'));
+    await waitFor(() => {
+      const calls = mockGet.mock.calls.filter(c => c[0] === '/records');
+      expect(calls.length).toBe(callsBefore + 1);
+      expect(calls[calls.length - 1][1].params.sortBy).toBe('id');
+    });
+  });
+
+  it('sorts by Banque column', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/records').length;
+    fireEvent.click(screen.getByText('Banque'));
+    await waitFor(() => {
+      const calls = mockGet.mock.calls.filter(c => c[0] === '/records');
+      expect(calls.length).toBe(callsBefore + 1);
+      expect(calls[calls.length - 1][1].params.sortBy).toBe('bank_name');
+    });
+  });
+
+  it('sorts by Prenom column', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/records').length;
+    fireEvent.click(screen.getByText('Prenom'));
+    await waitFor(() => {
+      const calls = mockGet.mock.calls.filter(c => c[0] === '/records');
+      expect(calls.length).toBe(callsBefore + 1);
+      expect(calls[calls.length - 1][1].params.sortBy).toBe('first_name');
+    });
+  });
+
+  it('sorts by PAN column', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/records').length;
+    fireEvent.click(screen.getByText('PAN'));
+    await waitFor(() => {
+      const calls = mockGet.mock.calls.filter(c => c[0] === '/records');
+      expect(calls.length).toBe(callsBefore + 1);
+      expect(calls[calls.length - 1][1].params.sortBy).toBe('pan');
+    });
+  });
+
+  it('sorts by Date column', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/records').length;
+    fireEvent.click(screen.getByText('Date'));
+    await waitFor(() => {
+      const calls = mockGet.mock.calls.filter(c => c[0] === '/records');
+      expect(calls.length).toBe(callsBefore + 1);
+      expect(calls[calls.length - 1][1].params.sortBy).toBe('processed_at');
+    });
+  });
+
+  it('opens history via history action button', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByTitle("Voir l'historique"));
+    await waitFor(() => { expect(screen.getByText(/Historique du PAN/)).toBeInTheDocument(); });
+  });
+
+  it('opens file preview for source file in XML tab', async () => {
+    render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('Fichiers XML'));
+    await waitFor(() => { expect(screen.getByText('output.xml')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('source.csv'));
+    await waitFor(() => { expect(screen.getByText('Telecharger')).toBeInTheDocument(); });
+  });
+
+  it('closes enrollment log detail modal on overlay click', async () => {
+    const enrollmentLogsWithDetails = [{
+      id: 1, file_name: 'enrolment.xml', processed_at: '2025-01-15T10:00:00Z', bank_code: 'BT', bank_name: 'Banque de Tunisie', total_records: 100, success_count: 90, error_count: 5,
+      not_found_ids: '["NF1"]',
+      error_details: '[{"xmlId":"X1","errorCode":"ERR01","errorDescription":"Invalid"}]',
+    }];
+    mockGet.mockImplementation((url) => {
+      if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
+      if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
+      if (url === '/xml-logs') return Promise.resolve({ data: { data: [], pagination: { total: 0 } } });
+      if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 0, success_count: 0, error_count: 0, pending_count: 0 } } });
+      if (url === '/enrollment/logs') return Promise.resolve({ data: { data: enrollmentLogsWithDetails } });
+      if (url === '/enrollment/stats') return Promise.resolve({ data: { data: { enrolled_success: 5, enrolled_error: 5, pending: 0 } } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    const { container } = render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('Rapport Enrolement'));
+    await waitFor(() => { expect(screen.getByText('enrolment.xml')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('Voir'));
+    await waitFor(() => { expect(screen.getByText(/Rapport d'Import/)).toBeInTheDocument(); });
+    const overlay = container.querySelector('.modal-overlay');
+    fireEvent.click(overlay);
+    await waitFor(() => { expect(screen.queryByText(/Rapport d'Import/)).not.toBeInTheDocument(); });
+  });
+
+  it('closes history modal on overlay click', async () => {
+    const { container } = render(<MemoryRouter><Records /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByText('4000056655665556'));
+    await waitFor(() => { expect(screen.getByText(/Historique du PAN/)).toBeInTheDocument(); });
+    const overlay = container.querySelector('.modal-overlay');
+    fireEvent.click(overlay);
+    await waitFor(() => { expect(screen.queryByText(/Historique du PAN/)).not.toBeInTheDocument(); });
+  });
 });

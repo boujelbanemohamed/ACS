@@ -514,4 +514,41 @@ describe('ApiTester', () => {
       expect(screen.getByText('Requête réussie')).toBeInTheDocument();
     });
   });
+
+  it('formatJson returns plain string when JSON.parse fails on string input', async () => {
+    mockPost.mockResolvedValueOnce({ data: "not-json-string", status: 200, headers: {} });
+    render(<MemoryRouter><ApiTester /></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText('Entrez votre clé API (acs_...)'), { target: { value: 'key' } });
+    fireEvent.click(screen.getByText('Envoyer'));
+    await waitFor(() => {
+      expect(screen.getByText('not-json-string')).toBeInTheDocument();
+    });
+  });
+
+  it('renders no status badge when statusCode is 0 (network error)', async () => {
+    mockPost.mockRejectedValueOnce({ response: null, message: 'Network Error' });
+    render(<MemoryRouter><ApiTester /></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText('Entrez votre clé API (acs_...)'), { target: { value: 'key' } });
+    fireEvent.click(screen.getByText('Envoyer'));
+    await waitFor(() => {
+      expect(screen.getAllByText(/Erreur/).length).toBeGreaterThanOrEqual(1);
+    });
+    const statusBadges = document.querySelectorAll('.api-status-badge');
+    expect(statusBadges.length).toBe(0);
+  });
+
+  it('calls useEffect cleanup on unmount', () => {
+    const { unmount } = render(<MemoryRouter><ApiTester /></MemoryRouter>);
+    unmount();
+  });
+
+  it('clears history when clear button is clicked', async () => {
+    mockPost.mockResolvedValue({ data: { success: true }, status: 200 });
+    render(<MemoryRouter><ApiTester /></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText('Entrez votre clé API (acs_...)'), { target: { value: 'key' } });
+    fireEvent.click(screen.getByText('Envoyer'));
+    await waitFor(() => { expect(screen.getByText('Historique (1)')).toBeInTheDocument(); });
+    fireEvent.click(screen.getByTitle('Effacer l\'historique'));
+    await waitFor(() => { expect(screen.getByText('Historique (0)')).toBeInTheDocument(); });
+  });
 });

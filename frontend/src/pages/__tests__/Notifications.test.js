@@ -560,4 +560,105 @@ describe('Notifications', () => {
       expect(screen.getByText('Network failure')).toBeInTheDocument();
     });
   });
+
+  it('logs error when fetchBankEmails fails', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.reject(new Error('Network error'));
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith('Error fetching bank emails:', expect.any(Error));
+    });
+    consoleSpy.mockRestore();
+  });
+
+  it('handles send report success path', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPost.mockResolvedValue({ data: { success: true } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer rapport'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith('Rapport envoye avec succes!');
+    });
+    await waitFor(() => {
+      expect(mockGet.mock.calls.length).toBeGreaterThan(5);
+    });
+  });
+
+  it('handles send all reports success path', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    mockPost.mockResolvedValue({ data: { success: true } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer a toutes les banques'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith('Rapports envoyes!');
+    });
+    await waitFor(() => {
+      expect(mockGet.mock.calls.length).toBeGreaterThan(5);
+    });
+  });
+
+  it('handles save cron config success', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    const cronData = { schedule: '30 12 * * *', enabled: true, nextRun: '2025-06-01T10:00:00Z' };
+    mockPut.mockResolvedValue({ data: { success: true, data: cronData } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.change(screen.getByDisplayValue('08'), { target: { value: '12' } });
+    fireEvent.change(screen.getByDisplayValue('00'), { target: { value: '30' } });
+    fireEvent.click(screen.getByText('Sauvegarder la planification'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith('Configuration du cron sauvegardee!');
+    });
+  });
+
+  it('handles toggle cron success', async () => {
+    const { container } = render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    mockPut.mockResolvedValue({ data: { success: true, data: { schedule: '00 08 * * *', enabled: false, nextRun: null } } });
+
+    fireEvent.click(container.querySelector('.toggle-btn'));
+    await waitFor(() => {
+      expect(screen.getByText('Inactif')).toBeInTheDocument();
+    });
+  });
+
+  it('changes secure select value', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    const secureSelect = screen.getByDisplayValue('Non');
+    fireEvent.change(secureSelect, { target: { value: 'true' } });
+    expect(screen.getByDisplayValue('Oui')).toBeInTheDocument();
+  });
+
+  it('fills password field', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.change(screen.getByPlaceholderText('Laisser vide pour ne pas changer'), { target: { value: 'newpassword' } });
+    expect(screen.getByDisplayValue('newpassword')).toBeInTheDocument();
+  });
+
+  it('toggles enabled checkbox', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    const checkbox = screen.getByLabelText('Activer les notifications email');
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+  });
 });
