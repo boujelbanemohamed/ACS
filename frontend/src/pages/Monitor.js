@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Database, Mail, Clock, Server, CheckCircle, XCircle, AlertTriangle, RefreshCw, Cpu, HardDrive, Settings, Bug } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './Monitor.css';
 
@@ -48,6 +49,7 @@ const getScanErrorSolution = (errorsDetail) => {
 
 const Monitor = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -56,7 +58,7 @@ const Monitor = () => {
   const [debugData, setDebugData] = useState(null);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugError, setDebugError] = useState(null);
-  const [debugExpanded, setDebugExpanded] = useState(false);
+  const [debugExpanded, setDebugExpanded] = useState(user?.role !== 'super_admin');
 
   const fetchHealth = async () => {
     try {
@@ -74,7 +76,8 @@ const Monitor = () => {
     try {
       setDebugLoading(true);
       setDebugError(null);
-      const response = await api.get('/monitoring/debug');
+      const params = user?.bank_id && user?.role !== 'super_admin' ? `?bankId=${user.bank_id}` : '';
+      const response = await api.get(`/monitoring/debug${params}`);
       setDebugData(response.data.data);
     } catch (err) {
       console.error('Debug fetch error:', err);
@@ -85,11 +88,15 @@ const Monitor = () => {
   };
 
   useEffect(() => {
-    fetchHealth();
+    if (user?.role === 'super_admin') {
+      fetchHealth();
+    } else {
+      fetchDebug();
+    }
   }, []);
 
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || user?.role !== 'super_admin') return;
     const interval = setInterval(fetchHealth, refreshInterval);
     return () => clearInterval(interval);
   }, [autoRefresh, refreshInterval]);
@@ -163,9 +170,9 @@ const Monitor = () => {
         </div>
       </div>
 
-      {loading && !health ? (
+      {user?.role === 'super_admin' && loading && !health ? (
         <div className="loading"><RefreshCw size={24} className="spin" /> Chargement...</div>
-      ) : error ? (
+      ) : user?.role === 'super_admin' && error ? (
         <div className="error-state">
           <XCircle size={48} />
           <p>{error}</p>
@@ -173,7 +180,9 @@ const Monitor = () => {
             <RefreshCw size={16} /> Réessayer
           </button>
         </div>
-      ) : health ? (
+      ) : null}
+
+      {user?.role === 'super_admin' && health && (
         <>
           <div className={'global-status ' + getStatusColor(health.globalStatus)}>
             {getStatusIcon(health.globalStatus)}
@@ -307,11 +316,13 @@ const Monitor = () => {
                   <span className="detail-item">RSS: {health.system.memory.rss}</span>
                 </div>
               </div>
-            </div>
           </div>
+        </div>
+      </>
+      )}
 
-          {debugExpanded && (
-            <div className="debug-section">
+      {debugExpanded && (
+        <div className="debug-section">
               <div className="debug-header">
                 <h2><Bug size={20} /> Diagnostic des erreurs</h2>
                 <button className="btn btn-secondary btn-sm" onClick={fetchDebug} disabled={debugLoading}>
@@ -521,8 +532,6 @@ const Monitor = () => {
               )}
             </div>
           )}
-        </>
-      ) : null}
     </div>
   );
 };

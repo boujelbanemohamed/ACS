@@ -14,7 +14,7 @@ jest.mock('../../services/api', () => ({
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
 jest.mock('lucide-react', () => ({
   Shield: () => null, Check: () => null, X: () => null, RefreshCw: () => null,
-  Building2: () => null, Users: () => null, AlertCircle: () => null, Info: () => null,
+  Building2: () => null, Users: () => null, AlertCircle: () => null, Info: () => null, Eye: () => null,
 }));
 
 const { useAuth } = require('../../contexts/AuthContext');

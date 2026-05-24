@@ -104,7 +104,7 @@ const Layout = () => {
             </NavLink>
           )}
 
-          {isSuperAdmin && hasFeature('cron') && (
+          {hasFeature('cron') && (
             <NavLink to="/cron" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Clock size={20} />
               <span>Scan Automatique</span>
@@ -118,7 +118,7 @@ const Layout = () => {
             </NavLink>
           )}
 
-          {isSuperAdmin && hasFeature('monitoring') && (
+          {hasFeature('monitoring') && (
             <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Activity size={20} />
               <span>Monitoring</span>

@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS enrollment_logs (
 CREATE TABLE IF NOT EXISTS scan_logs (
     id SERIAL PRIMARY KEY,
     scan_time TIMESTAMP NOT NULL,
+    bank_id INTEGER REFERENCES banks(id) ON DELETE CASCADE,
     banks_scanned INTEGER DEFAULT 0,
     files_found INTEGER DEFAULT 0,
     files_processed INTEGER DEFAULT 0,
@@ -154,10 +155,10 @@ CREATE TABLE IF NOT EXISTS scan_logs (
     enrollment_files_processed INTEGER DEFAULT 0,
     errors_count INTEGER DEFAULT 0,
     errors_detail TEXT,
-    error_details TEXT,
-    bank_details TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_scan_logs_bank_id ON scan_logs(bank_id);
 
 -- Settings table
 CREATE TABLE IF NOT EXISTS settings (

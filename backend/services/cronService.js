@@ -73,26 +73,34 @@ class CronService {
       result.banksScanned = banks.length;
 
       for (const bank of banks) {
-        // Scan for enrollment response XMLs FIRST (before CSV processing)
+        const bankResult = { filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
+
         try {
           const enrollmentResult = await this.scanEnrollmentReports(bank);
-          result.enrollmentProcessed += enrollmentResult.filesProcessed;
-          if (enrollmentResult.errors.length) result.errors.push(...enrollmentResult.errors);
+          bankResult.enrollmentProcessed = enrollmentResult.filesProcessed;
+          if (enrollmentResult.errors.length) bankResult.errors.push(...enrollmentResult.errors);
         } catch (error) {
-          result.errors.push({ bank: bank.name, error: `Enrollment scan: ${error.message}` });
+          bankResult.errors.push({ bank: bank.name, error: `Enrollment scan: ${error.message}` });
         }
 
         try {
-          const bankResult = await this.scanner.scanBank(bank);
-          result.filesFound += bankResult.filesFound;
-          result.filesProcessed += bankResult.filesProcessed;
-          if (bankResult.errors.length) result.errors.push(...bankResult.errors);
+          const scanResult = await this.scanner.scanBank(bank);
+          bankResult.filesFound = scanResult.filesFound;
+          bankResult.filesProcessed = scanResult.filesProcessed;
+          if (scanResult.errors.length) bankResult.errors.push(...scanResult.errors);
         } catch (error) {
-          result.errors.push({ bank: bank.name, error: error.message });
+          bankResult.errors.push({ bank: bank.name, error: error.message });
         }
+
+        result.filesFound += bankResult.filesFound;
+        result.filesProcessed += bankResult.filesProcessed;
+        result.enrollmentProcessed += bankResult.enrollmentProcessed;
+        if (bankResult.errors.length) result.errors.push(...bankResult.errors);
+
+        await this.logBankResult(bank, result.startTime, bankResult);
       }
 
-      await this.logResult(result);
+      result.banksScanned = banks.length;
       console.log(`✅ Scan done: ${result.filesProcessed}/${result.filesFound} files, ${result.enrollmentProcessed} enrollment reports`);
     } catch (error) {
       console.error('Scan error:', error);
@@ -185,17 +193,18 @@ class CronService {
     return result;
   }
 
-  async logResult(result) {
+  async logBankResult(bank, startTime, bankResult) {
     try {
+      const errorsDetail = bankResult.errors.length > 0 ? JSON.stringify(bankResult.errors.slice(0, 50)) : null;
       await db.query(
-        `INSERT INTO scan_logs (scan_time, banks_scanned, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail)
+        `INSERT INTO scan_logs (scan_time, bank_id, files_found, files_processed, enrollment_files_found, enrollment_files_processed, errors_count, errors_detail)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [result.startTime, result.banksScanned, result.filesFound, result.filesProcessed, 0, result.enrollmentProcessed, result.errors.length, JSON.stringify(result.errors)]
+        [startTime, bank.id, bankResult.filesFound, bankResult.filesProcessed, bankResult.enrollmentProcessed, 0, bankResult.errors.length, errorsDetail]
       );
     } catch (error) {
       if (error.code === '42P01') {
         await this.createTable();
-        await this.logResult(result);
+        await this.logBankResult(bank, startTime, bankResult);
       } else {
         console.error('Log error:', error);
       }
@@ -206,11 +215,13 @@ class CronService {
     await db.query(`
       CREATE TABLE IF NOT EXISTS scan_logs (
         id SERIAL PRIMARY KEY, scan_time TIMESTAMP NOT NULL,
-        banks_scanned INTEGER DEFAULT 0, files_found INTEGER DEFAULT 0,
-        files_processed INTEGER DEFAULT 0, enrollment_files_found INTEGER DEFAULT 0,
-        enrollment_files_processed INTEGER DEFAULT 0, errors_count INTEGER DEFAULT 0,
-        errors_detail TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        bank_id INTEGER, banks_scanned INTEGER DEFAULT 0,
+        files_found INTEGER DEFAULT 0, files_processed INTEGER DEFAULT 0,
+        enrollment_files_found INTEGER DEFAULT 0, enrollment_files_processed INTEGER DEFAULT 0,
+        errors_count INTEGER DEFAULT 0, errors_detail TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE INDEX IF NOT EXISTS idx_scan_logs_bank_id ON scan_logs(bank_id);
     `);
     console.log('✅ Created scan_logs table');
   }

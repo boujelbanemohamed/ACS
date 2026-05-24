@@ -18,6 +18,12 @@ jest.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
+const mockUser = { role: 'super_admin', bank_id: null };
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: mockUser }),
+  AuthProvider: ({ children }) => <>{children}</>,
+}));
+
 jest.mock('lucide-react', () => ({
   Activity: () => null,
   Database: () => null,

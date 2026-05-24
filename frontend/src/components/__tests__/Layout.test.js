@@ -23,6 +23,11 @@ jest.mock('../../services/api', () => ({
 
 const { useAuth } = require('../../contexts/AuthContext');
 
+const defaultFeatures = {
+  cron: false, monitoring: false, notifications: false,
+  api_tester: false, permissions: false,
+};
+
 const baseAuth = {
   user: { username: 'admin', role: 'super_admin', bank_name: null },
   logout: mockLogout,
@@ -31,6 +36,8 @@ const baseAuth = {
 
 const renderLayout = (overrides = {}) => {
   useAuth.mockReturnValue({ ...baseAuth, ...overrides });
+  const api = require('../../services/api').default;
+  api.get.mockResolvedValue({ data: { data: defaultFeatures } });
   return render(
     <MemoryRouter initialEntries={['/']}>
       <Layout />
@@ -43,7 +50,7 @@ describe('Layout', () => {
     jest.clearAllMocks();
     useAuth.mockReturnValue(baseAuth);
     const api = require('../../services/api').default;
-    api.get.mockResolvedValue({ data: { data: {} } });
+    api.get.mockResolvedValue({ data: { data: defaultFeatures } });
   });
 
   it('renders sidebar with app title', () => {
@@ -69,14 +76,12 @@ describe('Layout', () => {
     expect(screen.getByText('Permissions')).toBeInTheDocument();
   });
 
-  it('hides super_admin-only links for bank_admin', () => {
+  it('shows relevant links for bank_admin', () => {
     renderLayout({ user: { username: 'ba', role: 'bank_admin', bank_name: 'BT' } });
     expect(screen.getByText('Banques')).toBeInTheDocument();
     expect(screen.getByText('Utilisateurs')).toBeInTheDocument();
     expect(screen.queryByText('Test API')).not.toBeInTheDocument();
     expect(screen.queryByText('Notifications')).not.toBeInTheDocument();
-    expect(screen.queryByText('Monitoring')).not.toBeInTheDocument();
-    expect(screen.queryByText('Scan Automatique')).not.toBeInTheDocument();
   });
 
   it('shows Ma Banque for bank user', () => {

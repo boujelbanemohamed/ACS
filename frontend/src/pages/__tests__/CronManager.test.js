@@ -12,6 +12,12 @@ jest.mock('../../services/api', () => ({
   default: { get: (...args) => mockGet(...args), post: (...args) => mockPost(...args), put: (...args) => mockPut(...args), delete: (...args) => mockDelete(...args) },
 }));
 
+const mockUser = { role: 'super_admin', bank_id: null };
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: mockUser }),
+  AuthProvider: ({ children }) => <>{children}</>,
+}));
+
 jest.mock('lucide-react', () => ({
   Clock: () => null,
   PlayCircle: () => null,
@@ -68,7 +74,7 @@ describe('CronManager', () => {
   it('shows scan logs in history table', async () => {
     render(<MemoryRouter><CronManager /></MemoryRouter>);
     await waitFor(() => { expect(screen.getByText('Scan Automatique')).toBeInTheDocument(); });
-    expect(screen.getByText('Banques')).toBeInTheDocument();
+    expect(screen.getByText('Banque')).toBeInTheDocument();
     expect(screen.getByText('Trouvés')).toBeInTheDocument();
     expect(screen.getByText('Traités')).toBeInTheDocument();
   });

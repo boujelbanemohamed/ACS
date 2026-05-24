@@ -21,3 +21,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+
+-- Add bank_id to scan_logs for bank-level permissions
+ALTER TABLE scan_logs ADD COLUMN IF NOT EXISTS bank_id INTEGER REFERENCES banks(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_scan_logs_bank_id ON scan_logs(bank_id);

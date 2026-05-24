@@ -292,22 +292,25 @@ describe('CronService', () => {
     });
   });
 
-  describe('logResult()', () => {
+  describe('logBankResult()', () => {
     it('inserts scan log entry', async () => {
       db.query.mockResolvedValue({ rows: [] });
-      const result = { startTime: new Date(), banksScanned: 2, filesFound: 5, filesProcessed: 4, enrollmentProcessed: 1, errors: ['err1'] };
-      await cronService.logResult(result);
+      const bank = { id: 1, name: 'Test Bank' };
+      const startTime = new Date();
+      const bankResult = { filesFound: 5, filesProcessed: 4, enrollmentProcessed: 1, errors: ['err1'] };
+      await cronService.logBankResult(bank, startTime, bankResult);
       expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO scan_logs'), expect.any(Array));
     });
 
     it('creates table on 42P01 error and retries', async () => {
+      const bank = { id: 1, name: 'Test Bank' };
+      const startTime = new Date();
+      const bankResult = { filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
       db.query
         .mockRejectedValueOnce({ code: '42P01' })
-        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [] });
       cronService.createTable = jest.fn().mockResolvedValue();
-      const result = { startTime: new Date(), banksScanned: 0, filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
-      await cronService.logResult(result);
+      await cronService.logBankResult(bank, startTime, bankResult);
       expect(cronService.createTable).toHaveBeenCalled();
     });
 
@@ -317,8 +320,10 @@ describe('CronService', () => {
       Object.defineProperty(dbError, 'code', { value: null });
       db.query.mockReset();
       db.query.mockImplementation(() => Promise.reject(dbError));
-      const result = { startTime: new Date(), banksScanned: 0, filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
-      await cronService.logResult(result);
+      const bank = { id: 1, name: 'Test Bank' };
+      const startTime = new Date();
+      const bankResult = { filesFound: 0, filesProcessed: 0, enrollmentProcessed: 0, errors: [] };
+      await cronService.logBankResult(bank, startTime, bankResult);
       expect(consoleSpy).toHaveBeenCalledWith('Log error:', dbError);
     });
   });

@@ -114,12 +114,18 @@ describe('Monitoring Routes', () => {
       expect(res.body.data.components.smtp.status).toBe('disabled');
     });
 
-    it('blocks non-super_admin', async () => {
+    it('returns simplified health for non-super_admin', async () => {
       const res = await request(createTestApp())
         .get('/api/monitoring/health')
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'bank');
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.globalStatus).toBe('up');
+      expect(res.body.data.components.database.status).toBe('up');
+      expect(res.body.data.components.smtp.status).toBe('not_configured');
+      expect(res.body.data.components.cron.status).toBe('up');
+      expect(res.body.data.system.role).toBe('bank');
     });
 
     it('cron stopped returns stopped status', async () => {
@@ -277,12 +283,50 @@ describe('Monitoring Routes', () => {
       expect(res.body.success).toBe(false);
     });
 
-    it('blocks non-super_admin', async () => {
+    it('returns debug data for bank_admin with bank_id', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: 1 }] })
+        .mockResolvedValueOnce({ rows: [{ status: 'error', count: 1, invalid_rows: 2, duplicate_rows: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0, endpoints: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0, scan_errors: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] });
+
       const res = await request(createTestApp())
         .get('/api/monitoring/debug')
         .set('Authorization', 'Bearer token')
-        .set('x-test-role', 'bank');
-      expect(res.status).toBe(403);
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '5');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.summary).toBeDefined();
+    });
+
+    it('returns debug data filtered by bankId query param', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ total: 0, endpoints: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0, scan_errors: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .get('/api/monitoring/debug?bankId=3')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
     });
   });
 });

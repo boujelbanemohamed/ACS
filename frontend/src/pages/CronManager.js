@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, PlayCircle, RefreshCw, Settings, Save, Power, Trash2 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './CronManager.css';
 
@@ -16,6 +17,8 @@ const PRESETS = [
 ];
 
 const CronManager = () => {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [status, setStatus] = useState(null);
   const [logs, setLogs] = useState([]);
   const [schedule, setSchedule] = useState('*/5 * * * *');
@@ -33,9 +36,10 @@ const CronManager = () => {
 
   const fetchData = async () => {
     try {
+      const bankParam = !isSuperAdmin && user?.bank_id ? `&bankId=${user.bank_id}` : '';
       const [statusRes, logsRes, settingsRes] = await Promise.all([
         api.get('/scanner/status'),
-        api.get('/scanner/logs?limit=10'),
+        api.get(`/scanner/logs?limit=10${bankParam}`),
         api.get('/settings')
       ]);
       setStatus(statusRes.data.data);
@@ -100,9 +104,11 @@ const CronManager = () => {
           <button className={`btn ${enabled ? 'btn-success' : 'btn-danger'}`} onClick={toggleCron}>
             <Power size={18} /> {enabled ? 'Activé' : 'Désactivé'}
           </button>
+          {isSuperAdmin && (
           <button className="btn btn-primary" onClick={triggerScan} disabled={scanning || status?.isScanning}>
             {scanning || status?.isScanning ? <><RefreshCw size={18} className="spin" /> Scan...</> : <><PlayCircle size={18} /> Scan</>}
           </button>
+          )}
         </div>
       </div>
 
@@ -144,7 +150,7 @@ const CronManager = () => {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Banques</th>
+                  {isSuperAdmin && <th>Banque</th>}
                   <th>Trouvés</th>
                   <th>Traités</th>
                   <th>Erreurs</th>
@@ -154,7 +160,7 @@ const CronManager = () => {
                 {logs.map(log => (
                   <tr key={log.id}>
                     <td>{new Date(log.scan_time).toLocaleString('fr-FR')}</td>
-                    <td>{log.banks_scanned}</td>
+                    {isSuperAdmin && <td>{log.bank_id || 'Toutes'}</td>}
                     <td>{log.files_found}</td>
                     <td>{log.files_processed}</td>
                     <td>{log.errors_count > 0 ? <span className="err">{log.errors_count}</span> : <span className="ok">0</span>}</td>

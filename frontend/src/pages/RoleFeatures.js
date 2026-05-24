@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Check, X, RefreshCw, Building2, Users, AlertCircle, Info } from 'lucide-react';
+import { Shield, Check, X, RefreshCw, Building2, Users, AlertCircle, Info, Eye } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import './RoleFeatures.css';
@@ -15,6 +15,28 @@ const FEATURE_LABELS = {
 
 const ALL_FEATURES = Object.keys(FEATURE_LABELS);
 
+const CROSS_BANK_RISK_FEATURES = [
+  'audit_logs',
+  'monitoring',
+  'settings',
+  'dashboard',
+  'xml_logs',
+  'history',
+  'records',
+  'banks',
+];
+
+const CROSS_BANK_WARNINGS = {
+  audit_logs: 'Cette permission permet de voir les actions de tous les utilisateurs, y compris ceux des autres banques.',
+  monitoring: 'Cette permission donne accès aux métriques système globales et aux erreurs de toutes les banques.',
+  settings: 'Cette permission expose les paramètres généraux de la plateforme, non filtrés par banque.',
+  dashboard: 'Cette permission peut afficher des statistiques agrégées incluant les données des autres banques.',
+  xml_logs: 'Les logs XML peuvent contenir des fichiers de traitement provenant de n\'importe quelle banque.',
+  history: 'L\'historique des traitements peut lister les fichiers importés par toutes les banques.',
+  records: 'Les enregistrements peuvent exposer les données des clients d\'autres banques.',
+  banks: 'Cette permission permet de voir et modifier la liste complète des banques.',
+};
+
 const FeatureToggle = ({ enabled, saving, onToggle }) => (
   <button
     className={`feature-toggle ${enabled ? 'enabled' : 'disabled'} ${saving ? 'saving' : ''}`}
@@ -25,6 +47,16 @@ const FeatureToggle = ({ enabled, saving, onToggle }) => (
     {saving ? <RefreshCw size={16} className="spin" /> : enabled ? <Check size={16} /> : <X size={16} />}
   </button>
 );
+
+const CrossBankWarning = ({ feature }) => {
+  if (!CROSS_BANK_RISK_FEATURES.includes(feature)) return null;
+  return (
+    <div className="cross-bank-warning">
+      <Eye size={14} />
+      <span>{CROSS_BANK_WARNINGS[feature]}</span>
+    </div>
+  );
+};
 
 const RoleFeaturesPage = () => {
   const { user } = useAuth();
@@ -265,9 +297,18 @@ const RoleFeaturesPage = () => {
                 <tbody>
                   {ALL_FEATURES.map(f => {
                     const defaultVal = features.roles?.bank_admin?.[f];
+                    const overrideEnabled = bankOverrides[f];
+                    const isRisky = CROSS_BANK_RISK_FEATURES.includes(f);
+                    const showWarning = isRisky && (
+                      (overrideEnabled === true) ||
+                      (overrideEnabled === undefined && defaultVal === true)
+                    );
                     return (
                       <tr key={f}>
-                        <td className="feature-name">{FEATURE_LABELS[f]}</td>
+                        <td className="feature-name">
+                          {FEATURE_LABELS[f]}
+                          {showWarning && <CrossBankWarning feature={f} />}
+                        </td>
                         <td>
                           <span className={`default-indicator ${defaultVal ? 'on' : 'off'}`}>
                             {defaultVal ? '✅ Activé' : '❌ Désactivé'}
@@ -334,9 +375,20 @@ const RoleFeaturesPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {ALL_FEATURES.map(f => (
+                  {ALL_FEATURES.map(f => {
+                    const userEnabled = userOverrides[f];
+                    const roleDefault = features.roles?.bank_admin?.[f];
+                    const isRisky = CROSS_BANK_RISK_FEATURES.includes(f);
+                    const showWarning = isRisky && (
+                      (userEnabled === true) ||
+                      (userEnabled === undefined && roleDefault !== false)
+                    );
+                    return (
                     <tr key={f}>
-                      <td className="feature-name">{FEATURE_LABELS[f]}</td>
+                      <td className="feature-name">
+                        {FEATURE_LABELS[f]}
+                        {showWarning && <CrossBankWarning feature={f} />}
+                      </td>
                       <td>
                         <FeatureToggle
                           enabled={userOverrides[f]}
@@ -345,7 +397,8 @@ const RoleFeaturesPage = () => {
                         />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
