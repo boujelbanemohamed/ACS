@@ -2,6 +2,7 @@ const mockAxiosInstance = {
   get: jest.fn(() => Promise.resolve({ data: {} })),
   post: jest.fn(() => Promise.resolve({ data: {} })),
   put: jest.fn(() => Promise.resolve({ data: {} })),
+  patch: jest.fn(() => Promise.resolve({ data: {} })),
   delete: jest.fn(() => Promise.resolve({ data: {} })),
   interceptors: {
     request: { use: jest.fn() },
@@ -14,6 +15,7 @@ jest.mock('axios', () => ({
 }));
 
 const api = require('../api').default;
+const { authAPI, banksAPI, processingAPI, dashboardAPI } = require('../api');
 const axios = require('axios');
 
 const axiosCreateConfig = axios.create.mock.calls[0][0];
@@ -167,5 +169,148 @@ describe('response interceptor', () => {
       const error = new Error('Network Error');
       await expect(responseErrorHandler(error)).rejects.toThrow('Network Error');
     });
+  });
+});
+
+describe('authAPI', () => {
+  it('login calls api.post with credentials', () => {
+    const credentials = { email: 'test@test.com', password: 'pass' };
+    authAPI.login(credentials);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/auth/login', credentials);
+  });
+
+  it('register calls api.post with userData', () => {
+    const userData = { name: 'Test', email: 'test@test.com' };
+    authAPI.register(userData);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/auth/register', userData);
+  });
+
+  it('getMe calls api.get', () => {
+    authAPI.getMe();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/auth/me');
+  });
+
+  it('changePassword calls api.put with passwords', () => {
+    const passwords = { currentPassword: 'old', newPassword: 'new' };
+    authAPI.changePassword(passwords);
+    expect(mockAxiosInstance.put).toHaveBeenCalledWith('/auth/change-password', passwords);
+  });
+});
+
+describe('banksAPI', () => {
+  it('getAll calls api.get', () => {
+    banksAPI.getAll();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/banks');
+  });
+
+  it('getOne calls api.get with id', () => {
+    banksAPI.getOne(1);
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/banks/1');
+  });
+
+  it('create calls api.post with bankData', () => {
+    const bankData = { name: 'BT', code: 'BT' };
+    banksAPI.create(bankData);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/banks', bankData);
+  });
+
+  it('update calls api.put with id and bankData', () => {
+    const bankData = { name: 'BIAT' };
+    banksAPI.update(2, bankData);
+    expect(mockAxiosInstance.put).toHaveBeenCalledWith('/banks/2', bankData);
+  });
+
+  it('delete calls api.delete with id', () => {
+    banksAPI.delete(3);
+    expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/banks/3');
+  });
+
+  it('getStats calls api.get with id', () => {
+    banksAPI.getStats(1);
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/banks/1/stats');
+  });
+});
+
+describe('processingAPI', () => {
+  it('processUrl calls api.post with data', () => {
+    const data = { bankId: 1, url: 'https://example.com' };
+    processingAPI.processUrl(data);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/processing/process-url', data);
+  });
+
+  it('uploadFile calls api.post with formData and content-type header', () => {
+    const formData = new FormData();
+    processingAPI.uploadFile(formData);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/processing/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  });
+
+  it('getErrors calls api.get with fileLogId', () => {
+    processingAPI.getErrors(42);
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/processing/errors/42');
+  });
+
+  it('resolveError calls api.patch with errorId and correctedValue', () => {
+    processingAPI.resolveError(10, 'corrected-value');
+    expect(mockAxiosInstance.patch).toHaveBeenCalledWith('/processing/errors/10/resolve', {
+      correctedValue: 'corrected-value',
+    });
+  });
+
+  it('getLogs calls api.get with params', () => {
+    const params = { page: 1, limit: 10 };
+    processingAPI.getLogs(params);
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/processing/logs', { params });
+  });
+
+  it('downloadCorrected calls api.get with fileLogId and blob responseType', () => {
+    processingAPI.downloadCorrected(42);
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/processing/download/42', { responseType: 'blob' });
+  });
+
+  it('reprocess calls api.post with fileLogId', () => {
+    processingAPI.reprocess(42);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/processing/reprocess/42');
+  });
+
+  it('validateManualEntries calls api.post with data', () => {
+    const data = { entries: [] };
+    processingAPI.validateManualEntries(data);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/processing/validate-manual', data);
+  });
+
+  it('processManualEntries calls api.post with data', () => {
+    const data = { entries: [] };
+    processingAPI.processManualEntries(data);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/processing/process-manual', data);
+  });
+
+  it('downloadTemplate calls api.get with blob responseType', () => {
+    processingAPI.downloadTemplate();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/processing/template', { responseType: 'blob' });
+  });
+
+  it('callExternalApi calls api.post with data', () => {
+    const data = { url: 'https://api.example.com', method: 'GET' };
+    processingAPI.callExternalApi(data);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/processing/call-api', data);
+  });
+});
+
+describe('dashboardAPI', () => {
+  it('getStats calls api.get', () => {
+    dashboardAPI.getStats();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/stats');
+  });
+
+  it('getUnresolvedErrors calls api.get', () => {
+    dashboardAPI.getUnresolvedErrors();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/errors/unresolved');
+  });
+
+  it('getRecentRecords calls api.get with limit param', () => {
+    dashboardAPI.getRecentRecords(5);
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/records/recent', { params: { limit: 5 } });
   });
 });

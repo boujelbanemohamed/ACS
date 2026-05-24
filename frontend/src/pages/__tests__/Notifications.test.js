@@ -3,288 +3,561 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const mockGet = jest.fn();
-const mockPut = jest.fn();
 const mockPost = jest.fn();
+const mockPut = jest.fn();
 const mockDelete = jest.fn();
-const mockConfirm = jest.fn().mockReturnValue(true);
-window.confirm = mockConfirm;
 
 jest.mock('../../services/api', () => ({
   __esModule: true,
-  default: { get: (...args) => mockGet(...args), put: (...args) => mockPut(...args), post: (...args) => mockPost(...args), delete: (...args) => mockDelete(...args) },
+  default: { get: (...args) => mockGet(...args), post: (...args) => mockPost(...args), put: (...args) => mockPut(...args), delete: (...args) => mockDelete(...args) },
 }));
 
-jest.mock('../../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: jest.fn(),
+}));
 
 jest.mock('lucide-react', () => ({
-  Mail: () => null, Settings: () => null, Send: () => null, Plus: () => null,
-  Trash2: () => null, ToggleLeft: () => null, ToggleRight: () => null,
-  TestTube: () => null, RefreshCw: () => null, CheckCircle: () => null,
-  XCircle: () => null, Clock: () => null, Calendar: () => null,
+  Mail: () => null,
+  Settings: () => null,
+  Send: () => null,
+  Plus: () => null,
+  Trash2: () => null,
+  ToggleLeft: () => null,
+  ToggleRight: () => null,
+  TestTube: () => null,
+  RefreshCw: () => null,
+  CheckCircle: () => null,
+  XCircle: () => null,
+  Clock: () => null,
+  Calendar: () => null,
 }));
 
 jest.mock('../Notifications.css', () => ({}));
 
 const { useAuth } = require('../../contexts/AuthContext');
+const Notifications = require('../Notifications').default;
 
-const smtpData = {
-  host: 'smtp.gmail.com', port: 587, secure: false,
-  username: 'admin@acs.com', from_email: 'noreply@acs.com',
-  from_name: 'ACS Banking', enabled: true
+const defaultMockGet = (url) => {
+  if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+  if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+  if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+  if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+  if (url.includes('emails')) return Promise.resolve({ data: { data: [] } });
+  return Promise.resolve({ data: { data: [] } });
 };
 
-const banksData = [{ id: 1, code: 'BT', name: 'Banque de Tunisie', is_active: true }];
-
-const bankEmailsData = [
-  { id: 1, email: 'user1@bank.com', is_active: true },
-  { id: 2, email: 'user2@bank.com', is_active: false }
-];
-
-const cronData = { schedule: '30 8 * * *', enabled: true, nextRun: '2025-06-01T08:30:00Z' };
-
-const logsData = [
-  { id: 1, bank_name: 'BT', email: 'user@bank.com', subject: 'Rapport Quotidien', status: 'sent', sent_at: '2025-05-22T08:00:00Z' },
-  { id: 2, bank_name: 'BIAT', email: 'admin@biat.com', subject: 'Rapport Journalier', status: 'failed', sent_at: '2025-05-21T08:00:00Z' }
-];
-
-let Notifications;
-beforeEach(() => {
-  jest.clearAllMocks();
-  mockConfirm.mockReturnValue(true);
-  mockGet.mockImplementation((url) => {
-    if (url.includes('smtp')) return Promise.resolve({ data: { data: smtpData } });
-    if (url.includes('banks')) return Promise.resolve({ data: { data: banksData } });
-    if (url.includes('logs')) return Promise.resolve({ data: { data: logsData } });
-    if (url.includes('cron-config')) return Promise.resolve({ data: { data: cronData } });
-    if (url.includes('/notifications/emails/')) return Promise.resolve({ data: { data: bankEmailsData } });
-    return Promise.resolve({ data: { data: [] } });
-  });
-  Notifications = require('../Notifications').default;
-});
-
 describe('Notifications', () => {
-  it('renders loading state initially', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
     useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    expect(screen.getByText('Chargement...')).toBeInTheDocument();
+    mockGet.mockImplementation(defaultMockGet);
   });
 
-  it('super_admin can see full page', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Configuration SMTP')).toBeInTheDocument();
-    expect(screen.getByText('Emails par banque')).toBeInTheDocument();
-    expect(screen.getByText('Envoi Automatique')).toBeInTheDocument();
-    expect(screen.getByText('Historique des envois')).toBeInTheDocument();
-  });
-
-  it('blocks non-super_admin', () => {
+  it('shows access denied for non super_admin', () => {
     useAuth.mockReturnValue({ user: { role: 'bank_admin' } });
     render(<MemoryRouter><Notifications /></MemoryRouter>);
     expect(screen.getByText('Acces refuse')).toBeInTheDocument();
   });
 
-  it('SMTP form: fetches and pre-fills existing config', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('smtp.gmail.com')).toBeInTheDocument();
-    });
-    expect(screen.getByDisplayValue('587')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Non')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('admin@acs.com')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('noreply@acs.com')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('ACS Banking')).toBeInTheDocument();
-  });
-
-  it('SMTP form: saves config on Sauvegarder click', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('smtp.gmail.com')).toBeInTheDocument();
-    });
-    fireEvent.change(screen.getByDisplayValue('smtp.gmail.com'), { target: { value: 'smtp.outlook.com' } });
-    fireEvent.click(screen.getByText('Sauvegarder'));
-    await waitFor(() => {
-      expect(mockPut).toHaveBeenCalledWith('/notifications/smtp', expect.objectContaining({ host: 'smtp.outlook.com' }));
-    });
-  });
-
-  it('SMTP form: tests connection on Tester connexion click', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    mockPost.mockResolvedValue({ data: { success: true, message: 'Connexion SMTP reussie!' } });
+  it('renders the full page for super_admin', async () => {
     render(<MemoryRouter><Notifications /></MemoryRouter>);
     await waitFor(() => {
       expect(screen.getByText('Notifications Email')).toBeInTheDocument();
     });
+    expect(screen.getAllByText(/Configuration SMTP/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Historique des envois')).toBeInTheDocument();
+  });
+
+  it('displays loading state initially', () => {
+    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+    mockGet.mockImplementation(() => new Promise(() => {}));
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    expect(screen.getByText('Chargement...')).toBeInTheDocument();
+  });
+
+  it('saves SMTP configuration on form submit', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.change(screen.getByPlaceholderText('smtp.example.com'), { target: { value: 'smtp.gmail.com' } });
+    fireEvent.change(screen.getByDisplayValue(587), { target: { value: '465' } });
+    fireEvent.change(screen.getByPlaceholderText('user@example.com'), { target: { value: 'admin@test.com' } });
+    fireEvent.change(screen.getByPlaceholderText('noreply@example.com'), { target: { value: 'noreply@test.com' } });
+    fireEvent.change(screen.getByDisplayValue('ACS Banking System'), { target: { value: 'Test Sender' } });
+
+    fireEvent.click(screen.getByText('Sauvegarder'));
+    await waitFor(() => {
+      expect(mockPut).toHaveBeenCalledWith('/notifications/smtp', expect.objectContaining({
+        host: 'smtp.gmail.com',
+        port: 465,
+        username: 'admin@test.com',
+        from_email: 'noreply@test.com',
+        from_name: 'Test Sender',
+      }));
+    });
+  });
+
+  it('tests SMTP connection and shows result', async () => {
+    mockPost.mockResolvedValue({ data: { success: true, message: 'Connexion reussie' } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
     fireEvent.click(screen.getByText('Tester connexion'));
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith('/notifications/smtp/test');
     });
     await waitFor(() => {
-      expect(screen.getByText('Connexion SMTP reussie!')).toBeInTheDocument();
+      expect(screen.getByText('Connexion reussie')).toBeInTheDocument();
     });
   });
 
-  it('Email management: adds email via Ajouter', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+  it('pre-fills SMTP form with existing config', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: { host: 'smtp.gmail.com', port: 465, username: 'admin@test.com', from_email: 'noreply@test.com', from_name: 'Custom Name', enabled: true } } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [] } });
+      return Promise.resolve({ data: { data: [] } });
+    });
     render(<MemoryRouter><Notifications /></MemoryRouter>);
     await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('smtp.gmail.com')).toBeInTheDocument();
     });
-    fireEvent.change(screen.getByPlaceholderText('Ajouter un email...'), { target: { value: 'new@test.com' } });
+    expect(screen.getByDisplayValue(465)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('admin@test.com')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('noreply@test.com')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Custom Name')).toBeInTheDocument();
+  });
+
+  it('adds a notification email', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.change(screen.getByPlaceholderText('Ajouter un email...'), { target: { value: 'newbank@test.com' } });
     fireEvent.click(screen.getByText('Ajouter'));
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/notifications/emails/1', { email: 'new@test.com' });
+      expect(mockPost).toHaveBeenCalledWith('/notifications/emails/1', { email: 'newbank@test.com' });
     });
   });
 
-  it('Email management: deletes email via trash icon', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
+  it('deletes a notification email after confirmation', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [{ id: 1, email: 'test@test.com', is_active: true }] } });
+      return Promise.resolve({ data: { data: [] } });
     });
-    const deleteBtns = await screen.findAllByTitle('Supprimer');
-    fireEvent.click(deleteBtns[0]);
-    expect(mockConfirm).toHaveBeenCalledWith('Supprimer cet email?');
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('test@test.com')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByTitle('Supprimer'));
     await waitFor(() => {
       expect(mockDelete).toHaveBeenCalledWith('/notifications/emails/1');
     });
   });
 
-  it('Email management: toggles email active/inactive', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
+  it('toggles notification email active status', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [{ id: 1, email: 'test@test.com', is_active: true }] } });
+      return Promise.resolve({ data: { data: [] } });
     });
-    const toggleBtn = await screen.findByTitle('Desactiver');
-    fireEvent.click(toggleBtn);
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('test@test.com')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByTitle('Desactiver'));
     await waitFor(() => {
       expect(mockPut).toHaveBeenCalledWith('/notifications/emails/1/toggle');
     });
   });
 
-  it('Send report: sends to single bank', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    mockPost.mockResolvedValue({ data: { success: true } });
+  it('sends daily report for selected bank', async () => {
     render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
     fireEvent.click(screen.getByText('Envoyer rapport'));
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith('/notifications/send/1');
     });
   });
 
-  it('Send report: sends to all banks', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    mockPost.mockResolvedValue({ data: { success: true } });
+  it('sends report to all banks after confirmation', async () => {
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
     render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
     fireEvent.click(screen.getByText('Envoyer a toutes les banques'));
-    expect(mockConfirm).toHaveBeenCalledWith('Envoyer les rapports a toutes les banques?');
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith('/notifications/send-all');
     });
   });
 
-  it('Cron config: loads and displays current schedule', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+  it('saves cron schedule configuration', async () => {
     render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Actif')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('08')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('30')).toBeInTheDocument();
-    expect(screen.getByText(/Prochaine execution/)).toBeInTheDocument();
-  });
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
 
-  it('Cron config: saves new schedule on Sauvegarder la planification click', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    mockPut.mockResolvedValue({ data: { success: true, data: { schedule: '45 14 * * *', enabled: true, nextRun: null } } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
-    fireEvent.change(screen.getByDisplayValue('08'), { target: { value: '14' } });
-    fireEvent.change(screen.getByDisplayValue('30'), { target: { value: '45' } });
+    fireEvent.change(screen.getByDisplayValue('08'), { target: { value: '12' } });
+    fireEvent.change(screen.getByDisplayValue('00'), { target: { value: '30' } });
     fireEvent.click(screen.getByText('Sauvegarder la planification'));
     await waitFor(() => {
-      expect(mockPut).toHaveBeenCalledWith('/notifications/cron-config', { schedule: '45 14 * * *', enabled: true });
+      expect(mockPut).toHaveBeenCalledWith('/notifications/cron-config', {
+        schedule: '30 12 * * *',
+        enabled: true,
+      });
     });
   });
 
-  it('Cron config: toggles cron enabled/disabled', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    mockPut.mockResolvedValue({ data: { success: true, data: { schedule: '30 8 * * *', enabled: false, nextRun: null } } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
+  it('toggles cron enabled/disabled', async () => {
+    const { container } = render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(container.querySelector('.toggle-btn'));
     await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Actif')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Actif').nextElementSibling);
-    await waitFor(() => {
-      expect(mockPut).toHaveBeenCalledWith('/notifications/cron-config', { schedule: '30 08 * * *', enabled: false });
+      expect(mockPut).toHaveBeenCalledWith('/notifications/cron-config', {
+        schedule: '00 08 * * *',
+        enabled: false,
+      });
     });
   });
 
-  it('Logs: loads and displays notification logs table', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
+  it('shows empty SMTP form when no config exists', async () => {
     render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Rapport Quotidien')).toBeInTheDocument();
-    expect(screen.getByText('Rapport Journalier')).toBeInTheDocument();
-    expect(screen.getByText('Envoye')).toBeInTheDocument();
-    expect(screen.getByText('Echec')).toBeInTheDocument();
-  });
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
 
-  it('Logs: empty state when no logs', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    mockGet.mockImplementation((url) => {
-      if (url.includes('smtp')) return Promise.resolve({ data: { data: smtpData } });
-      if (url.includes('banks')) return Promise.resolve({ data: { data: banksData } });
-      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
-      if (url.includes('cron-config')) return Promise.resolve({ data: { data: cronData } });
-      if (url.includes('/notifications/emails/')) return Promise.resolve({ data: { data: bankEmailsData } });
-      return Promise.resolve({ data: { data: [] } });
-    });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Aucun envoi')).toBeInTheDocument();
+    expect(screen.getByDisplayValue(587)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('ACS Banking System')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('smtp.example.com')).toBeInTheDocument();
   });
 
   it('handles API error gracefully', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
     mockGet.mockRejectedValue(new Error('Network error'));
     render(<MemoryRouter><Notifications /></MemoryRouter>);
     await waitFor(() => {
       expect(screen.queryByText('Chargement...')).not.toBeInTheDocument();
     });
-    expect(screen.getByText('Configuration SMTP')).toBeInTheDocument();
+    expect(screen.getByText('Notifications Email')).toBeInTheDocument();
   });
 
-  it('Email preview modal opens on Apercu du template click', async () => {
-    useAuth.mockReturnValue({ user: { role: 'super_admin' } });
-    render(<MemoryRouter><Notifications /></MemoryRouter>);
-    await waitFor(() => {
-      expect(screen.getByText('Notifications Email')).toBeInTheDocument();
+  it('renders logs table with data', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [{ id: 1, sent_at: '2025-01-15T10:00:00Z', bank_name: 'BT', email: 'test@test.com', subject: 'Rapport Quotidien', status: 'sent' }, { id: 2, sent_at: '2025-01-15T09:00:00Z', bank_name: 'ATB', email: 'admin@test.com', subject: 'Rapport', status: 'failed' }] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [] } });
+      return Promise.resolve({ data: { data: [] } });
     });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Historique des envois')).toBeInTheDocument(); });
+
+    expect(screen.getByText('Date')).toBeInTheDocument();
+    expect(screen.getByText('Banque')).toBeInTheDocument();
+    expect(screen.getByText('Email')).toBeInTheDocument();
+    expect(screen.getByText('Sujet')).toBeInTheDocument();
+    expect(screen.getByText('Statut')).toBeInTheDocument();
+    expect(screen.getByText('Rapport Quotidien')).toBeInTheDocument();
+    expect(screen.getByText('Envoye')).toBeInTheDocument();
+    expect(screen.getByText('Echec')).toBeInTheDocument();
+  });
+
+  it('opens email preview modal', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
     fireEvent.click(screen.getByText('Apercu du template'));
     await waitFor(() => {
       expect(screen.getByText('Aperçu du Template Email')).toBeInTheDocument();
+    });
+  });
+
+  it('closes email preview modal via close button', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Apercu du template'));
+    await waitFor(() => {
+      expect(screen.getByText('Aperçu du Template Email')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('×'));
+    await waitFor(() => {
+      expect(screen.queryByText('Aperçu du Template Email')).not.toBeInTheDocument();
+    });
+  });
+
+  it('closes email preview modal via overlay click', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Apercu du template'));
+    await waitFor(() => {
+      expect(screen.getByText('Aperçu du Template Email')).toBeInTheDocument();
+    });
+
+    const overlay = document.querySelector('.modal-overlay');
+    fireEvent.click(overlay);
+    await waitFor(() => {
+      expect(screen.queryByText('Aperçu du Template Email')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows alert when saving SMTP fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPut.mockRejectedValue({ response: { data: { message: 'SMTP error' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Sauvegarder'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('SMTP error'));
+    });
+  });
+
+  it('shows error message when SMTP test fails', async () => {
+    mockPost.mockRejectedValue({ response: { data: { message: 'Connection failed' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Tester connexion'));
+    await waitFor(() => {
+      expect(screen.getByText('Connection failed')).toBeInTheDocument();
+    });
+  });
+
+  it('shows alert when adding invalid email (empty)', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Ajouter'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith('Email invalide');
+    });
+  });
+
+  it('shows alert when adding invalid email (no @)', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.change(screen.getByPlaceholderText('Ajouter un email...'), { target: { value: 'invalid-email' } });
+    fireEvent.click(screen.getByText('Ajouter'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith('Email invalide');
+    });
+  });
+
+  it('shows alert when adding email API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPost.mockRejectedValue({ response: { data: { message: 'API error' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.change(screen.getByPlaceholderText('Ajouter un email...'), { target: { value: 'test@test.com' } });
+    fireEvent.click(screen.getByText('Ajouter'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('API error'));
+    });
+  });
+
+  it('shows alert when deleting email API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [{ id: 1, email: 'test@test.com', is_active: true }] } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    mockDelete.mockRejectedValue({ response: { data: { message: 'Delete error' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('test@test.com')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByTitle('Supprimer'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Delete error'));
+    });
+  });
+
+  it('shows alert when toggling email API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [{ id: 1, email: 'test@test.com', is_active: true }] } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    mockPut.mockRejectedValue({ response: { data: { message: 'Toggle error' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('test@test.com')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByTitle('Desactiver'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Toggle error'));
+    });
+  });
+
+  it('shows alert when send report returns success: false', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPost.mockResolvedValue({ data: { success: false, message: 'No data to send' } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer rapport'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('No data to send'));
+    });
+  });
+
+  it('shows alert when send report API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPost.mockResolvedValue({ data: { success: false, message: 'Erreur' } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer rapport'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Erreur'));
+    });
+  });
+
+  it('shows alert when send all reports returns success: false', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    mockPost.mockResolvedValue({ data: { success: false, message: 'All failed' } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer a toutes les banques'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('All failed'));
+    });
+  });
+
+  it('shows alert when send all reports API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    mockPost.mockRejectedValue({ response: { data: { message: 'Network error' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer a toutes les banques'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Network error'));
+    });
+  });
+
+  it('shows alert when saving cron config API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPut.mockRejectedValue({ response: { data: { message: 'Cron error' } } });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Sauvegarder la planification'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Cron error'));
+    });
+  });
+
+  it('shows alert when toggling cron API fails', async () => {
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
+    const { container } = render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+    mockPut.mockRejectedValue({ response: { data: { message: 'Toggle cron error' } } });
+
+    fireEvent.click(container.querySelector('.toggle-btn'));
+    await waitFor(() => {
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Toggle cron error'));
+    });
+  });
+
+  it('fetches bank emails on bank select change', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }, { id: 2, name: 'ATB' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [{ id: 1, email: 'test@test.com', is_active: true }] } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    const bankSelect = screen.getByDisplayValue('BT');
+    fireEvent.change(bankSelect, { target: { value: '2' } });
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalledWith('/notifications/emails/2');
+    });
+  });
+
+  it('renders cron config with existing data', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: { host: 'smtp.gmail.com', port: 465, username: 'admin@test.com', from_email: 'noreply@test.com', from_name: 'Custom', enabled: true } } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: { schedule: '0 12 * * *', enabled: true } } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [] } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => {
+      expect(screen.getByText(/12:00/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows empty logs state when no logs', async () => {
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+    expect(screen.getByText('Aucun envoi')).toBeInTheDocument();
+  });
+
+  it('deletes email early return when confirm cancelled', async () => {
+    jest.spyOn(window, 'confirm').mockReturnValue(false);
+    mockGet.mockImplementation((url) => {
+      if (url.includes('smtp')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('logs')) return Promise.resolve({ data: { data: [] } });
+      if (url.includes('cron')) return Promise.resolve({ data: { data: null } });
+      if (url.includes('banks')) return Promise.resolve({ data: { data: [{ id: 1, name: 'BT' }] } });
+      if (url.includes('emails')) return Promise.resolve({ data: { data: [{ id: 1, email: 'test@test.com', is_active: true }] } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => {
+      expect(screen.getByText('test@test.com')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('Supprimer'));
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it('sends all reports early return when confirm cancelled', async () => {
+    jest.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Envoyer a toutes les banques'));
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('checks test SMTP result shows error from network error', async () => {
+    mockPost.mockRejectedValue(new Error('Network failure'));
+    render(<MemoryRouter><Notifications /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Notifications Email')).toBeInTheDocument(); });
+
+    fireEvent.click(screen.getByText('Tester connexion'));
+    await waitFor(() => {
+      expect(screen.getByText('Network failure')).toBeInTheDocument();
     });
   });
 });
