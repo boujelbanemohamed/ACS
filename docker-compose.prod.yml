@@ -33,7 +33,7 @@ services:
       retries: 5
 
   pgbouncer:
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:1.21.0
     container_name: banking_pgbouncer_prod
     restart: always
     environment:
@@ -88,12 +88,24 @@ services:
       retries: 3
       start_period: 20s
     depends_on:
+      pgbouncer:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
       - banking_network_prod
+    environment:
+      PM2_INSTANCES: ${PM2_INSTANCES:-max}
+      PM2_MAX_MEMORY: ${PM2_MAX_MEMORY:-512M}
+      QUEUE_JOB_ATTEMPTS: ${QUEUE_JOB_ATTEMPTS:-3}
+      QUEUE_BACKOFF_DELAY: ${QUEUE_BACKOFF_DELAY:-5000}
+      QUEUE_JOB_TIMEOUT: ${QUEUE_JOB_TIMEOUT:-120000}
+      QUEUE_KEEP_COMPLETE: ${QUEUE_KEEP_COMPLETE:-100}
+      QUEUE_KEEP_FAILED: ${QUEUE_KEEP_FAILED:-50}
+      QUEUE_MAX_PER_SECOND: ${QUEUE_MAX_PER_SECOND:-5}
+      DB_BATCH_SIZE: ${DB_BATCH_SIZE:-100}
     volumes:
       - banking_data:/data
 
@@ -114,12 +126,17 @@ services:
       REDIS_URL: redis://redis:6379
       PAN_ENCRYPTION_KEY: ${PAN_ENCRYPTION_KEY}
     depends_on:
+      pgbouncer:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
       - banking_network_prod
+    environment:
+      WORKER_INSTANCES: ${WORKER_INSTANCES:-2}
+      WORKER_MAX_MEMORY: ${WORKER_MAX_MEMORY:-512M}
     volumes:
       - banking_data:/data
 

@@ -1,10 +1,9 @@
 node_modules
 .env
+.env.*
+build/
+coverage/
 .git
-*.md
 .gitignore
-Dockerfile
-playwright.config.js
-tests/
-playwright-report/
-test-results/
+*.md
+npm-debug.log*
