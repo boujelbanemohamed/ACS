@@ -4,6 +4,48 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import './Monitor.css';
 
+const getSolution = (key, value) => {
+  if (!value || value === 0) return '';
+  const solutions = {
+    unresolved_validation_errors: 'Corriger les données invalides depuis Enregistrements > Corrections',
+    file_processing_errors: 'Consulter l\'historique des traitements pour le détail de l\'erreur',
+    api_call_errors: 'Vérifier la configuration de l\'API dans Banques > [Banque] > Source URL',
+    xml_generation_errors: 'Vérifier les permissions d\'écriture sur le serveur de destination',
+    rejected_records: 'Consulter l\'historique des enregistrements pour voir les motifs de rejet',
+    failed_notifications: 'Vérifier la configuration SMTP dans Notifications > Configuration SMTP',
+    scan_errors_total: 'Vérifier les logs de scan dans Scan Automatique > Logs',
+    enrollment_errors: 'Vérifier le format du fichier XML d\'enrôlement',
+  };
+  return solutions[key] || 'Contacter l\'administrateur de la plateforme';
+};
+
+const getFieldSolution = (fieldName, errorType) => {
+  const map = {
+    phone: 'Vérifier le format du numéro (8 chiffres)',
+    pan: 'Vérifier que le PAN fait 16 chiffres et respecte l\'algorithme de Luhn',
+    card_holder: 'Le nom ne doit pas contenir de chiffres ou caractères spéciaux',
+    email: 'Vérifier le format de l\'adresse email',
+    amount: 'Vérifier que le montant est un nombre positif',
+    cin: 'Vérifier que le CIN fait 8 chiffres',
+    date_naissance: 'Vérifier le format de la date (JJ/MM/AAAA)',
+  };
+  return map[fieldName] || 'Contacter l\'administrateur de la plateforme';
+};
+
+const getFileErrorSolution = (status) => {
+  if (status === 'validation_error') return 'Corriger les lignes invalides dans le fichier source et le re-télécharger';
+  if (status === 'error') return 'Vérifier le fichier source et relancer le traitement depuis l\'historique';
+  return 'Contacter l\'administrateur de la plateforme';
+};
+
+const getScanErrorSolution = (errorsDetail) => {
+  if (!errorsDetail) return 'Vérifier les logs de scan dans Scan Automatique > Logs';
+  if (errorsDetail.toLowerCase().includes('timeout')) return 'Vérifier la connectivité réseau vers le serveur SFTP';
+  if (errorsDetail.toLowerCase().includes('auth')) return 'Vérifier les identifiants de connexion SFTP dans la configuration de la banque';
+  if (errorsDetail.toLowerCase().includes('permis')) return 'Vérifier les permissions d\'accès au dossier SFTP';
+  return 'Contacter l\'administrateur de la plateforme';
+};
+
 const Monitor = () => {
   const navigate = useNavigate();
   const [health, setHealth] = useState(null);
@@ -291,34 +333,42 @@ const Monitor = () => {
                     <div className={'debug-card ' + (debugData.summary.unresolved_validation_errors > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.unresolved_validation_errors}</span>
                       <span className="debug-card-label">Erreurs de validation non résolues</span>
+                      {debugData.summary.unresolved_validation_errors > 0 && <span className="debug-card-solution">{getSolution('unresolved_validation_errors', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.file_processing_errors > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.file_processing_errors}</span>
                       <span className="debug-card-label">Fichiers en erreur</span>
+                      {debugData.summary.file_processing_errors > 0 && <span className="debug-card-solution">{getSolution('file_processing_errors', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.api_call_errors > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.api_call_errors}</span>
                       <span className="debug-card-label">Appels API en échec</span>
+                      {debugData.summary.api_call_errors > 0 && <span className="debug-card-solution">{getSolution('api_call_errors', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.xml_generation_errors > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.xml_generation_errors}</span>
                       <span className="debug-card-label">Générations XML en échec</span>
+                      {debugData.summary.xml_generation_errors > 0 && <span className="debug-card-solution">{getSolution('xml_generation_errors', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.rejected_records > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.rejected_records}</span>
                       <span className="debug-card-label">Enregistrements rejetés</span>
+                      {debugData.summary.rejected_records > 0 && <span className="debug-card-solution">{getSolution('rejected_records', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.failed_notifications > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.failed_notifications}</span>
                       <span className="debug-card-label">Notifications échouées</span>
+                      {debugData.summary.failed_notifications > 0 && <span className="debug-card-solution">{getSolution('failed_notifications', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.scan_errors_total > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.scan_errors_total}</span>
                       <span className="debug-card-label">Scans en échec</span>
+                      {debugData.summary.scan_errors_total > 0 && <span className="debug-card-solution">{getSolution('scan_errors_total', 1)}</span>}
                     </div>
                     <div className={'debug-card ' + (debugData.summary.enrollment_errors > 0 ? 'has-errors' : 'ok')}>
                       <span className="debug-card-value">{debugData.summary.enrollment_errors}</span>
                       <span className="debug-card-label">Rapports d'enrôlement en erreur</span>
+                      {debugData.summary.enrollment_errors > 0 && <span className="debug-card-solution">{getSolution('enrollment_errors', 1)}</span>}
                     </div>
                   </div>
                   )}
@@ -333,6 +383,7 @@ const Monitor = () => {
                             <th>Type d'erreur</th>
                             <th>Message</th>
                             <th>Occurrences</th>
+                            <th>Solution</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -342,6 +393,7 @@ const Monitor = () => {
                               <td><span className={'error-badge error-' + (err.error_type || 'unknown').toLowerCase()}>{err.error_type || 'N/A'}</span></td>
                               <td className="error-message-cell">{err.error_message}</td>
                               <td className="count-cell">{err.count}</td>
+                              <td className="solution-cell">{getFieldSolution(err.field_name, err.error_type)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -361,6 +413,7 @@ const Monitor = () => {
                             <th>Lignes invalides</th>
                             <th>Date</th>
                             <th>Détails</th>
+                            <th>Solution</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -410,6 +463,7 @@ const Monitor = () => {
                                   </div>
                                 )}
                               </td>
+                              <td className="solution-cell">{getFileErrorSolution(f.status)}</td>
                             </tr>
                             );
                           })}
@@ -442,6 +496,7 @@ const Monitor = () => {
                             <th>Date</th>
                             <th>Erreurs</th>
                             <th>Détails</th>
+                            <th>Solution</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -450,6 +505,7 @@ const Monitor = () => {
                               <td className="date-cell">{new Date(s.scan_time).toLocaleString('fr-FR')}</td>
                               <td className="count-cell">{s.errors_count}</td>
                               <td className="error-details-cell">{s.errors_detail || '—'}</td>
+                              <td className="solution-cell">{getScanErrorSolution(s.errors_detail)}</td>
                             </tr>
                           ))}
                         </tbody>
