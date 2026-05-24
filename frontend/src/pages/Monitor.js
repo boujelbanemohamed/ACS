@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Database, Mail, Clock, Server, CheckCircle, XCircle, AlertTriangle, RefreshCw, Cpu, HardDrive, Settings, Bug, ChevronDown, ChevronRight } from 'lucide-react';
+import { Activity, Database, Mail, Clock, Server, CheckCircle, XCircle, AlertTriangle, RefreshCw, Cpu, HardDrive, Settings, Bug } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import './Monitor.css';
@@ -98,6 +98,7 @@ const Monitor = () => {
     switch (status) {
       case 'up': return <CheckCircle size={24} />;
       case 'healthy': return <CheckCircle size={24} />;
+      case 'degraded': return <AlertTriangle size={24} />;
       case 'down': return <XCircle size={24} />;
       case 'error': return <XCircle size={24} />;
       case 'disabled':
@@ -111,6 +112,7 @@ const Monitor = () => {
     switch (status) {
       case 'up':
       case 'healthy': return 'success';
+      case 'degraded': return 'warning';
       case 'down':
       case 'error': return 'error';
       case 'disabled':
@@ -124,6 +126,7 @@ const Monitor = () => {
     switch (status) {
       case 'up': return 'Fonctionnel';
       case 'healthy': return 'Fonctionnel';
+      case 'degraded': return 'Dégradé';
       case 'down': return 'HS';
       case 'error': return 'Erreur';
       case 'disabled': return 'Désactivé';
