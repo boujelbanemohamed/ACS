@@ -4,9 +4,11 @@ import { BrowserRouter } from 'react-router-dom';
 import Login from '../Login';
 
 const mockNavigate = jest.fn();
+const mockLocationState = {};
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
   useNavigate: () => mockNavigate,
+  useLocation: () => ({ state: mockLocationState }),
 }));
 
 const mockLogin = jest.fn();
@@ -71,6 +73,12 @@ describe('Login', () => {
     await waitFor(() => {
       expect(screen.getByText('Identifiants invalides')).toBeInTheDocument();
     });
+  });
+
+  it('shows success message when redirected after password change', () => {
+    mockLocationState.passwordChanged = true;
+    renderLogin();
+    expect(screen.getByText('Mot de passe changé avec succès. Veuillez vous connecter avec votre nouveau mot de passe.')).toBeInTheDocument();
   });
 
   it('disables inputs and button while loading', async () => {

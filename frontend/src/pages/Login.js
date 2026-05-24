@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LogIn, AlertCircle } from 'lucide-react';
+import { LogIn, AlertCircle, CheckCircle } from 'lucide-react';
 import './Login.css';
 
 const Login = () => {
@@ -13,6 +13,16 @@ const Login = () => {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
+
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state?.passwordChanged) {
+      setPasswordChanged(true);
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   const handleChange = (e) => {
     setFormData({
@@ -50,6 +60,13 @@ const Login = () => {
           <h1>Banking CSV Processor</h1>
           <p>Connectez-vous pour accéder au système</p>
         </div>
+
+        {passwordChanged && (
+          <div className="success-message">
+            <CheckCircle size={20} />
+            <span>Mot de passe changé avec succès. Veuillez vous connecter avec votre nouveau mot de passe.</span>
+          </div>
+        )}
 
         {error && (
           <div className="error-message">

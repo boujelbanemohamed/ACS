@@ -85,7 +85,7 @@ describe('ChangePassword', () => {
     });
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith('/login', { state: { passwordChanged: true }, replace: true });
     }, { timeout: 3000 });
   });
 

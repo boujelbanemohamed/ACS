@@ -49,7 +49,7 @@ const ChangePassword = () => {
       });
       setSuccess(true);
       setTimeout(() => {
-        navigate('/dashboard', { replace: true });
+        navigate('/login', { state: { passwordChanged: true }, replace: true });
       }, 2000);
     } catch (err) {
       setError(err.response?.data?.message || 'Erreur lors du changement de mot de passe');
@@ -66,7 +66,7 @@ const ChangePassword = () => {
             <CheckCircle size={48} />
           </div>
           <h2>Mot de passe changé avec succès</h2>
-          <p>Vous allez être redirigé vers le tableau de bord...</p>
+          <p>Vous allez être redirigé vers la page de connexion...</p>
         </div>
       </div>
     );

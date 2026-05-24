@@ -37,6 +37,18 @@
   margin: 0;
 }
 
+.success-message {
+  background-color: #e8f5e9;
+  border: 1px solid #a5d6a7;
+  color: #2e7d32;
+  padding: 12px 16px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
 .error-message {
   background-color: #fee;
   border: 1px solid #fcc;
