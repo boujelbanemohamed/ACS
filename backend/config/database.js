@@ -7,7 +7,7 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'banking_db',
   user: process.env.DB_USER || 'banking_user',
   password: process.env.DB_PASSWORD || 'banking_password',
-  max: 20,
+  max: parseInt(process.env.DB_POOL_MAX) || 100,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 });

@@ -1,5 +1,6 @@
 const csv = require('csv-parser');
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 const axios = require('axios');
 const db = require('../config/database');
@@ -64,7 +65,7 @@ class CSVProcessor {
       }
 
       // Clean up temp file
-      fs.unlinkSync(tempFilePath);
+      await fsp.unlink(tempFilePath);
 
       return {
         success: errors.length === 0,
@@ -155,10 +156,12 @@ class CSVProcessor {
     }
 
     const cleanPath = url.replace('file://', '');
-    if (!fs.existsSync(cleanPath)) {
+    try {
+      await fsp.access(cleanPath);
+    } catch {
       throw new Error(`File not found: ${cleanPath}`);
     }
-    fs.cpSync(cleanPath, destPath);
+    await fsp.cp(cleanPath, destPath);
   }
 
   /**
@@ -321,48 +324,68 @@ class CSVProcessor {
    * Save validated records to database
    */
   async saveValidatedRecords(bankId, rows, fileName) {
-    const query = `
-      INSERT INTO processed_records 
-        (bank_id, language, first_name, last_name, pan, pan_hash, expiry, phone, behaviour, action, file_name)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (bank_id, pan_hash) DO UPDATE SET
-        language = EXCLUDED.language,
-        first_name = EXCLUDED.first_name,
-        last_name = EXCLUDED.last_name,
-        pan = EXCLUDED.pan,
-        expiry = EXCLUDED.expiry,
-        phone = EXCLUDED.phone,
-        behaviour = EXCLUDED.behaviour,
-        action = EXCLUDED.action,
-        file_name = EXCLUDED.file_name,
-        pan_hash = EXCLUDED.pan_hash,
-        enrollment_status = 'pending',
-        enrollment_error_code = NULL,
-        enrollment_error_description = NULL,
-        enrollment_date = NULL,
-        processed_at = CURRENT_TIMESTAMP
-      RETURNING id, pan
-    `;
+    if (rows.length === 0) return [];
 
+    const BATCH_SIZE = parseInt(process.env.DB_BATCH_SIZE) || 100;
     const saved = [];
-    for (const row of rows) {
-      const encryptedPan = encrypt(row.pan);
-      const panHash = hashPan(row.pan);
-      const result = await db.query(query, [
-        bankId,
-        row.language,
-        row.firstName || row.first_name,
-        row.lastName || row.last_name,
-        encryptedPan,
-        panHash,
-        row.expiry,
-        row.phone,
-        row.behaviour,
-        row.action,
-        fileName
-      ]);
-      saved.push({ ...result.rows[0], pan: decrypt(result.rows[0].pan) });
+
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      const values = [];
+      const params = [];
+      let paramIndex = 1;
+
+      for (const row of batch) {
+        const encryptedPan = encrypt(row.pan);
+        const panHash = hashPan(row.pan);
+        values.push(
+          `($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10})`
+        );
+        params.push(
+          bankId,
+          row.language,
+          row.firstName || row.first_name,
+          row.lastName || row.last_name,
+          encryptedPan,
+          panHash,
+          row.expiry,
+          row.phone,
+          row.behaviour,
+          row.action,
+          fileName
+        );
+        paramIndex += 11;
+      }
+
+      const query = `
+        INSERT INTO processed_records 
+          (bank_id, language, first_name, last_name, pan, pan_hash, expiry, phone, behaviour, action, file_name)
+        VALUES ${values.join(', ')}
+        ON CONFLICT (bank_id, pan_hash) DO UPDATE SET
+          language = EXCLUDED.language,
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name,
+          pan = EXCLUDED.pan,
+          expiry = EXCLUDED.expiry,
+          phone = EXCLUDED.phone,
+          behaviour = EXCLUDED.behaviour,
+          action = EXCLUDED.action,
+          file_name = EXCLUDED.file_name,
+          pan_hash = EXCLUDED.pan_hash,
+          enrollment_status = 'pending',
+          enrollment_error_code = NULL,
+          enrollment_error_description = NULL,
+          enrollment_date = NULL,
+          processed_at = CURRENT_TIMESTAMP
+        RETURNING id, pan
+      `;
+
+      const result = await db.query(query, params);
+      for (const row of result.rows) {
+        saved.push({ ...row, pan: decrypt(row.pan) });
+      }
     }
+
     return saved;
   }
 
@@ -409,21 +432,36 @@ class CSVProcessor {
    * Save validation errors
    */
   async saveValidationErrors(fileLogId, errors) {
-    const query = `
-      INSERT INTO validation_errors 
-        (file_log_id, row_number, field_name, field_value, error_message, severity)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `;
+    if (errors.length === 0) return;
 
-    for (const error of errors) {
-      await db.query(query, [
-        fileLogId,
-        error.rowNumber || null,
-        error.field,
-        error.value || '',
-        error.error,
-        error.severity || 'error'
-      ]);
+    const BATCH_SIZE = parseInt(process.env.DB_BATCH_SIZE) || 100;
+
+    for (let i = 0; i < errors.length; i += BATCH_SIZE) {
+      const batch = errors.slice(i, i + BATCH_SIZE);
+      const values = [];
+      const params = [];
+      let paramIndex = 1;
+
+      for (const error of batch) {
+        values.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5})`);
+        params.push(
+          fileLogId,
+          error.rowNumber || null,
+          error.field,
+          error.value || '',
+          error.error,
+          error.severity || 'error'
+        );
+        paramIndex += 6;
+      }
+
+      const query = `
+        INSERT INTO validation_errors 
+          (file_log_id, row_number, field_name, field_value, error_message, severity)
+        VALUES ${values.join(', ')}
+      `;
+
+      await db.query(query, params);
     }
   }
 
@@ -480,18 +518,23 @@ class CSVProcessor {
           await remoteFileService.deleteFile(fullSourceUrl);
         } else {
           await remoteFileService.copyFromLocal(path.join(sourceUrl.replace('file://', ''), fileName), fullDestUrl);
-          fs.unlinkSync(path.join(sourceUrl.replace('file://', ''), fileName));
+          await fsp.unlink(path.join(sourceUrl.replace('file://', ''), fileName));
         }
       } else {
         const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
         const destPath = destinationUrl.startsWith('file://') ? destinationUrl.slice(7) : destinationUrl;
 
-        if (fs.existsSync(sourcePath)) {
-          if (!fs.existsSync(destPath)) {
-            fs.mkdirSync(destPath, { recursive: true });
+        try {
+          await fsp.access(sourcePath);
+          await fsp.mkdir(destPath, { recursive: true });
+          await fsp.cp(path.join(sourcePath, fileName), path.join(destPath, fileName));
+          await fsp.unlink(path.join(sourcePath, fileName));
+        } catch (e) {
+          if (e.code === 'ENOENT') {
+            console.warn(`Source file not found: ${path.join(sourcePath, fileName)}`);
+          } else {
+            throw e;
           }
-          fs.cpSync(path.join(sourcePath, fileName), path.join(destPath, fileName));
-          fs.unlinkSync(path.join(sourcePath, fileName));
         }
       }
       return {
@@ -531,7 +574,7 @@ class CSVProcessor {
                 const temp = '/tmp/' + oldFileName;
                 await sftp.fastGet(srcConfig.remotePath, temp);
                 await sftp.fastPut(temp, dstConfig.remotePath);
-                fs.unlinkSync(temp);
+                await fsp.unlink(temp);
               }
             } finally {
               if (sftp) await sftp.end();
@@ -549,11 +592,16 @@ class CSVProcessor {
         const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
         const archivePath = archiveUrl.startsWith('file://') ? archiveUrl.slice(7) : archiveUrl;
 
-        if (fs.existsSync(sourcePath)) {
-          if (!fs.existsSync(archivePath)) {
-            fs.mkdirSync(archivePath, { recursive: true });
+        try {
+          await fsp.access(sourcePath);
+          await fsp.mkdir(archivePath, { recursive: true });
+          await fsp.cp(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
+        } catch (e) {
+          if (e.code === 'ENOENT') {
+            console.warn(`Source file not found: ${path.join(sourcePath, fileName)}`);
+          } else {
+            throw e;
           }
-          fs.cpSync(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
         }
       }
       return {
@@ -588,7 +636,7 @@ class CSVProcessor {
       csvContent += values.join(';') + '\n';
     });
 
-    fs.writeFileSync(outputPath, csvContent);
+    await fsp.writeFile(outputPath, csvContent);
     return outputPath;
   }
 }

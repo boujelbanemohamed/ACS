@@ -1,18 +1,15 @@
 const express = require('express');
-const axios = require('axios');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const db = require('../config/database');
 const CSVProcessor = require('../services/csvProcessor');
-const xmlGenerator = require('../services/xmlGenerator');
-const recordHistoryService = require('../services/recordHistoryService');
-const { validateRowForHistory } = require('../utils/validationHelper');
 const { authMiddleware } = require('../middleware/auth');
 const { forceBankId } = require('../middleware/roleMiddleware');
 const { processingSchemas, validate } = require('../utils/validators');
-const { encrypt, decrypt, hashPan } = require('../services/encryptionService');
+const { hashPan } = require('../services/encryptionService');
 const auditService = require('../services/auditService');
+const { enqueueJob, getJob, getQueueStats, getActiveJobs } = require('../services/queueService');
 
 const ALLOWED_API_DOMAINS = (process.env.ALLOWED_API_DOMAINS || '').split(',').filter(Boolean);
 
@@ -97,7 +94,6 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
       });
     }
 
-    // Get bank details
     const bankQuery = 'SELECT * FROM banks WHERE id = $1 AND is_active = true';
     const bankResult = await db.query(bankQuery, [bankId]);
 
@@ -110,88 +106,31 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
 
     const bank = bankResult.rows[0];
     const fileUrl = `${baseUrl}/${bank.code}`;
-
-    // Check for new files (this would need to be implemented based on your file system)
-    // For now, we'll simulate checking for a file
     const fileName = 'latest.csv';
     const fullUrl = `${fileUrl}/${fileName}`;
 
-    // Process the file
-    const result = await csvProcessor.processFileFromURL(bankId, fullUrl, fileName);
+    const { jobId } = await enqueueJob('process-url', {
+      bankId,
+      fileUrl: fullUrl,
+      fileName,
+      userId: req.user?.id,
+      username: req.user?.username || 'SYSTEM',
+      ipAddress: req.ip,
+    });
 
-    if (result.success) {
-      // Save validated records and get their DB IDs
-      const savedRecords = await csvProcessor.saveValidatedRecords(bankId, result.validRecords, fileName);
-      for (let i = 0; i < result.validRecords.length; i++) {
-        if (savedRecords[i]) result.validRecords[i].id = savedRecords[i].id;
-      }
-
-      // Log history for each record
-      for (let i = 0; i < result.validRecords.length; i++) {
-        if (savedRecords[i]?.id) {
-          try {
-            const validation = validateRowForHistory(result.validRecords[i]);
-            await recordHistoryService.logAttempt({
-              processedRecordId: savedRecords[i].id,
-              pan: result.validRecords[i].pan,
-              bankId,
-              validationResults: validation.results,
-              status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
-              sourceType: 'url',
-              fileName,
-              username: req.user?.username || 'SYSTEM',
-              dataReceived: result.validRecords[i]
-            });
-          } catch (e) {
-            console.error('History log error:', e.message);
-          }
-        }
-      }
-
-      // Generate XML file using centralized service
-      const xmlResult = await xmlGenerator.processAndGenerateXML(result.validRecords, bank);
-      if (xmlResult && xmlResult.success) {
-        await db.query(
-          'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
-          [bankId, result.fileLogId, xmlResult.fileName, xmlResult.filePath, result.validRecords.length, xmlResult.xmlEntriesCount, 'success']
-        );
-      }
-
-      // Move file to destination
-      await csvProcessor.moveFileToDestination(
-        fileUrl,
-        bank.destination_url,
-        fileName
-      );
-
-      // Archive old file
-      await csvProcessor.archiveOldFile(
-        fileUrl,
-        bank.old_url,
-        fileName
-      );
-    }
-
-    const urlStatus = result.success ? 'SUCCESS' : 'PARTIAL';
-    await auditService.logAction('PROCESS_URL', { tableName: 'file_logs', recordId: result.fileLogId, newData: { bankId, status: urlStatus, totalRows: result.validRecords.length } }, req);
-
-    res.json({
-      success: result.success,
-      message: result.success 
-        ? 'Fichier traité avec succès'
-        : 'Fichier traité avec des erreurs',
+    res.status(202).json({
+      success: true,
+      message: 'Traitement du fichier mis en file d\'attente',
       data: {
-        fileLogId: result.fileLogId,
-        stats: result.stats,
-        errors: result.errors,
-        totalValidRows: result.validRecords.length
+        jobId,
+        status: 'pending',
       }
     });
   } catch (error) {
     console.error('Process URL error:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur lors du traitement du fichier',
+      message: 'Erreur lors de la mise en file d\'attente',
       error: error.message
     });
   }
@@ -203,6 +142,9 @@ router.post('/upload', authMiddleware, upload.single('file'), forceBankId, valid
     const { bankId } = req.body;
 
     if (!bankId) {
+      if (req.file) {
+        await fs.promises.unlink(req.file.path).catch(() => {});
+      }
       return res.status(400).json({
         success: false,
         message: 'Bank ID requis'
@@ -216,105 +158,34 @@ router.post('/upload', authMiddleware, upload.single('file'), forceBankId, valid
       });
     }
 
-    // Process the uploaded file
-    const { rows, errors, stats } = await csvProcessor.parseAndValidateCSV(
-      req.file.path,
-      bankId
-    );
-
-    // Create file log
-    const fileLogId = await csvProcessor.createFileLog(
+    const { jobId } = await enqueueJob('upload', {
       bankId,
-      req.file.originalname,
-      req.file.path
-    );
-
-    // Update file log
-    await csvProcessor.updateFileLog(fileLogId, {
-      total_rows: stats.totalRows,
-      valid_rows: stats.validRows,
-      invalid_rows: stats.invalidRows,
-      duplicate_rows: stats.duplicateRows,
-      status: errors.length > 0 ? 'validation_error' : 'success'
+      filePath: req.file.path,
+      originalName: req.file.originalname,
+      userId: req.user?.id,
+      username: req.user?.username || 'SYSTEM',
+      ipAddress: req.ip,
     });
 
-    // Save validation errors
-    if (errors.length > 0) {
-      await csvProcessor.saveValidationErrors(fileLogId, errors);
-    } else {
-      // Save valid records and get their DB IDs
-      const savedRecords = await csvProcessor.saveValidatedRecords(bankId, rows, req.file.originalname);
-      for (let i = 0; i < rows.length; i++) {
-        if (savedRecords[i]) rows[i].id = savedRecords[i].id;
-      }
-
-      // Generate XML file using centralized service
-      const bankResult = await db.query('SELECT * FROM banks WHERE id = $1', [bankId]);
-      const bank = bankResult.rows[0];
-      if (bank) {
-        await xmlGenerator.processAndGenerateXML(rows, bank);
-      }
-
-      // Log history for each record
-      for (const row of rows) {
-        if (row.id) {
-          try {
-            const validation = validateRowForHistory(row);
-            await recordHistoryService.logAttempt({
-              processedRecordId: row.id,
-              pan: row.pan,
-              bankId,
-              validationResults: validation.results,
-              status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
-              sourceType: 'upload',
-              fileName: req.file.originalname,
-              username: req.user?.username || 'SYSTEM',
-              dataReceived: row
-            });
-          } catch (e) {
-            console.error('History log error:', e.message);
-          }
-        }
-      }
-    }
-
-    const uploadStatus = errors.filter(e => e.severity === 'error').length === 0 ? 'SUCCESS' : 'PARTIAL';
-    await auditService.logAction('UPLOAD_FILE', { tableName: 'file_logs', recordId: fileLogId, newData: { bankId, status: uploadStatus, fileName: req.file.originalname, totalRows: stats.totalRows } }, req);
-
-    try {
-      await fsPromises.unlink(req.file.path);
-    } catch (e) {
-    }
-
-    res.json({
-
-      success: errors.filter(e => e.severity === 'error').length === 0,
-      message: errors.length > 0 
-        ? 'Fichier traité avec des erreurs de validation'
-        : 'Fichier traité avec succès',
+    res.status(202).json({
+      success: true,
+      message: 'Fichier mis en file d\'attente pour traitement',
       data: {
-        fileLogId,
-        stats,
-        errors,
-        totalValidRows: rows.length
+        jobId,
+        status: 'pending',
+        fileName: req.file.originalname,
       }
     });
   } catch (error) {
     console.error('Upload error:', error);
-    
-    // Clean up file if it exists
+
     if (req.file) {
-      try {
-        await fsPromises.access(req.file.path);
-        await fsPromises.unlink(req.file.path);
-      } catch (e) {
-        // ignore cleanup errors
-      }
+      await fs.promises.unlink(req.file.path).catch(() => {});
     }
 
     res.status(500).json({
       success: false,
-      message: 'Erreur lors du traitement du fichier',
+      message: 'Erreur lors de la mise en file d\'attente',
       error: error.message
     });
   }
@@ -517,7 +388,6 @@ router.get('/download/:fileLogId', authMiddleware, async (req, res) => {
 // Reprocess file after corrections
 router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
   try {
-    // Get file log
     const logQuery = `
       SELECT fl.*, b.* 
       FROM file_logs fl
@@ -536,22 +406,21 @@ router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
 
     const fileLog = logResult.rows[0];
 
-    // Reprocess file
-    const result = await csvProcessor.processFileFromURL(
-      fileLog.bank_id,
-      fileLog.original_path,
-      fileLog.file_name
-    );
+    const { jobId } = await enqueueJob('process-url', {
+      bankId: fileLog.bank_id,
+      fileUrl: fileLog.original_path,
+      fileName: fileLog.file_name,
+      userId: req.user?.id,
+      username: req.user?.username || 'SYSTEM',
+      ipAddress: req.ip,
+    });
 
-    await auditService.logAction('REPROCESS_FILE', { tableName: 'file_logs', recordId: req.params.fileLogId, newData: { bankId: fileLog.bank_id, fileName: fileLog.file_name } }, req);
-
-    res.json({
-      success: result.success,
-      message: 'Fichier retraité',
+    res.status(202).json({
+      success: true,
+      message: 'Fichier mis en file d\'attente pour retraitement',
       data: {
-        fileLogId: result.fileLogId,
-        stats: result.stats,
-        errors: result.errors
+        jobId,
+        status: 'pending',
       }
     });
   } catch (error) {
@@ -643,110 +512,36 @@ router.post('/process-manual', authMiddleware, forceBankId, async (req, res) => 
       });
     }
 
-    // Get bank info
     const bankResult = await db.query('SELECT * FROM banks WHERE id = $1', [bankId]);
     if (bankResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Banque non trouvee'
+        message: 'Banque non trouvée'
       });
     }
-    
-    const bank = bankResult.rows[0];
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const fileName = `MANUAL_${bank.code}_${timestamp}`;
 
-    // Create file log
-    const fileLogResult = await db.query(
-      `INSERT INTO file_logs (bank_id, file_name, original_path, status, total_rows, valid_rows) 
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [bankId, `${fileName}.csv`, 'manual_entry', 'success', entries.length, entries.length]
-    );
-    const fileLogId = fileLogResult.rows[0].id;
+    const { jobId } = await enqueueJob('process-manual', {
+      bankId,
+      entries,
+      userId: req.user?.id,
+      username: req.user?.username || 'SYSTEM',
+      ipAddress: req.ip,
+    });
 
-    // Insert records into database with RETURNING
-    const savedRecords = [];
-    for (const entry of entries) {
-      const encryptedPan = encrypt(entry.pan);
-      const panHashVal = hashPan(entry.pan);
-      const result = await db.query(
-        `INSERT INTO processed_records (bank_id, language, first_name, last_name, pan, pan_hash, expiry, phone, behaviour, action, file_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         ON CONFLICT (bank_id, pan_hash) DO UPDATE SET
-           language = EXCLUDED.language,
-           first_name = EXCLUDED.first_name,
-           last_name = EXCLUDED.last_name,
-           pan = EXCLUDED.pan,
-           pan_hash = EXCLUDED.pan_hash,
-           expiry = EXCLUDED.expiry,
-           phone = EXCLUDED.phone,
-           behaviour = EXCLUDED.behaviour,
-           action = EXCLUDED.action,
-           file_name = EXCLUDED.file_name,
-           processed_at = CURRENT_TIMESTAMP
-         RETURNING id, pan`,
-        [bankId, entry.language, entry.firstName, entry.lastName, encryptedPan, panHashVal, entry.expiry, entry.phone, entry.behaviour, entry.action, `${fileName}.csv`]
-      );
-      savedRecords.push(result.rows[0]);
-    }
-
-    // Generate CSV content
-
-    // Generate XML using centralized service
-    const recordsForXml = entries.map((e, i) => ({
-      id: savedRecords[i]?.id,
-      pan: e.pan,
-      phone: e.phone,
-      firstName: e.firstName,
-      lastName: e.lastName,
-      expiry: e.expiry,
-      language: e.language,
-      behaviour: e.behaviour,
-      action: e.action
-    }));
-    await xmlGenerator.processAndGenerateXML(recordsForXml, bank);
-
-    // Log history for each manual entry
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      if (savedRecords[i]?.id) {
-        try {
-          const validation = validateRowForHistory(entry);
-          await recordHistoryService.logAttempt({
-            processedRecordId: savedRecords[i].id,
-            pan: entry.pan,
-            bankId,
-            validationResults: validation.results,
-            status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
-            sourceType: 'manual',
-            fileName: `${fileName}.csv`,
-            username: req.user?.username || 'SYSTEM',
-            dataReceived: entry
-          });
-        } catch (e) {
-          console.error('History log error:', e.message);
-        }
-      }
-    }
-
-    await auditService.logAction('PROCESS_MANUAL', { tableName: 'file_logs', recordId: fileLogId, newData: { bankId, entriesCount: entries.length, fileName: `${fileName}.csv` } }, req);
-
-    res.json({
+    res.status(202).json({
       success: true,
-      message: `${entries.length} enregistrement(s) traite(s) avec succes. Fichiers CSV et XML generes.`,
+      message: 'Traitement des enregistrements mis en file d\'attente',
       data: {
-        fileLogId,
-        csvFileName: `${fileName}.csv`,
-        xmlFileName: `${fileName}.xml`,
-        recordsProcessed: entries.length,
-        xmlEntriesGenerated: entries.length * 2
+        jobId,
+        status: 'pending',
+        entriesCount: entries.length,
       }
     });
   } catch (error) {
     console.error('Process manual error:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur lors du traitement',
+      message: 'Erreur lors de la mise en file d\'attente',
       error: error.message
     });
   }
@@ -771,178 +566,82 @@ router.post('/call-api', authMiddleware, forceBankId, validate(processingSchemas
       });
     }
 
-    // Build headers
-    const requestHeaders = {
-      'Content-Type': 'application/json',
-      ...headers
-    };
-
-    // Add authentication
-    if (authType === 'bearer' && authToken) {
-      requestHeaders['Authorization'] = 'Bearer ' + authToken;
-    } else if (authType === 'basic' && authToken) {
-      requestHeaders['Authorization'] = 'Basic ' + Buffer.from(authToken).toString('base64');
-    } else if (authType === 'apikey' && authToken) {
-      requestHeaders['X-API-Key'] = authToken;
-    }
-
-    // Make API call
-    const axiosConfig = {
-      method: method || 'GET',
-      url: url,
-      headers: requestHeaders,
-      timeout: 30000
-    };
-
-    if ((method === 'POST' || method === 'PUT') && body) {
-      axiosConfig.data = body;
-    }
-
-    const apiResponse = await axios(axiosConfig);
-    
-    // Extract data from response
-    let responseData = apiResponse.data;
-    
-    if (dataPath) {
-      const pathParts = dataPath.split('.');
-      for (const part of pathParts) {
-        if (responseData && responseData[part] !== undefined) {
-          responseData = responseData[part];
-        } else {
-          responseData = [];
-          break;
-        }
-      }
-    }
-
-    // Ensure responseData is an array
-    if (!Array.isArray(responseData)) {
-      responseData = [responseData];
-    }
-
-    // Map and validate the data
-    const mappedRows = [];
-    const validationErrors = [];
-    
-    responseData.forEach((item, index) => {
-      const row = {
-        language: item.language || item.lang || 'fr',
-        firstName: item.firstName || item.first_name || item.prenom || '',
-        lastName: item.lastName || item.last_name || item.nom || '',
-        pan: item.pan || item.cardNumber || item.card_number || '',
-        expiry: item.expiry || item.expiryDate || item.expiry_date || '',
-        phone: item.phone || item.phoneNumber || item.phone_number || item.telephone || '',
-        behaviour: item.behaviour || item.behavior || 'otp',
-        action: item.action || 'update'
-      };
-
-      // Validate row
-      const rowErrors = [];
-      
-      if (!row.pan || row.pan.length < 13 || row.pan.length > 19) {
-        rowErrors.push({ field: 'pan', message: 'PAN invalide' });
-      }
-      
-      if (!row.phone) {
-        rowErrors.push({ field: 'phone', message: 'Telephone requis' });
-      }
-
-      if (rowErrors.length > 0) {
-        validationErrors.push({
-          rowNumber: index + 1,
-          errors: rowErrors,
-          data: row
-        });
-      } else {
-        mappedRows.push(row);
-      }
+    const { jobId } = await enqueueJob('call-api', {
+      bankId,
+      url,
+      method,
+      headers,
+      body,
+      authType,
+      authToken,
+      dataPath,
+      userId: req.user?.id,
+      username: req.user?.username || 'SYSTEM',
+      ipAddress: req.ip,
     });
 
-    // Create file log
-    const fileLogResult = await db.query(
-      'INSERT INTO file_logs (bank_id, file_name, original_path, status, source_type, total_rows, valid_rows, invalid_rows) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-      [bankId, 'API_' + new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-') + '.json', url, mappedRows.length > 0 ? 'success' : 'validation_error', 'api', responseData.length, mappedRows.length, validationErrors.length]
-    );
-
-    const fileLogId = fileLogResult.rows[0].id;
-
-    // Save validated records and log history
-    if (mappedRows.length > 0) {
-      try {
-        const bankResult = await db.query('SELECT * FROM banks WHERE id = $1', [bankId]);
-        const bank = bankResult.rows[0];
-        const fileName = 'API_' + new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-') + '.json';
-
-        const savedRecords = await csvProcessor.saveValidatedRecords(bankId, mappedRows, fileName);
-        for (let i = 0; i < mappedRows.length; i++) {
-          if (savedRecords[i]) mappedRows[i].id = savedRecords[i].id;
-        }
-
-        // Log history
-        for (let i = 0; i < mappedRows.length; i++) {
-          if (savedRecords[i]?.id) {
-            try {
-              const validation = validateRowForHistory(mappedRows[i]);
-              await recordHistoryService.logAttempt({
-                processedRecordId: savedRecords[i].id,
-                pan: mappedRows[i].pan,
-                bankId,
-                validationResults: validation.results,
-                status: validation.isValid ? 'SUCCESS' : (validation.errorCount > 0 ? 'REJECTED' : 'PARTIAL'),
-                sourceType: 'api',
-                fileName,
-                username: req.user?.username || 'SYSTEM',
-                dataReceived: mappedRows[i]
-              });
-            } catch (e) {
-              console.error('History log error:', e.message);
-            }
-          }
-        }
-
-        // Generate XML
-        if (bank) {
-          const recordsForXml = mappedRows.map(r => ({
-            id: r.id, pan: r.pan, phone: r.phone, firstName: r.firstName,
-            lastName: r.lastName, expiry: r.expiry, language: r.language,
-            behaviour: r.behaviour, action: r.action
-          }));
-          const xmlResult = await xmlGenerator.processAndGenerateXML(recordsForXml, bank);
-          if (xmlResult && xmlResult.success) {
-            await db.query(
-              'INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)',
-              [bankId, fileLogId, xmlResult.fileName, xmlResult.filePath, mappedRows.length, xmlResult.xmlEntriesCount, 'success']
-            );
-          }
-        }
-      } catch (e) {
-        console.error('Save records / history error:', e.message);
-      }
-    }
-
-    await auditService.logAction('CALL_API', { tableName: 'file_logs', recordId: fileLogId, newData: { bankId, url, totalRows: responseData.length, validRows: mappedRows.length } }, req);
-
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'API appelee avec succes',
+      message: 'Appel API mis en file d\'attente',
       data: {
-        fileLogId,
-        validRows: mappedRows,
-        errors: validationErrors,
-        stats: {
-          totalRows: responseData.length,
-          validRows: mappedRows.length,
-          invalidRows: validationErrors.length,
-          duplicateRows: 0
-        }
+        jobId,
+        status: 'pending',
       }
     });
   } catch (error) {
     console.error('External API call error:', error);
-    res.status(error.response?.status || 500).json({
+    res.status(500).json({
       success: false,
-      message: 'Erreur lors de l\'appel API externe',
-      error: error.response?.data?.message || error.message
+      message: 'Erreur lors de la mise en file d\'attente',
+      error: error.message
+    });
+  }
+});
+
+// Get job status
+router.get('/status/:jobId', authMiddleware, async (req, res) => {
+  try {
+    const job = await getJob(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job non trouvé'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: job
+    });
+  } catch (error) {
+    console.error('Get job status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération du statut',
+      error: error.message
+    });
+  }
+});
+
+// Get queue statistics
+router.get('/queue/stats', authMiddleware, async (req, res) => {
+  try {
+    const stats = await getQueueStats();
+    const activeJobs = await getActiveJobs();
+
+    res.json({
+      success: true,
+      data: {
+        stats,
+        activeJobs
+      }
+    });
+  } catch (error) {
+    console.error('Get queue stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération des statistiques',
+      error: error.message
     });
   }
 });

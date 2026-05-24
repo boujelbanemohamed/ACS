@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: banking_redis
+    ports:
+      - "16379:6379"
+    networks:
+      - banking_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
   postgres:
     image: postgres:15-alpine
     container_name: banking_postgres
@@ -21,28 +36,56 @@ services:
       timeout: 5s
       retries: 5
 
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: banking_pgbouncer
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: banking_user
+      DB_PASSWORD: banking_password
+      DB_NAME: banking_db
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 100
+    ports:
+      - "15433:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - banking_network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: banking_backend
-    command: sh -c "npm install && npm start"
+    command: sh -c "npm install && npm run start:pm2"
     environment:
       NODE_ENV: production
       PORT: 5000
-      DB_HOST: postgres
+      DB_HOST: pgbouncer
       DB_PORT: 5432
       DB_NAME: banking_db
       DB_USER: banking_user
       DB_PASSWORD: banking_password
+      DB_POOL_MAX: 100
+      REDIS_URL: redis://redis:6379
       JWT_SECRET: dev_secret_key_not_for_production_use_only_12345678901234567890
       PAN_ENCRYPTION_KEY: dev-encryption-key-32chars!xyz
       CORS_ORIGIN: http://localhost:3000,http://localhost:8088
+      PM2_INSTANCES: 4
+      PM2_MAX_MEMORY: 512M
     ports:
       - "8000:5000"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:5000/api/health"]
       interval: 30s
@@ -54,6 +97,38 @@ services:
     volumes:
       - ./backend:/app
       - backend_node_modules:/app/node_modules
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: banking_worker
+    command: sh -c "npm install && node services/worker.js"
+    environment:
+      NODE_ENV: production
+      DB_HOST: pgbouncer
+      DB_PORT: 5432
+      DB_NAME: banking_db
+      DB_USER: banking_user
+      DB_PASSWORD: banking_password
+      DB_POOL_MAX: 100
+      REDIS_URL: redis://redis:6379
+      PAN_ENCRYPTION_KEY: dev-encryption-key-32chars!xyz
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    networks:
+      - banking_network
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+    restart: unless-stopped
+    deploy:
+      replicas: 2
 
   frontend:
     build:
@@ -83,6 +158,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   backend_node_modules:
   frontend_node_modules:
 

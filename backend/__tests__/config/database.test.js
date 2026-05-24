@@ -39,7 +39,7 @@ describe('Database config', () => {
       database: 'banking_db',
       user: 'banking_user',
       password: 'banking_password',
-      max: 20,
+      max: 100,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
     });
@@ -60,7 +60,7 @@ describe('Database config', () => {
       database: 'mydb',
       user: 'myuser',
       password: 'mypass',
-      max: 20,
+      max: 100,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
     });

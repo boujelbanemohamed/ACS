@@ -68,6 +68,8 @@ export const processingAPI = {
   processManualEntries: (data) => api.post("/processing/process-manual", data),
   downloadTemplate: () => api.get("/processing/template", { responseType: "blob" }),
   callExternalApi: (data) => api.post("/processing/call-api", data),
+  getJobStatus: (jobId) => api.get("/processing/status/" + jobId),
+  getQueueStats: () => api.get("/processing/queue/stats"),
 };
 
 export const dashboardAPI = {

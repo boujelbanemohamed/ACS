@@ -28,6 +28,8 @@ jest.mock('../../services/api', () => ({
     validateManualEntries: jest.fn(),
     processManualEntries: jest.fn(),
     downloadTemplate: jest.fn(),
+    getJobStatus: jest.fn(),
+    getQueueStats: jest.fn(),
   }
 }));
 
@@ -82,13 +84,17 @@ beforeEach(() => {
     if (typeof url === 'string' && url.includes('api-keys')) return Promise.resolve({ data: { data: apiKeysData } });
     return Promise.resolve({ data: { data: banksData } });
   });
+  const defaultJobResult = { success: true, fileLogId: 1, stats: {}, errors: [], totalValidRows: 0, validRecords: [], validRows: [] };
+  const defaultJobResponse = { data: { success: true, data: { status: 'completed', result: defaultJobResult, progress: 100 } } };
+
   const { processingAPI } = require('../../services/api');
-  processingAPI.callExternalApi.mockResolvedValue({ data: { success: true, data: { validRows: [], errors: [], stats: {} } } });
-  processingAPI.uploadFile.mockResolvedValue({ data: { success: true, data: { errors: [], validRecords: [] } } });
-  processingAPI.processUrl.mockResolvedValue({ data: { success: true, data: { errors: [], validRecords: [] } } });
+  processingAPI.callExternalApi.mockResolvedValue({ data: { success: true, data: { jobId: 'api-1', status: 'pending' } } });
+  processingAPI.uploadFile.mockResolvedValue({ data: { success: true, data: { jobId: 'up-1', status: 'pending' } } });
+  processingAPI.processUrl.mockResolvedValue({ data: { success: true, data: { jobId: 'url-1', status: 'pending' } } });
   processingAPI.validateManualEntries.mockResolvedValue({ data: { data: { entries: [] } } });
-  processingAPI.processManualEntries.mockResolvedValue({ data: { message: 'Traitement termine avec succes !', success: true } });
+  processingAPI.processManualEntries.mockResolvedValue({ data: { success: true, data: { jobId: 'man-1', status: 'pending' } } });
   processingAPI.downloadTemplate.mockResolvedValue({ data: 'csv,template' });
+  processingAPI.getJobStatus.mockResolvedValue(defaultJobResponse);
   Processing = require('../Processing').default;
 });
 
@@ -405,21 +411,17 @@ describe('Processing', () => {
 
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: {
-        success: true,
-        data: {
-          errors: [],
-          validRecords: [
-            {
-              rowNumber: 1, language: 'fr', firstName: 'Mohamed',
-              lastName: 'Ben Ali', pan: '4111111111111111',
-              expiry: '202512', phone: '21624080852',
-              behaviour: 'otp', action: 'update',
-            },
-          ],
-          stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 },
+      data: { success: true, data: { jobId: 'url-ok', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [
+        {
+          rowNumber: 1, language: 'fr', firstName: 'Mohamed',
+          lastName: 'Ben Ali', pan: '4111111111111111',
+          expiry: '202512', phone: '21624080852',
+          behaviour: 'otp', action: 'update',
         },
-      },
+      ], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
 
     fireEvent.click(screen.getByText('Lancer le traitement'));
@@ -454,10 +456,10 @@ describe('Processing', () => {
 
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: {
-        success: true,
-        data: { errors: [], validRecords: [], stats: { totalRows: 0, validRows: 0, invalidRows: 0, duplicateRows: 0 } },
-      },
+      data: { success: true, data: { jobId: 'url-empty', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [], stats: { totalRows: 0, validRows: 0, invalidRows: 0, duplicateRows: 0 } } } },
     });
 
     fireEvent.click(screen.getByText('Lancer le traitement'));
@@ -539,7 +541,10 @@ describe('Processing', () => {
   it('processResponseData handles errors without rowData', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid', value: '123' }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-err2', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid', value: '123' }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -579,7 +584,8 @@ describe('Processing', () => {
     fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
     fireEvent.change(screen.getByPlaceholderText('https://api.example.com/cards'), { target: { value: 'https://api.test.com/cards' } });
     const { processingAPI } = require('../../services/api');
-    processingAPI.callExternalApi.mockResolvedValue({ data: { success: false, message: 'API Error' } });
+    processingAPI.callExternalApi.mockResolvedValue({ data: { success: true, data: { jobId: 'api-err', status: 'pending' } } });
+    processingAPI.getJobStatus.mockResolvedValue({ data: { success: true, data: { status: 'completed', result: { success: false, message: 'API Error' } } } });
     fireEvent.click(screen.getByText("Appeler l'API"));
     await waitFor(() => expect(screen.getByText('API Error')).toBeInTheDocument());
   });
@@ -928,7 +934,10 @@ describe('Processing', () => {
   it('handleResolveError with PAN duplicate shows error notification', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [{ rowNumber: 2, pan: '4111111111111111' }], stats: { totalRows: 2, validRows: 1, invalidRows: 1, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-dup', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [{ rowNumber: 2, pan: '4111111111111111' }], stats: { totalRows: 2, validRows: 1, invalidRows: 1, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -949,7 +958,10 @@ describe('Processing', () => {
   it('handleResolveError corrects error and moves to valid rows', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-corr', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -970,7 +982,10 @@ describe('Processing', () => {
   it('handleIgnoreError removes error and shows warning notification', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-ign', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -988,7 +1003,10 @@ describe('Processing', () => {
   it('handleRemoveValidRow removes row from valid list', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-rem', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1008,7 +1026,10 @@ describe('Processing', () => {
   it('handleFinalProcess alerts when bank deselected after getting valid rows', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-fin1', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1028,7 +1049,10 @@ describe('Processing', () => {
   it('handleFinalProcess success path generates XML', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-fin2', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1046,9 +1070,11 @@ describe('Processing', () => {
   it('handleFinalProcess handles success=false branch', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-fin3', status: 'pending' } },
     });
-    processingAPI.processManualEntries.mockResolvedValue({ data: { success: false, message: 'XML generation failed' } });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+    });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Traitement URL'));
@@ -1058,6 +1084,8 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('https://example.com/ACS'), { target: { value: 'https://bank.com/data' } });
     fireEvent.click(screen.getByText('Lancer le traitement'));
     await waitFor(() => expect(screen.getByText('Toutes les lignes sont valides !')).toBeInTheDocument());
+    processingAPI.processManualEntries.mockResolvedValue({ data: { success: true, data: { jobId: 'man-fin3', status: 'pending' } } });
+    processingAPI.getJobStatus.mockResolvedValue({ data: { success: true, data: { status: 'completed', result: { success: false, message: 'XML generation failed' } } } });
     fireEvent.click(screen.getByText('Traiter et Generer XML'));
     await waitFor(() => expect(mockAlert).toHaveBeenCalledWith('Erreur: XML generation failed'));
   });
@@ -1065,7 +1093,10 @@ describe('Processing', () => {
   it('handleFinalProcess catch block handles error', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-fin4', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     processingAPI.processManualEntries.mockRejectedValue({ response: { data: { message: 'Process failed' } } });
     render(<MemoryRouter><Processing /></MemoryRouter>);
@@ -1084,7 +1115,10 @@ describe('Processing', () => {
   it('handleDownloadCorrected generates CSV and shows notification', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-dl', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1256,7 +1290,10 @@ describe('Processing', () => {
   it('ErrorRowEditor shows PAN required alert when PAN cleared', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } },
+      data: { success: true, data: { jobId: 'url-pan1', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1276,7 +1313,10 @@ describe('Processing', () => {
   it('ErrorRowEditor shows duplicate PAN alert when severity is warning', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { errors: [{ rowNumber: 1, field: 'pan', error: 'Duplicate PAN found', value: '4111111111111111', severity: 'warning', rowData: { pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 0, duplicateRows: 1 } } },
+      data: { success: true, data: { jobId: 'url-pan2', status: 'pending' } },
+    });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Duplicate PAN found', value: '4111111111111111', severity: 'warning', rowData: { pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 0, duplicateRows: 1 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());

@@ -50,28 +50,29 @@ const Processing = () => {
         dataPath: apiConfig.dataPath
       });
 
-      if (response.data.success) {
+      const result = await pollJobStatus(response.data.data.jobId);
+      if (result.success) {
         setApiResponse({
           success: true,
           statusCode: 200,
-          dataCount: response.data.data?.validRows?.length || 0
+          dataCount: result.validRows?.length || 0
         });
         
-        if (response.data.data?.validRows) {
-          setValidRows(response.data.data.validRows);
+        if (result.validRows) {
+          setValidRows(result.validRows);
         }
-        if (response.data.data?.errors) {
-          setErrors(response.data.data.errors);
+        if (result.errors) {
+          setErrors(result.errors);
         }
-        if (response.data.data?.stats) {
-          setStats(response.data.data.stats);
+        if (result.stats) {
+          setStats(result.stats);
         }
         
-        showNotification('API appelee avec succes ! ' + (response.data.data?.validRows?.length || 0) + ' enregistrements recuperes.');
+        showNotification('API appelee avec succes ! ' + (result.validRows?.length || 0) + ' enregistrements recuperes.');
       } else {
         setApiResponse({
           success: false,
-          error: response.data.message || 'Erreur lors de l\'appel API'
+          error: result.message || 'Erreur lors de l\'appel API'
         });
       }
     } catch (error) {
@@ -238,6 +239,17 @@ const Processing = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  const pollJobStatus = async (jobId, maxRetries = 60, interval = 1000) => {
+    for (let i = 0; i < maxRetries; i++) {
+      const res = await processingAPI.getJobStatus(jobId);
+      const status = res.data.data.status;
+      if (status === 'completed') return res.data.data.result;
+      if (status === 'failed') throw new Error(res.data.data.error || 'Le traitement a echoue');
+      await new Promise(r => setTimeout(r, interval));
+    }
+    throw new Error('Le traitement a depasse le temps maximum d\'attente');
+  };
+
   const processResponseData = (responseData) => {
     const errorsData = responseData.data?.errors || [];
     const validData = responseData.data?.validRecords || [];
@@ -300,11 +312,13 @@ const Processing = () => {
         baseUrl: baseUrl
       });
 
+      const result = await pollJobStatus(response.data.data.jobId);
+      response.data.data = result;
       setResult(response.data);
       processResponseData(response.data);
-      
+      showNotification(result.message || 'Traitement termine');
     } catch (error) {
-      alert(error.response?.data?.message || 'Erreur lors du traitement');
+      alert(error.response?.data?.message || error.message || 'Erreur lors du traitement');
     } finally {
       setProcessing(false);
     }
@@ -329,13 +343,16 @@ const Processing = () => {
 
     try {
       const response = await processingAPI.uploadFile(formData);
+      const result = await pollJobStatus(response.data.data.jobId);
+      response.data.data = result;
       setResult(response.data);
       processResponseData(response.data);
 
       setSelectedFile(null);
       e.target.reset();
+      showNotification(result.message || 'Traitement termine');
     } catch (error) {
-      alert(error.response?.data?.message || 'Erreur lors du traitement');
+      alert(error.response?.data?.message || error.message || 'Erreur lors du traitement');
     } finally {
       setProcessing(false);
     }
@@ -483,13 +500,12 @@ const Processing = () => {
         entries: validEntries
       });
       
-      showNotification(response.data.message || 'Traitement termine avec succes !');
+      const result = await pollJobStatus(response.data.data.jobId);
+      showNotification(result.message || 'Traitement termine avec succes !');
       
-      // Clear processed entries
       setManualEntries([]);
-      
     } catch (error) {
-      alert(error.response?.data?.message || 'Erreur lors du traitement');
+      alert(error.response?.data?.message || error.message || 'Erreur lors du traitement');
     } finally {
       setProcessing(false);
     }
@@ -564,13 +580,14 @@ const handleFinalProcess = async () => {
         }))
       });
       
-      if (response.data.success) {
+      const result = await pollJobStatus(response.data.data.jobId);
+      if (result.success) {
         showNotification('Traitement reussi ! ' + validRows.length + ' lignes traitees. XML genere.');
         setValidRows([]);
         setErrors([]);
         setStats(null);
       } else {
-        alert('Erreur: ' + (response.data.message || 'Erreur inconnue'));
+        alert('Erreur: ' + (result.message || 'Erreur inconnue'));
       }
     } catch (error) {
       console.error('Final process error:', error);

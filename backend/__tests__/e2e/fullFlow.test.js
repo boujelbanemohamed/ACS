@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const supertest = require('supertest');
 
+jest.setTimeout(30000);
+
 const TEST_PREFIX = 'E2E';
 let db;
 let app;
@@ -46,6 +48,7 @@ beforeAll(async () => {
 
   jest.isolateModules(() => {
     app = require('../../server');
+    require('../../services/worker');
   });
 
   request = supertest(app);
@@ -206,8 +209,19 @@ describe('E2E: Settings & Features', () => {
   });
 });
 
+async function pollJobCompletion(jobId, maxRetries = 20, interval = 500) {
+  for (let i = 0; i < maxRetries; i++) {
+    const res = await request.get(`/api/processing/status/${jobId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    if (res.body.data.status === 'completed' || res.body.data.status === 'failed') {
+      return res.body.data;
+    }
+    await new Promise(r => setTimeout(r, interval));
+  }
+  throw new Error(`Job ${jobId} did not complete within ${maxRetries * interval}ms`);
+}
+
 describe('E2E: Processing & Records', () => {
-  let fileLogId;
   const csvContent = 'language;firstName;lastName;pan;expiry;phone;behaviour;action\nfr;Jean;Dupont;4000056655665556;12/28;21612345678;otp;create';
 
   it('POST /api/processing/upload processes a CSV file', async () => {
@@ -215,9 +229,18 @@ describe('E2E: Processing & Records', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .field('bankId', bankId.toString())
       .attach('file', Buffer.from(csvContent, 'utf8'), 'test_cards.csv');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
     expect(res.body.success).toBe(true);
-    fileLogId = res.body.data.fileLogId;
+    expect(res.body.data.jobId).toBeDefined();
+    expect(res.body.data.status).toBe('pending');
+
+    const job = await pollJobCompletion(res.body.data.jobId);
+    if (job.status === 'failed') {
+      console.error('Job failed error:', job.error);
+    }
+    expect(job.status).toBe('completed');
+    expect(job.result).toBeDefined();
+    expect(job.result.success).toBe(true);
   });
 
   it('POST /api/processing/upload returns validation errors for bad PAN', async () => {
@@ -226,8 +249,15 @@ describe('E2E: Processing & Records', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .field('bankId', bankId.toString())
       .attach('file', Buffer.from(badCsv, 'utf8'), 'bad_cards.csv');
-    expect(res.status).toBe(200);
-    expect(res.body.data.errors.length).toBeGreaterThan(0);
+    expect(res.status).toBe(202);
+    expect(res.body.data.jobId).toBeDefined();
+
+    const job = await pollJobCompletion(res.body.data.jobId);
+    if (job.status === 'failed') {
+      console.error('Bad PAN job failed error:', job.error);
+    }
+    expect(job.status).toBe('completed');
+    expect(job.result.errors.length).toBeGreaterThan(0);
   });
 
   it('GET /api/records returns records with filters', async () => {

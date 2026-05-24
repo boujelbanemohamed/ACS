@@ -10,6 +10,14 @@ jest.mock('fs', () => {
     writeFileSync: jest.fn(),
     mkdirSync: jest.fn(),
     readdirSync: jest.fn(),
+    promises: {
+      access: jest.fn(),
+      cp: jest.fn(),
+      unlink: jest.fn(),
+      writeFile: jest.fn(),
+      mkdir: jest.fn(),
+      readFile: jest.fn(),
+    },
   };
 });
 
@@ -83,11 +91,11 @@ describe('CSVProcessor', () => {
         return this;
       }),
     });
-    fs.existsSync.mockReturnValue(true);
-    fs.cpSync.mockReturnValue();
-    fs.unlinkSync.mockReturnValue();
-    fs.writeFileSync.mockReturnValue();
-    fs.mkdirSync.mockReturnValue();
+    fs.promises.access.mockResolvedValue(undefined);
+    fs.promises.cp.mockResolvedValue();
+    fs.promises.unlink.mockResolvedValue();
+    fs.promises.writeFile.mockResolvedValue();
+    fs.promises.mkdir.mockResolvedValue();
 
     remoteFileService.isRemote.mockReturnValue(false);
     remoteFileService.listFiles.mockReset();
@@ -377,19 +385,18 @@ describe('CSVProcessor', () => {
     });
 
     it('copies file from local filesystem', async () => {
-      fs.existsSync.mockReturnValue(true);
       await processor.downloadFile('file:///data/file.csv', '/tmp/file.csv');
-      expect(fs.cpSync).toHaveBeenCalledWith('/data/file.csv', '/tmp/file.csv');
+      expect(fs.promises.cp).toHaveBeenCalledWith('/data/file.csv', '/tmp/file.csv');
     });
 
     it('copies file from plain local path', async () => {
       await processor.downloadFile('/data/file.csv', '/tmp/file.csv');
-      expect(fs.existsSync).toHaveBeenCalledWith('/data/file.csv');
-      expect(fs.cpSync).toHaveBeenCalledWith('/data/file.csv', '/tmp/file.csv');
+      expect(fs.promises.access).toHaveBeenCalledWith('/data/file.csv');
+      expect(fs.promises.cp).toHaveBeenCalledWith('/data/file.csv', '/tmp/file.csv');
     });
 
     it('throws when local file not found', async () => {
-      fs.existsSync.mockReturnValue(false);
+      fs.promises.access.mockRejectedValue(new Error('ENOENT'));
       await expect(
         processor.downloadFile('/data/file.csv', '/tmp/file.csv')
       ).rejects.toThrow('File not found');
@@ -489,7 +496,7 @@ describe('CSVProcessor', () => {
 
       await processor.processFileFromURL(1, 'http://example.com/test.csv', 'test.csv');
 
-      expect(fs.unlinkSync).toHaveBeenCalledWith(path.join('/tmp', 'test.csv'));
+      expect(fs.promises.unlink).toHaveBeenCalledWith(path.join('/tmp', 'test.csv'));
     });
   });
 
@@ -630,9 +637,10 @@ describe('CSVProcessor', () => {
     });
 
     it('saves multiple records', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [{ id: 1, pan: 'enc_4000000000000002' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 2, pan: 'enc_5000000000000009' }] });
+      db.query.mockResolvedValue({ rows: [
+        { id: 1, pan: 'enc_4000000000000002' },
+        { id: 2, pan: 'enc_5000000000000009' }
+      ] });
 
       const rows = [
         makeValidRow({ pan: '4000000000000002' }),
@@ -641,7 +649,7 @@ describe('CSVProcessor', () => {
       const result = await processor.saveValidatedRecords(1, rows, 'test.csv');
 
       expect(result).toHaveLength(2);
-      expect(db.query).toHaveBeenCalledTimes(2);
+      expect(db.query).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -689,10 +697,10 @@ describe('CSVProcessor', () => {
 
       await processor.saveValidationErrors(42, errors);
 
-      expect(db.query).toHaveBeenCalledTimes(2);
+      expect(db.query).toHaveBeenCalledTimes(1);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO validation_errors'),
-        [42, 1, 'pan', '1234', 'Invalid length', 'error']
+        [42, 1, 'pan', '1234', 'Invalid length', 'error', 42, 2, 'phone', 'abc', 'Invalid format', 'error']
       );
     });
 
@@ -763,21 +771,18 @@ describe('CSVProcessor', () => {
 
       expect(result.success).toBe(true);
       expect(result.destinationPath).toBe('file:///dest/test.csv');
-      expect(fs.cpSync).toHaveBeenCalledWith(
+      expect(fs.promises.cp).toHaveBeenCalledWith(
         path.join('/source', 'test.csv'),
         path.join('/dest', 'test.csv')
       );
-      expect(fs.unlinkSync).toHaveBeenCalledWith(path.join('/source', 'test.csv'));
+      expect(fs.promises.unlink).toHaveBeenCalledWith(path.join('/source', 'test.csv'));
     });
 
     it('creates destination directory if needed', async () => {
-      fs.existsSync.mockReturnValue(true);
-      fs.existsSync.mockReturnValueOnce(true).mockReturnValueOnce(false);
-
       const result = await processor.moveFileToDestination('file:///source', 'file:///dest', 'test.csv');
 
       expect(result.success).toBe(true);
-      expect(fs.mkdirSync).toHaveBeenCalledWith('/dest', { recursive: true });
+      expect(fs.promises.mkdir).toHaveBeenCalledWith('/dest', { recursive: true });
     });
 
     it('handles SFTP source and SFTP destination', async () => {
@@ -802,7 +807,7 @@ describe('CSVProcessor', () => {
 
       expect(result.success).toBe(true);
       expect(remoteFileService.copyFromLocal).toHaveBeenCalled();
-      expect(fs.unlinkSync).toHaveBeenCalledWith(path.join('/source', 'test.csv'));
+      expect(fs.promises.unlink).toHaveBeenCalledWith(path.join('/source', 'test.csv'));
     });
 
     it('handles SFTP source with local destination', async () => {
@@ -820,7 +825,7 @@ describe('CSVProcessor', () => {
     });
 
     it('returns failure result on error', async () => {
-      fs.cpSync.mockImplementation(() => { throw new Error('Permission denied'); });
+      fs.promises.cp.mockRejectedValue(new Error('Permission denied'));
 
       const result = await processor.moveFileToDestination('file:///source', 'file:///dest', 'test.csv');
 
@@ -844,16 +849,14 @@ describe('CSVProcessor', () => {
       expect(result.success).toBe(true);
       expect(result.archivePath).toContain('OLD_');
       expect(result.archivePath).toContain('test.csv');
-      expect(fs.cpSync).toHaveBeenCalled();
+      expect(fs.promises.cp).toHaveBeenCalled();
     });
 
     it('creates archive directory if needed', async () => {
-      fs.existsSync.mockReturnValueOnce(true).mockReturnValueOnce(false);
-
       const result = await processor.archiveOldFile('file:///source', 'file:///archive', 'test.csv');
 
       expect(result.success).toBe(true);
-      expect(fs.mkdirSync).toHaveBeenCalledWith('/archive', { recursive: true });
+      expect(fs.promises.mkdir).toHaveBeenCalledWith('/archive', { recursive: true });
     });
 
     it('handles SFTP source and archive', async () => {
@@ -878,7 +881,7 @@ describe('CSVProcessor', () => {
       expect(mockSftp.exists).toHaveBeenCalled();
       expect(mockSftp.fastGet).toHaveBeenCalled();
       expect(mockSftp.fastPut).toHaveBeenCalled();
-      expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('/tmp/OLD_'));
+      expect(fs.promises.unlink).toHaveBeenCalledWith(expect.stringContaining('/tmp/OLD_'));
       expect(mockSftp.end).toHaveBeenCalled();
     });
 
@@ -895,13 +898,14 @@ describe('CSVProcessor', () => {
     });
 
     it('does not throw on non-existent source file', async () => {
-      fs.existsSync.mockReturnValue(false);
-      fs.existsSync.mockReturnValueOnce(false);
+      const err = new Error('ENOENT');
+      err.code = 'ENOENT';
+      fs.promises.access.mockRejectedValue(err);
 
       const result = await processor.archiveOldFile('file:///source', 'file:///archive', 'test.csv');
 
       expect(result.success).toBe(true);
-      expect(fs.cpSync).not.toHaveBeenCalled();
+      expect(fs.promises.cp).not.toHaveBeenCalled();
     });
 
     it('handles local source with SFTP archive', async () => {
@@ -928,8 +932,8 @@ describe('CSVProcessor', () => {
       const result = await processor.generateCorrectedCSV(rows, '/tmp/corrected.csv');
 
       expect(result).toBe('/tmp/corrected.csv');
-      expect(fs.writeFileSync).toHaveBeenCalled();
-      const written = fs.writeFileSync.mock.calls[0][1];
+      expect(fs.promises.writeFile).toHaveBeenCalled();
+      const written = fs.promises.writeFile.mock.calls[0][1];
       expect(written).toContain('language;firstName;lastName;pan;expiry;phone;behaviour;action');
       expect(written).toContain('John');
       expect(written).toContain('Jane');
@@ -939,8 +943,8 @@ describe('CSVProcessor', () => {
       const result = await processor.generateCorrectedCSV([], '/tmp/empty.csv');
 
       expect(result).toBe('/tmp/empty.csv');
-      expect(fs.writeFileSync).toHaveBeenCalled();
-      const written = fs.writeFileSync.mock.calls[0][1];
+      expect(fs.promises.writeFile).toHaveBeenCalled();
+      const written = fs.promises.writeFile.mock.calls[0][1];
       expect(written).toContain('language;firstName;lastName;pan;expiry;phone;behaviour;action');
     });
 
@@ -949,7 +953,7 @@ describe('CSVProcessor', () => {
 
       await processor.generateCorrectedCSV(rows, '/tmp/partial.csv');
 
-      const written = fs.writeFileSync.mock.calls[0][1];
+      const written = fs.promises.writeFile.mock.calls[0][1];
       expect(written).toContain('fr;;;;;;;');
     });
   });
