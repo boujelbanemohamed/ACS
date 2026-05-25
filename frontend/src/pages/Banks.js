@@ -33,7 +33,7 @@ const Banks = () => {
 
   const fetchBanks = async () => {
     try {
-      const bankParam = user?.role === 'bank' && user?.bank_id ? '?bankId=' + user.bank_id : '';
+      const bankParam = user?.role !== 'super_admin' && user?.bank_id ? '?bankId=' + user.bank_id : '';
       const response = await api.get('/banks' + bankParam);
       setBanks(response.data.data || []);
     } catch (error) {

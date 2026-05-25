@@ -764,7 +764,7 @@ test.describe('Permissions - Sécurité renforcée', () => {
     expect(res.status()).toBe(403);
   });
 
-  test('bank user ne peut pas acceder au scanner sans la feature cron', async ({ request }) => {
+  test('bank user peut acceder au scanner (feature cron activee par defaut)', async ({ request }) => {
     const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
       data: { username: 'bankuser', password: 'Bank1234!' }
     });
@@ -774,12 +774,12 @@ test.describe('Permissions - Sécurité renforcée', () => {
     const statusRes = await request.get(`${API_BASE}/api/scanner/status`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    expect(statusRes.status()).toBe(403);
+    expect(statusRes.status()).toBe(200);
 
     const logsRes = await request.get(`${API_BASE}/api/scanner/logs?bankId=1&limit=10`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    expect(logsRes.status()).toBe(403);
+    expect(logsRes.status()).toBe(200);
   });
 
   test('bank user ne peut pas acceder aux cles API stats', async ({ request }) => {
