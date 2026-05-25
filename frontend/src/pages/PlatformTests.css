@@ -349,3 +349,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.suite-line.preflight {
+  background: #f8f9ff;
+  border: 1px solid #e8ecf4;
+  margin-bottom: 2px;
+}
+
+.suite-line-name {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.suite-line-detail {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: #6c757d;
+  font-size: 11px;
+  max-width: 300px;
+  text-align: right;
+}
+
+.suite-detail {
+  font-size: 12px;
+  color: #6c757d;
+  max-width: 400px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

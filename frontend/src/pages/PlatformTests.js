@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader, Info } from 'lucide-react';
 import api from '../services/api';
 import './PlatformTests.css';
 
@@ -71,7 +71,7 @@ const PlatformTests = () => {
         done += p.completedSuites;
       }
     }
-    if (total === 0 && phases.some(p => p.status === 'running')) return 10;
+    if (total === 0 && phases.some(p => p.status === 'running')) return 5;
     if (total === 0) return 0;
     return Math.round((done / total) * 100);
   };
@@ -141,7 +141,7 @@ const RunningView = ({ progress, percent, currentPhase }) => {
 const PhaseProgress = ({ phase, active }) => {
   const completed = phase.completedSuites;
   const total = phase.totalSuites || completed || '?';
-  const phasePercent = total !== '?' && total > 0 ? Math.round((completed / total) * 100) : completed > 0 ? 50 : 0;
+  const isPreflight = phase.name === 'preflight';
 
   return (
     <div className={`phase-progress ${active ? 'active' : phase.done ? 'done' : 'pending'}`}>
@@ -166,9 +166,12 @@ const PhaseProgress = ({ phase, active }) => {
       {active && phase.suites.length > 0 && (
         <div className="suite-feed">
           {phase.suites.slice(-20).map((suite, i) => (
-            <div key={i} className={`suite-line ${suite.status}`}>
+            <div key={i} className={`suite-line ${suite.status} ${isPreflight ? 'preflight' : ''}`}>
               {suite.status === 'passed' ? <CheckCircle size={12} /> : <XCircle size={12} />}
-              <span>{suite.name}</span>
+              <span className="suite-line-name" title={suite.name}>{suite.name}</span>
+              {isPreflight && suite.detail && (
+                <span className="suite-line-detail">{suite.detail}</span>
+              )}
             </div>
           ))}
         </div>
@@ -218,39 +221,47 @@ const ResultsView = ({ data }) => {
   );
 };
 
-const PhaseResults = ({ phase }) => (
-  <div className="suite-section">
-    <div className="suite-header">
-      <h3>{phase.label} — {phase.totalTests} tests</h3>
-      <span className={`suite-overall ${phase.failedTests > 0 ? 'has-fails' : 'all-good'}`}>
-        {phase.failedTests > 0 ? <XCircle size={15} /> : <CheckCircle size={15} />}
-        {phase.totalSuites} suites — {phase.passedTests}/{phase.totalTests} tests
-      </span>
-    </div>
-    <div className="suite-table-wrap">
-      <table className="suite-table">
-        <thead>
-          <tr>
-            <th>Suite de tests</th>
-            <th>Statut</th>
-          </tr>
-        </thead>
-        <tbody>
-          {phase.suites.map((suite, i) => (
-            <tr key={i} className={suite.status === 'failed' ? 'row-failed' : ''}>
-              <td className="suite-name">{suite.name}</td>
-              <td>
-                <span className={`status-tag ${suite.status}`}>
-                  {suite.status === 'passed' ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                  {suite.status === 'passed' ? 'Passé' : 'Échoué'}
-                </span>
-              </td>
+const PhaseResults = ({ phase }) => {
+  const isPreflight = phase.name === 'preflight';
+
+  return (
+    <div className="suite-section">
+      <div className="suite-header">
+        <h3>{phase.label} — {phase.totalTests} {isPreflight ? 'vérifications' : 'tests'}</h3>
+        <span className={`suite-overall ${phase.failedTests > 0 ? 'has-fails' : 'all-good'}`}>
+          {phase.failedTests > 0 ? <XCircle size={15} /> : <CheckCircle size={15} />}
+          {phase.totalSuites} {isPreflight ? 'vérifications' : 'suites'} — {phase.passedTests}/{phase.totalTests} tests
+        </span>
+      </div>
+      <div className="suite-table-wrap">
+        <table className="suite-table">
+          <thead>
+            <tr>
+              <th>{isPreflight ? 'Vérification' : 'Script de test'}</th>
+              <th>Statut</th>
+              {isPreflight && <th>Détail</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {phase.suites.map((suite, i) => (
+              <tr key={i} className={suite.status === 'failed' ? 'row-failed' : ''}>
+                <td className="suite-name">{suite.name}</td>
+                <td>
+                  <span className={`status-tag ${suite.status}`}>
+                    {suite.status === 'passed' ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                    {suite.status === 'passed' ? 'Passé' : 'Échoué'}
+                  </span>
+                </td>
+                {isPreflight && (
+                  <td className="suite-detail">{suite.detail || '—'}</td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default PlatformTests;
