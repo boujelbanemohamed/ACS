@@ -228,8 +228,14 @@ router.post('/run', async (req, res) => {
 });
 
 router.get('/progress', (req, res) => {
-  if (!currentRun) return res.json({ success: true, data: null });
-  res.json({ success: true, data: currentRun });
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+  });
+  if (!currentRun) return res.end(JSON.stringify({ success: true, data: null }));
+  res.end(JSON.stringify({ success: true, data: currentRun }));
 });
 
 router.get('/status', (req, res) => {
