@@ -63,15 +63,15 @@ const PlatformTests = () => {
     let done = 0;
     for (const p of phases) {
       if (p.status === 'pending') continue;
-      if (p.totalSuites > 0) {
-        total += p.totalSuites;
+      if (p.done) {
+        total += Math.max(p.totalSuites, p.completedSuites, 1);
         done += p.completedSuites;
-      } else if (p.completedSuites > 0) {
-        total += 50;
-        done += p.completedSuites;
+      } else {
+        const est = Math.max(p.totalSuites, 50);
+        total += est;
+        done += Math.min(p.completedSuites, est);
       }
     }
-    if (total === 0 && phases.some(p => p.status === 'running')) return 5;
     if (total === 0) return 0;
     return Math.round((done / total) * 100);
   };
