@@ -153,6 +153,7 @@ app.use('/api/monitoring', authMiddleware, checkFeature('monitoring'), require('
 app.use('/api/audit-logs', authMiddleware, checkFeature('audit_logs'), require('./routes/audit'));
 app.use('/api/role-features', authMiddleware, require('./routes/roleFeatures'));
 app.use('/api/api-docs', authMiddleware, isSuperAdmin, apiDocsRoutes);
+app.use('/api/platform-tests', authMiddleware, isSuperAdmin, require('./routes/platformTests'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
