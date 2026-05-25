@@ -65,6 +65,14 @@ async function runPhase(idx) {
     return;
   }
 
+  if (phase.name === 'e2e') {
+    await runE2ETests(phase);
+    phase.done = true;
+    currentRun.currentPhase = idx + 1;
+    runPhase(idx + 1);
+    return;
+  }
+
   if (phase.name === 'integration') {
     await runIntegrationTests(phase);
     phase.done = true;
@@ -385,6 +393,81 @@ async function runQATests(phase) {
         }
       } else {
         phase.suites.push({ name: 'Exécution des tests QA', status: 'failed', detail: 'Aucun résultat trouvé dans la sortie' });
+        phase.totalTests = 1;
+        phase.failedTests = 1;
+      }
+      phase.status = phase.failedTests > 0 ? 'failed' : 'passed';
+      resolve();
+    });
+  });
+}
+
+async function runE2ETests(phase) {
+  await ensureFrontendRunning();
+  phase.status = 'running';
+  const child = spawn('npx', ['playwright', 'test', 'e2e.spec.js', '--reporter=json'], {
+    cwd: FRONTEND_DIR,
+    shell: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, NODE_PATH: require('path').join(FRONTEND_DIR, 'node_modules') }
+  });
+
+  let output = '';
+  child.stdout.on('data', d => { output += d.toString(); });
+  child.stderr.on('data', d => { output += d.toString(); });
+
+  function flattenSuites(suites) {
+    const specs = [];
+    function walk(arr) {
+      for (const s of arr) {
+        if (s.specs) {
+          for (const sp of s.specs) {
+            specs.push(sp);
+          }
+        }
+        if (s.suites) walk(s.suites);
+      }
+    }
+    walk(suites);
+    return specs;
+  }
+
+  return new Promise((resolve) => {
+    child.on('close', () => {
+      phase.rawOutput = output;
+      const jsonStart = output.indexOf('{');
+      const jsonEnd = output.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd > jsonStart) {
+        try {
+          const report = JSON.parse(output.slice(jsonStart, jsonEnd + 1));
+          const specs = flattenSuites(report.suites || []);
+          phase.totalTests = specs.length;
+          phase.totalSuites = specs.length;
+          phase.passedTests = specs.filter(s => s.tests && s.tests[0] && (s.tests[0].status === 'expected')).length;
+          phase.failedTests = specs.filter(s => s.tests && s.tests[0] && (s.tests[0].status === 'unexpected')).length;
+          phase.suites = specs.map(s => {
+            const test = s.tests && s.tests[0];
+            const result = test && test.results && test.results[0];
+            const isFailed = test && test.status === 'unexpected';
+            return {
+              name: s.title || 'unknown',
+              status: isFailed ? 'failed' : 'passed',
+              detail: '',
+              totalTests: 1,
+              passedTests: isFailed ? 0 : 1,
+              failedTests: isFailed ? 1 : 0,
+              errors: isFailed && result && result.errors && result.errors.length > 0
+                ? result.errors.map(e => ({ title: s.title, failureMessages: [e.message || e.stack || ''] })) : [],
+            };
+          });
+          phase.completedSuites = phase.suites.length;
+        } catch (e) {
+          phase.suites.push({ name: 'Parsing des résultats E2E', status: 'failed', detail: e.message });
+          phase.totalTests = 1;
+          phase.failedTests = 1;
+        }
+      } else {
+        phase.suites.push({ name: 'Exécution des tests E2E', status: 'failed', detail: 'Aucun résultat JSON trouvé dans la sortie' });
         phase.totalTests = 1;
         phase.failedTests = 1;
       }
@@ -824,7 +907,8 @@ router.post('/run', async (req, res) => {
       { name: 'preflight', label: 'Pré-vérifications', status: 'running', suites: [], completedSuites: 0, totalSuites: 8, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
       { name: 'backend', label: 'Backend', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
       { name: 'frontend', label: 'Frontend', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
-      { name: 'qa', label: 'Tests QA (E2E)', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
+      { name: 'qa', label: 'Tests QA (E2E UI)', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
+      { name: 'e2e', label: 'Tests E2E (Playwright API + UI)', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
       { name: 'integration', label: 'Tests Intégration (API)', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
       { name: 'load', label: 'Tests Charge (50 req concurrentes)', status: 'pending', suites: [], completedSuites: 0, totalSuites: 0, totalTests: 0, passedTests: 0, failedTests: 0, done: false },
     ],
@@ -944,6 +1028,8 @@ router.get('/script/:phaseIdx/:suiteIdx', (req, res) => {
     fullPath = path.join(FRONTEND_DIR, suite.name);
   } else if (phase.name === 'qa') {
     fullPath = path.join(BACKEND_DIR, 'tests', 'qa', 'run.cjs');
+  } else if (phase.name === 'e2e') {
+    fullPath = path.join(FRONTEND_DIR, 'tests', 'e2e.spec.js');
   } else {
     return res.status(400).json({ success: false, message: 'Cette phase ne contient pas de fichier de script' });
   }
