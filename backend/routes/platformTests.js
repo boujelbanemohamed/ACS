@@ -214,10 +214,12 @@ async function checkDatabase() {
 }
 
 async function checkRedis() {
-  let Redis;
-  try { Redis = require('ioredis'); } catch { Redis = require('redis'); }
+  const Redis = require('ioredis');
   const client = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', { connectTimeout: 3000, maxRetries: 1, retryStrategy: () => null, lazyConnect: true });
-  await client.connect();
+  await Promise.race([
+    client.connect(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 3s')), 3000)),
+  ]);
   await client.quit();
   return { passed: true, message: '✅ Redis connecté' };
 }
