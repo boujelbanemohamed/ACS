@@ -232,3 +232,133 @@ describe('Banks Routes', () => {
     });
   });
 });
+
+describe('Permissions par rôle', () => {
+  describe('GET /api/banks', () => {
+    it('permet à super_admin', async () => {
+      db.query.mockResolvedValueOnce({
+        rows: [{ id: 1, name: 'Bank A', code: 'BA', total_records: 10, total_files_processed: 5 }]
+      });
+      const res = await request(createTestApp())
+        .get('/api/banks')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('permet à bank_admin', async () => {
+      db.query.mockResolvedValueOnce({
+        rows: [{ id: 1, name: 'Bank A', code: 'BA', total_records: 10, total_files_processed: 5 }]
+      });
+      const res = await request(createTestApp())
+        .get('/api/banks')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('permet à bank (filtré)', async () => {
+      db.query.mockResolvedValueOnce({
+        rows: [{ id: 2, name: 'Bank B', code: 'BB', total_records: 3, total_files_processed: 1 }]
+      });
+      const res = await request(createTestApp())
+        .get('/api/banks')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '2');
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('POST /api/banks', () => {
+    it('permet à super_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 10, code: 'NB', name: 'New Bank' }] });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .post('/api/banks')
+        .send({ code: 'NB', name: 'New Bank', source_url: 'http://s.com', destination_url: 'http://d.com', old_url: 'http://o.com', xml_output_url: 'http://x.com' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(201);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .post('/api/banks')
+        .send({ code: 'NB', name: 'New Bank' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .post('/api/banks')
+        .send({ code: 'NB', name: 'New Bank' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('PUT /api/banks/:id', () => {
+    it('permet à super_admin', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Updated', code: 'UP' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Old' }] });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .put('/api/banks/1')
+        .send({ name: 'Updated' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .put('/api/banks/1')
+        .send({ name: 'Updated' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .put('/api/banks/1')
+        .send({ name: 'Updated' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('DELETE /api/banks/:id', () => {
+    it('permet à super_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Delete Me' }] });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .delete('/api/banks/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .delete('/api/banks/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .delete('/api/banks/1')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+});

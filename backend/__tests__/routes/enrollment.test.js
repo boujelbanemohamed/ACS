@@ -180,3 +180,38 @@ describe('Enrollment Routes', () => {
     });
   });
 });
+
+describe('Permissions par rôle', () => {
+  describe('POST /api/enrollment/upload', () => {
+    it('permet à super_admin', async () => {
+      enrollmentService.processEnrollmentReportFromContent.mockResolvedValue({
+        success: true,
+        records: [{ id: 1, status: 'matched' }]
+      });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .post('/api/enrollment/upload')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin')
+        .attach('file', Buffer.from('<xml>test</xml>'), 'report.xml')
+        .field('bankId', '1');
+      expect(res.status).toBe(200);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .post('/api/enrollment/upload')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .post('/api/enrollment/upload')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+});

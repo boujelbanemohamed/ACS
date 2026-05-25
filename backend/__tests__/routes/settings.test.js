@@ -124,3 +124,34 @@ describe('Settings Routes', () => {
     });
   });
 });
+
+describe('Permissions par rôle', () => {
+  describe('GET /api/settings', () => {
+    it('permet à super_admin', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ exists: true }] })
+        .mockResolvedValueOnce({ rows: [{ key: 'cron_schedule', value: '*/5 * * * *' }] });
+      const res = await request(createTestApp())
+        .get('/api/settings')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .get('/api/settings')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .get('/api/settings')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+});

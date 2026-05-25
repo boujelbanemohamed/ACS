@@ -1,11 +1,12 @@
 const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
+const { filterByBank } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Get all XML logs with pagination
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { 
       bankId, 
@@ -85,7 +86,7 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Get XML statistics
-router.get('/stats/summary', authMiddleware, async (req, res) => {
+router.get('/stats/summary', authMiddleware, filterByBank, async (req, res) => {
   try {
     const { bankId } = req.query;
     

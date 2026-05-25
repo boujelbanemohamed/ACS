@@ -125,3 +125,83 @@ describe('Scanner Routes', () => {
     });
   });
 });
+
+describe('Permissions par rôle', () => {
+  describe('POST /api/scanner/trigger', () => {
+    it('permet à super_admin', async () => {
+      mockCronService.run.mockResolvedValue({ scanned: 5, processed: 3, errors: 0 });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .post('/api/scanner/trigger')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .post('/api/scanner/trigger')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .post('/api/scanner/trigger')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('GET /api/scanner/status', () => {
+    it('permet à super_admin', async () => {
+      mockCronService.getStatus.mockReturnValue({
+        enabled: true,
+        isScanning: false,
+        lastScan: new Date(),
+        nextScan: new Date(Date.now() + 3600000),
+        schedule: '*/5 * * * *',
+        description: 'Every 5 minutes'
+      });
+      const res = await request(createTestApp())
+        .get('/api/scanner/status')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('permet à bank_admin', async () => {
+      mockCronService.getStatus.mockReturnValue({
+        enabled: true,
+        isScanning: false,
+        lastScan: new Date(),
+        nextScan: new Date(Date.now() + 3600000),
+        schedule: '*/5 * * * *',
+        description: 'Every 5 minutes'
+      });
+      const res = await request(createTestApp())
+        .get('/api/scanner/status')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('permet à bank', async () => {
+      mockCronService.getStatus.mockReturnValue({
+        enabled: true,
+        isScanning: false,
+        lastScan: new Date(),
+        nextScan: new Date(Date.now() + 3600000),
+        schedule: '*/5 * * * *',
+        description: 'Every 5 minutes'
+      });
+      const res = await request(createTestApp())
+        .get('/api/scanner/status')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(200);
+    });
+  });
+});

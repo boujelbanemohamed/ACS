@@ -103,7 +103,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
   }
 });
 
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
     const getQuery = 'SELECT pan, bank_id FROM processed_records WHERE id = $1';
     const getResult = await db.query(getQuery, [req.params.id]);

@@ -218,3 +218,65 @@ describe('API Keys Routes', () => {
     });
   });
 });
+
+describe('Permissions par rôle', () => {
+  describe('POST /api/api-keys', () => {
+    it('permet à super_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'New Key', api_key: 'acs_' + 'a'.repeat(64), bank_id: null }] });
+      auditService.logAction.mockResolvedValue();
+      const res = await request(createTestApp())
+        .post('/api/api-keys')
+        .send({ name: 'New Key' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('bloque bank_admin', async () => {
+      const res = await request(createTestApp())
+        .post('/api/api-keys')
+        .send({ name: 'New Key' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(403);
+    });
+
+    it('bloque bank', async () => {
+      const res = await request(createTestApp())
+        .post('/api/api-keys')
+        .send({ name: 'New Key' })
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('GET /api/api-keys', () => {
+    it('permet à super_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Test Key', api_key: 'acs_...', bank_name: 'Bank A' }] });
+      const res = await request(createTestApp())
+        .get('/api/api-keys')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'super_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('permet à bank_admin', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Test Key', api_key: 'acs_...', bank_name: 'Bank A' }] });
+      const res = await request(createTestApp())
+        .get('/api/api-keys')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin');
+      expect(res.status).toBe(200);
+    });
+
+    it('permet à bank', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Test Key', api_key: 'acs_...', bank_name: 'Bank A' }] });
+      const res = await request(createTestApp())
+        .get('/api/api-keys')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank');
+      expect(res.status).toBe(200);
+    });
+  });
+});

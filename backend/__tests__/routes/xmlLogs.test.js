@@ -3,6 +3,17 @@ const request = require('supertest');
 
 jest.mock('../../config/database');
 
+jest.mock('../../middleware/roleMiddleware', () => ({
+  filterByBank: (req, res, next) => {
+    if (req.user.role === 'super_admin') return next();
+    if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
+      req.query.bankId = req.user.bank_id;
+      req.bankFilter = req.user.bank_id;
+    }
+    next();
+  }
+}));
+
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, res, next) => {
     if (req.headers['x-test-role']) {
@@ -122,6 +133,62 @@ describe('XML Logs Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('Permissions par rôle', () => {
+    for (const role of ['super_admin', 'bank_admin', 'bank']) {
+      describe(`GET /api/xml-logs en tant que ${role}`, () => {
+        it('peut accéder à la liste', async () => {
+          db.query
+            .mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 1 }] })
+            .mockResolvedValueOnce({ rows: [{ count: '1' }] });
+          const headers = { 'Authorization': 'Bearer token', 'x-test-role': role };
+          if (role !== 'super_admin') headers['x-test-bank-id'] = '1';
+          const res = await request(createTestApp()).get('/api/xml-logs').set(headers);
+          expect(res.status).toBe(200);
+        });
+
+        it('peut accéder aux stats', async () => {
+          db.query.mockResolvedValueOnce({ rows: [{ total_xml: 5 }] });
+          const headers = { 'Authorization': 'Bearer token', 'x-test-role': role };
+          if (role !== 'super_admin') headers['x-test-bank-id'] = '2';
+          const res = await request(createTestApp()).get('/api/xml-logs/stats/summary').set(headers);
+          expect(res.status).toBe(200);
+        });
+
+        it('peut accéder à un log par ID', async () => {
+          db.query.mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 1 }] });
+          const headers = { 'Authorization': 'Bearer token', 'x-test-role': role };
+          if (role !== 'super_admin') headers['x-test-bank-id'] = '1';
+          const res = await request(createTestApp()).get('/api/xml-logs/1').set(headers);
+          expect(res.status).toBe(200);
+        });
+      });
+    }
+
+    it('filterByBank injecte bank_id pour bank', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 3 }] })
+        .mockResolvedValueOnce({ rows: [{ count: '1' }] });
+      await request(createTestApp())
+        .get('/api/xml-logs')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '3');
+      expect(db.query.mock.calls[0][1]).toContain(3);
+    });
+
+    it('filterByBank injecte bank_id pour bank_admin', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 5 }] })
+        .mockResolvedValueOnce({ rows: [{ count: '1' }] });
+      await request(createTestApp())
+        .get('/api/xml-logs')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '5');
+      expect(db.query.mock.calls[0][1]).toContain(5);
     });
   });
 });

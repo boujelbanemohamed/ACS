@@ -72,12 +72,22 @@ jest.mock('../../services/queueService', () => ({
 
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, res, next) => {
-    req.user = { id: 1, username: 'admin', role: 'super_admin', bank_id: null };
+    req.user = {
+      id: parseInt(req.headers['x-test-id'] || '1'),
+      username: req.headers['x-test-username'] || 'admin',
+      role: req.headers['x-test-role'] || 'super_admin',
+      bank_id: parseInt(req.headers['x-test-bank-id'] || '0') || null
+    };
     next();
   }
 }));
 jest.mock('../../middleware/roleMiddleware', () => ({
-  forceBankId: (req, res, next) => next()
+  forceBankId: (req, res, next) => {
+    if (req.user.role !== 'super_admin' && req.user.bank_id) {
+      req.body.bankId = req.user.bank_id;
+    }
+    next();
+  }
 }));
 
 const db = require('../../config/database');
@@ -944,6 +954,60 @@ describe('Processing Routes', () => {
       expect(res.status).toBe(202);
       expect(res.body.data.jobId).toBeDefined();
       expect(res.body.data.status).toBe('pending');
+    });
+  });
+
+  describe('Permissions par rôle', () => {
+    const publicRoutes = [
+      { method: 'get', path: '/template' },
+      { method: 'get', path: '/status/test-job' },
+      { method: 'get', path: '/queue/stats' },
+    ];
+    const bankScopedRoutes = [
+      { method: 'post', path: '/process-url', body: { url: 'http://example.com/file.csv', bankId: 1 } },
+      { method: 'post', path: '/validate-manual', body: { entries: [{ pan: '4000056655665556' }] } },
+      { method: 'post', path: '/process-manual', body: { entries: [{ pan: '4000056655665556' }] } },
+    ];
+
+    for (const role of ['super_admin', 'bank_admin', 'bank']) {
+      describe(`en tant que ${role}`, () => {
+        const headers = { 'Authorization': 'Bearer token', 'x-test-role': role };
+        if (role === 'bank_admin' || role === 'bank') {
+          headers['x-test-bank-id'] = '1';
+        }
+
+        for (const r of publicRoutes) {
+          it(`accede à GET ${r.path}`, async () => {
+            const res = await request(createTestApp())[r.method](r.path).set(headers);
+            expect(res.status).not.toBe(401);
+            expect(res.status).not.toBe(403);
+          });
+        }
+
+        for (const r of bankScopedRoutes) {
+          it(`accede à POST ${r.path} avec forceBankId`, async () => {
+            const res = await request(createTestApp())[r.method](r.path).set(headers).send(r.body);
+            expect(res.status).not.toBe(401);
+            expect(res.status).not.toBe(403);
+          });
+        }
+      });
+    }
+
+    it('forceBankId injecte bank_id pour bank', async () => {
+      const app = createTestApp();
+      const db = require('../../config/database');
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 5, code: 'BT', name: 'Bank Test', is_active: true }] })
+        .mockResolvedValueOnce({ rows: [] });
+      mockCsvProcessor.processFileFromURL.mockResolvedValue({ fileLog: { id: 10 }, errorCount: 0, successCount: 5 });
+      const res = await request(app)
+        .post('/api/processing/process-url')
+        .set('Authorization', 'Bearer token')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '5')
+        .send({ baseUrl: 'http://example.com/file.csv' });
+      expect(res.status).toBe(202);
     });
   });
 });
