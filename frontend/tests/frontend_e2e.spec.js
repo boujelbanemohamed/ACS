@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'Admin@123';
-const API_BASE = process.env.API_URL || 'http://localhost:8000';
+const API_BASE = process.env.API_URL || 'http://localhost:5001';
 
 async function loginAsAdmin(page) {
   await page.goto('/login');
@@ -20,7 +20,7 @@ async function getAdminToken(request) {
 }
 
 test.describe('Mot de passe oublié - Tous les rôles', () => {
-  const API_BASE_LOCAL = process.env.API_URL || 'http://localhost:8000';
+  const API_BASE_LOCAL = API_BASE;
 
   test('forgot-password API retourne 200 pour super_admin', async ({ request }) => {
     const res = await request.post(`${API_BASE_LOCAL}/api/auth/forgot-password`, {
@@ -398,7 +398,33 @@ test.describe('Paramètres - API', () => {
 });
 
 test.describe('Scanner - API', () => {
-  test('recupere le statut du scanner', async ({ request }) => {
+  let baUserId = null;
+  let baToken = null;
+
+  test.beforeAll(async ({ request }) => {
+    const adminToken = await getAdminToken(request);
+    const baRes = await request.post(`${API_BASE}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      data: { username: `e2e_ba_scanner_${Date.now()}`, email: `ba_scanner_${Date.now()}@test.com`, password: 'TestBa1234!', role: 'bank_admin', bankId: 1 }
+    });
+    if (baRes.status() === 200) {
+      baUserId = (await baRes.json()).data.id;
+      const baLogin = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: `e2e_ba_scanner_${Date.now()}`, password: 'TestBa1234!' }
+      });
+      if (baLogin.status() === 200) baToken = (await baLogin.json()).data.token;
+    }
+  });
+
+  test.afterAll(async ({ request }) => {
+    if (!baUserId) return;
+    const adminToken = await getAdminToken(request);
+    await request.delete(`${API_BASE}/api/users/${baUserId}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+  });
+
+  test('super_admin recupere le statut du scanner', async ({ request }) => {
     const token = await getAdminToken(request);
     const res = await request.get(`${API_BASE}/api/scanner/status`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -409,13 +435,157 @@ test.describe('Scanner - API', () => {
     expect(body.data).toHaveProperty('enabled');
   });
 
-  test('recupere les logs du scanner', async ({ request }) => {
+  test('super_admin recupere les logs du scanner', async ({ request }) => {
     const token = await getAdminToken(request);
     const res = await request.get(`${API_BASE}/api/scanner/logs?limit=10`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     expect(res.status()).toBe(200);
     expect(Array.isArray((await res.json()).data)).toBe(true);
+  });
+
+  test('bank_admin recupere le statut du scanner', async ({ request }) => {
+    if (!baToken) return;
+    const res = await request.get(`${API_BASE}/api/scanner/status`, {
+      headers: { Authorization: `Bearer ${baToken}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveProperty('enabled');
+  });
+
+  test('bank_admin recupere les logs du scanner', async ({ request }) => {
+    if (!baToken) return;
+    const res = await request.get(`${API_BASE}/api/scanner/logs?limit=10`, {
+      headers: { Authorization: `Bearer ${baToken}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.data)).toBe(true);
+  });
+});
+
+test.describe('Monitoring - Accès par rôle', () => {
+  let createdUserId = null;
+  let bankAdminToken = null;
+  let bankUserToken = null;
+
+  test.beforeAll(async ({ request }) => {
+    const adminToken = await getAdminToken(request);
+    const baRes = await request.post(`${API_BASE}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      data: { username: `e2e_ba_mon_${Date.now()}`, email: `ba_mon_${Date.now()}@test.com`, password: 'TestBa1234!', role: 'bank_admin', bankId: 1 }
+    });
+    if (baRes.status() === 200) {
+      createdUserId = (await baRes.json()).data.id;
+      const baLogin = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: `e2e_ba_mon_${Date.now()}`, password: 'TestBa1234!' }
+      });
+      if (baLogin.status() === 200) bankAdminToken = (await baLogin.json()).data.token;
+    }
+
+    const buLogin = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: 'bankuser', password: 'Bank1234!' }
+    });
+    if (buLogin.status() === 200) bankUserToken = (await buLogin.json()).data.token;
+  });
+
+  test.afterAll(async ({ request }) => {
+    if (!createdUserId) return;
+    const adminToken = await getAdminToken(request);
+    await request.delete(`${API_BASE}/api/users/${createdUserId}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+  });
+
+  test('bank_admin peut acceder a health et recoit donnees simplifiees', async ({ request }) => {
+    if (!bankAdminToken) return;
+    const res = await request.get(`${API_BASE}/api/monitoring/health`, {
+      headers: { Authorization: `Bearer ${bankAdminToken}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveProperty('globalStatus');
+    expect(body.data).toHaveProperty('components');
+    expect(body.data).toHaveProperty('system');
+    expect(body.data.system).toHaveProperty('role');
+    expect(body.data.system).not.toHaveProperty('nodeVersion');
+    expect(body.data.system).not.toHaveProperty('memory');
+  });
+
+  test('bank_admin peut acceder a debug avec bank_id filtre', async ({ request }) => {
+    if (!bankAdminToken) return;
+    const res = await request.get(`${API_BASE}/api/monitoring/debug?bankId=1`, {
+      headers: { Authorization: `Bearer ${bankAdminToken}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveProperty('summary');
+    expect(body.data).toHaveProperty('file_errors_by_status');
+  });
+
+  test('bank_user recoit donnees simplifiees si la feature est activee', async ({ request }) => {
+    if (!bankUserToken) return;
+    const res = await request.get(`${API_BASE}/api/monitoring/health`, {
+      headers: { Authorization: `Bearer ${bankUserToken}` }
+    });
+    if (res.status() === 403) return;
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveProperty('globalStatus');
+    expect(body.data.system).toHaveProperty('role');
+  });
+});
+
+test.describe('Scanner - Accès par rôle', () => {
+  let createdUserId = null;
+  let bankAdminToken = null;
+
+  test.beforeAll(async ({ request }) => {
+    const adminToken = await getAdminToken(request);
+    const baRes = await request.post(`${API_BASE}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      data: { username: `e2e_ba_scan_${Date.now()}`, email: `ba_scan_${Date.now()}@test.com`, password: 'TestBa1234!', role: 'bank_admin', bankId: 1 }
+    });
+    if (baRes.status() === 200) {
+      createdUserId = (await baRes.json()).data.id;
+      const baLogin = await request.post(`${API_BASE}/api/auth/login`, {
+        data: { username: `e2e_ba_scan_${Date.now()}`, password: 'TestBa1234!' }
+      });
+      if (baLogin.status() === 200) bankAdminToken = (await baLogin.json()).data.token;
+    }
+  });
+
+  test.afterAll(async ({ request }) => {
+    if (!createdUserId) return;
+    const adminToken = await getAdminToken(request);
+    await request.delete(`${API_BASE}/api/users/${createdUserId}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+  });
+
+  test('bank_admin peut acceder au scanner status', async ({ request }) => {
+    if (!bankAdminToken) return;
+    const res = await request.get(`${API_BASE}/api/scanner/status`, {
+      headers: { Authorization: `Bearer ${bankAdminToken}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveProperty('enabled');
+  });
+
+  test('bank_admin peut acceder aux logs scanner', async ({ request }) => {
+    if (!bankAdminToken) return;
+    const res = await request.get(`${API_BASE}/api/scanner/logs?limit=5`, {
+      headers: { Authorization: `Bearer ${bankAdminToken}` }
+    });
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.data)).toBe(true);
   });
 });
 
@@ -559,7 +729,7 @@ test.describe('Permissions - Sécurité renforcée', () => {
     expect(res.status()).toBe(403);
   });
 
-  test('bank user ne peut pas acceder au monitoring', async ({ request }) => {
+  test('bank user peut acceder au monitoring si feature activee (donnees simplifiees sans nodeVersion)', async ({ request }) => {
     const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
       data: { username: 'bankuser', password: 'Bank1234!' }
     });
@@ -569,7 +739,47 @@ test.describe('Permissions - Sécurité renforcée', () => {
     const res = await request.get(`${API_BASE}/api/monitoring/health`, {
       headers: { Authorization: `Bearer ${token}` }
     });
+    // Par defaut bank user n'a pas monitoring -> 403
+    // Si super_admin active la feature -> 200 avec donnees simplifiees
+    if (res.status() === 403) return;
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveProperty('globalStatus');
+    expect(body.data.system).toHaveProperty('role');
+    expect(body.data.system).not.toHaveProperty('nodeVersion');
+    expect(body.data.system).not.toHaveProperty('memory');
+  });
+
+  test('bank user ne peut pas acceder au monitoring debug sans la feature', async ({ request }) => {
+    const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: 'bankuser', password: 'Bank1234!' }
+    });
+    if (loginRes.status() !== 200) return;
+    const { token } = (await loginRes.json()).data;
+
+    const res = await request.get(`${API_BASE}/api/monitoring/debug?bankId=1`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     expect(res.status()).toBe(403);
+  });
+
+  test('bank user ne peut pas acceder au scanner sans la feature cron', async ({ request }) => {
+    const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
+      data: { username: 'bankuser', password: 'Bank1234!' }
+    });
+    if (loginRes.status() !== 200) return;
+    const { token } = (await loginRes.json()).data;
+
+    const statusRes = await request.get(`${API_BASE}/api/scanner/status`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(statusRes.status()).toBe(403);
+
+    const logsRes = await request.get(`${API_BASE}/api/scanner/logs?bankId=1&limit=10`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    expect(logsRes.status()).toBe(403);
   });
 
   test('bank user ne peut pas acceder aux cles API stats', async ({ request }) => {

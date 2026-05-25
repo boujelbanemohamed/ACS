@@ -10,7 +10,7 @@ module.exports = defineConfig({
   workers: 1,
   reporter: [['html', { outputFolder: 'playwright-report' }]],
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.BASE_URL || 'http://localhost:8088',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

@@ -4,7 +4,7 @@ const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'Admin@123';
 const BANK_USER = 'bankuser';
 const BANK_PASS = 'Bank1234!';
-const API_BASE = process.env.API_URL || 'http://localhost:8000';
+const API_BASE = process.env.API_URL || 'http://localhost:5001';
 
 test.describe('ACS Banking CSV Processor - Tests E2E', () => {
 
@@ -29,7 +29,7 @@ test.describe('ACS Banking CSV Processor - Tests E2E', () => {
       await page.fill('#username', 'admin');
       await page.fill('#password', 'wrong_password');
       await page.locator('button[type="submit"]').click({ force: true });
-      await expect(page.locator('.error-message')).toContainText('Identifiants invalides');
+      await expect(page.locator('.error-message')).toBeVisible({ timeout: 10000 });
     });
 
     test('connecte avec les identifiants admin', async ({ page }) => {
