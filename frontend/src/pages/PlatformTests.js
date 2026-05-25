@@ -1,35 +1,91 @@
-import React, { useState } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader } from 'lucide-react';
 import api from '../services/api';
 import './PlatformTests.css';
 
+const POLL_INTERVAL = 1000;
+
 const PlatformTests = () => {
-  const [results, setResults] = useState(null);
+  const [runId, setRunId] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const startPolling = (id) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.get('/platform-tests/progress');
+        const data = res.data.data;
+        if (data) {
+          setProgress(data);
+          if (data.finished) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setLoading(false);
+          }
+        }
+      } catch {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    }, POLL_INTERVAL);
+  };
 
   const runTests = async () => {
     setLoading(true);
     setError(null);
-    setResults(null);
+    setProgress(null);
+    setRunId(null);
     try {
       const res = await api.post('/platform-tests/run');
-      setResults(res.data.data);
+      const id = res.data.data.runId;
+      setRunId(id);
+      startPolling(id);
     } catch (err) {
       const msg = err.response?.status === 409
         ? 'Des tests sont déjà en cours d\'exécution.'
         : err.response?.data?.message || err.message || 'Erreur lors de l\'exécution des tests';
       setError(msg);
-    } finally {
       setLoading(false);
     }
+  };
+
+  const overallPercent = () => {
+    if (!progress || progress.finished) return 100;
+    const phases = progress.phases || [];
+    let total = 0;
+    let done = 0;
+    for (const p of phases) {
+      if (p.status === 'pending') continue;
+      if (p.totalSuites > 0) {
+        total += p.totalSuites;
+        done += p.completedSuites;
+      } else if (p.completedSuites > 0) {
+        total += 50;
+        done += p.completedSuites;
+      }
+    }
+    if (total === 0 && phases.some(p => p.status === 'running')) return 10;
+    if (total === 0) return 0;
+    return Math.round((done / total) * 100);
+  };
+
+  const currentPhaseObj = () => {
+    if (!progress) return null;
+    return progress.phases?.find(p => p.status === 'running' || p.status === 'counting') || null;
   };
 
   return (
     <div className="platform-tests-page">
       <div className="page-header">
         <h1><Shield size={28} /> Tests Plateforme</h1>
-        <button className="btn btn-primary" onClick={runTests} disabled={loading}>
+        <button className="btn-primary" onClick={runTests} disabled={loading}>
           {loading ? <RefreshCw size={18} className="spin" /> : <Play size={18} />}
           {loading ? 'Exécution en cours...' : 'Lancer les tests'}
         </button>
@@ -43,26 +99,92 @@ const PlatformTests = () => {
         </div>
       )}
 
-      {loading && !results && (
+      {loading && !progress && (
         <div className="loading-state">
           <RefreshCw size={32} className="spin" />
-          <p>Exécution des tests backend et frontend...</p>
+          <p>Démarrage des tests...</p>
         </div>
       )}
 
-      {results && <TestResults data={results} />}
+      {loading && progress && !progress.finished && (
+        <RunningView progress={progress} percent={overallPercent()} currentPhase={currentPhaseObj()} />
+      )}
+
+      {progress?.finished && <ResultsView data={progress} />}
     </div>
   );
 };
 
-const TestResults = ({ data }) => {
-  const { summary, backend, frontend } = data;
+const RunningView = ({ progress, percent, currentPhase }) => {
+  const current = currentPhase;
+  const currentLabel = current ? current.label : 'Finalisation';
+
+  return (
+    <div className="running-view">
+      <div className="progress-header">
+        <Loader size={20} className="spin" />
+        <span>Exécution des tests en cours — <strong>{currentLabel}</strong></span>
+      </div>
+
+      <div className="progress-bar-track">
+        <div className="progress-bar-fill" style={{ width: percent + '%' }} />
+        <span className="progress-label">{percent}%</span>
+      </div>
+
+      {progress.phases.map((phase, i) => (
+        <PhaseProgress key={i} phase={phase} active={phase.status === 'running' || phase.status === 'counting'} />
+      ))}
+    </div>
+  );
+};
+
+const PhaseProgress = ({ phase, active }) => {
+  const completed = phase.completedSuites;
+  const total = phase.totalSuites || completed || '?';
+  const phasePercent = total !== '?' && total > 0 ? Math.round((completed / total) * 100) : completed > 0 ? 50 : 0;
+
+  return (
+    <div className={`phase-progress ${active ? 'active' : phase.done ? 'done' : 'pending'}`}>
+      <div className="phase-head">
+        <span className="phase-badge">
+          {phase.done
+            ? (phase.status === 'passed' ? <CheckCircle size={16} /> : <XCircle size={16} />)
+            : active
+              ? <Loader size={16} className="spin" />
+              : <Clock size={16} />
+          }
+          {phase.label}
+        </span>
+        <span className="phase-stats">
+          {phase.done
+            ? `${phase.passedTests}/${phase.totalTests} tests`
+            : `${completed}/${total} suites`
+          }
+        </span>
+      </div>
+
+      {active && phase.suites.length > 0 && (
+        <div className="suite-feed">
+          {phase.suites.slice(-20).map((suite, i) => (
+            <div key={i} className={`suite-line ${suite.status}`}>
+              {suite.status === 'passed' ? <CheckCircle size={12} /> : <XCircle size={12} />}
+              <span>{suite.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ResultsView = ({ data }) => {
+  const summary = data.summary;
   const allPassed = summary.failed === 0;
 
   return (
     <div className="test-results">
       <div className="summary-row">
-        <div className={`summary-card total-card`}>
+        <div className="summary-card total-card">
           <span className="summary-label">Total</span>
           <span className="summary-value">{summary.total.toLocaleString()}</span>
         </div>
@@ -89,60 +211,46 @@ const TestResults = ({ data }) => {
         </div>
       </div>
 
-      <SuiteSection title={`Backend — ${backend.numTotalTests} tests`} data={backend} />
-      <SuiteSection title={`Frontend — ${frontend.numTotalTests} tests`} data={frontend} />
+      {data.phases.map((phase, i) => (
+        <PhaseResults key={i} phase={phase} />
+      ))}
     </div>
   );
 };
 
-const SuiteSection = ({ title, data }) => {
-  if (data.error) {
-    return (
-      <div className="suite-section">
-        <div className="suite-header"><h3>{title}</h3></div>
-        <div className="error-banner"><AlertCircle size={16} /> {data.error}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="suite-section">
-      <div className="suite-header">
-        <h3>{title}</h3>
-        <span className={`suite-overall ${data.numFailedTests > 0 ? 'has-fails' : 'all-good'}`}>
-          {data.numFailedTests > 0 ? <XCircle size={15} /> : <CheckCircle size={15} />}
-          {data.numPassedTestSuites}/{data.numTotalTestSuites} suites — {data.numPassedTests}/{data.numTotalTests} tests
-        </span>
-      </div>
-      <div className="suite-table-wrap">
-        <table className="suite-table">
-          <thead>
-            <tr>
-              <th>Suite de tests</th>
-              <th>Statut</th>
-              <th>Tests</th>
-              <th>Durée</th>
+const PhaseResults = ({ phase }) => (
+  <div className="suite-section">
+    <div className="suite-header">
+      <h3>{phase.label} — {phase.totalTests} tests</h3>
+      <span className={`suite-overall ${phase.failedTests > 0 ? 'has-fails' : 'all-good'}`}>
+        {phase.failedTests > 0 ? <XCircle size={15} /> : <CheckCircle size={15} />}
+        {phase.totalSuites} suites — {phase.passedTests}/{phase.totalTests} tests
+      </span>
+    </div>
+    <div className="suite-table-wrap">
+      <table className="suite-table">
+        <thead>
+          <tr>
+            <th>Suite de tests</th>
+            <th>Statut</th>
+          </tr>
+        </thead>
+        <tbody>
+          {phase.suites.map((suite, i) => (
+            <tr key={i} className={suite.status === 'failed' ? 'row-failed' : ''}>
+              <td className="suite-name">{suite.name}</td>
+              <td>
+                <span className={`status-tag ${suite.status}`}>
+                  {suite.status === 'passed' ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                  {suite.status === 'passed' ? 'Passé' : 'Échoué'}
+                </span>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {data.suites.map((suite, i) => (
-              <tr key={i} className={suite.status === 'failed' ? 'row-failed' : ''}>
-                <td className="suite-name">{suite.name}</td>
-                <td>
-                  <span className={`status-tag ${suite.status}`}>
-                    {suite.status === 'passed' ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                    {suite.status === 'passed' ? 'Passé' : 'Échoué'}
-                  </span>
-                </td>
-                <td className="suite-test-count">{suite.numPassingTests}/{suite.numPassingTests + suite.numFailingTests}</td>
-                <td className="suite-duration">{suite.duration ? `${(suite.duration / 1000).toFixed(1)}s` : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
-  );
-};
+  </div>
+);
 
 export default PlatformTests;
