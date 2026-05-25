@@ -16,9 +16,6 @@ const FEATURE_LABELS = {
 const ALL_FEATURES = Object.keys(FEATURE_LABELS);
 
 const CROSS_BANK_RISK_FEATURES = [
-  'audit_logs',
-  'monitoring',
-  'settings',
   'xml_logs',
   'history',
   'records',
@@ -26,12 +23,9 @@ const CROSS_BANK_RISK_FEATURES = [
 ];
 
 const CROSS_BANK_WARNINGS = {
-  audit_logs: 'Cette permission permet de voir les actions de tous les utilisateurs, y compris ceux des autres banques.',
-  monitoring: 'Cette permission donne accès aux métriques système globales et aux erreurs de toutes les banques.',
-  settings: 'Cette permission expose les paramètres généraux de la plateforme, non filtrés par banque.',
-  xml_logs: 'Les logs XML peuvent contenir des fichiers de traitement provenant de n\'importe quelle banque.',
-  history: 'L\'historique des traitements peut lister les fichiers importés par toutes les banques.',
-  records: 'Les enregistrements peuvent exposer les données des clients d\'autres banques.',
+  xml_logs: 'Les logs XML peuvent contenir des fichiers de traitement provenant de n\'importe quelle banque (aucun filtre banque côté serveur).',
+  history: 'L\'historique des traitements peut exposer les fichiers importés par toutes les banques (stats et détail non filtrés).',
+  records: 'Les enregistrements peuvent exposer les données des clients d\'autres banques (suppression non filtrée par banque).',
   banks: 'Cette permission permet de voir et modifier la liste complète des banques.',
 };
 
