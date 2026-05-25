@@ -190,9 +190,6 @@ const RoleFeaturesPage = () => {
     <div className="role-features-page">
       <div className="page-header">
         <h1><Shield size={28} /> Gestion des Permissions</h1>
-        <button className="refresh-btn" onClick={fetchAll} title="Rafraîchir">
-          <RefreshCw size={16} /> Rafraîchir
-        </button>
       </div>
 
       {error && (
@@ -203,22 +200,28 @@ const RoleFeaturesPage = () => {
         </div>
       )}
 
-      <div className="permission-tabs">
-        {isSuperAdmin && (
-          <button className={`tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>
-            <Shield size={16} /> Par Rôle
+      <div className="tab-bar-wrapper">
+        <div className="permission-tabs">
+          {isSuperAdmin && (
+            <button className={`tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>
+              <Shield size={16} /> Par Rôle
+            </button>
+          )}
+          <button className={`tab ${tab === 'banks' ? 'active' : ''}`} onClick={() => setTab('banks')}>
+            <Building2 size={16} /> Par Banque
           </button>
-        )}
-        <button className={`tab ${tab === 'banks' ? 'active' : ''}`} onClick={() => setTab('banks')}>
-          <Building2 size={16} /> Par Banque
-        </button>
-        <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
-          <Users size={16} /> Par Utilisateur
+          <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
+            <Users size={16} /> Par Utilisateur
+          </button>
+        </div>
+        <button className="refresh-tab-btn" onClick={fetchAll} title="Rafraîchir les données">
+          <RefreshCw size={14} className={loading ? 'spin' : ''} />
+          Rafraîchir
         </button>
       </div>
 
       {tab === 'roles' && (
-        <div className="features-card">
+        <div className="features-card tab-content">
           <table className="features-table">
             <thead>
               <tr>
@@ -248,7 +251,7 @@ const RoleFeaturesPage = () => {
       )}
 
       {tab === 'banks' && (
-        <div className="permission-context">
+        <div className="permission-context tab-content">
           <div className="context-selector">
             <Building2 size={18} />
             {isBankAdmin ? (
@@ -324,7 +327,7 @@ const RoleFeaturesPage = () => {
       )}
 
       {tab === 'users' && (
-        <div className="permission-context">
+        <div className="permission-context tab-content">
           <div className="context-selector">
             <Building2 size={18} />
             {isBankAdmin ? (
