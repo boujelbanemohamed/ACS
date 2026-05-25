@@ -10,6 +10,8 @@ const FRONTEND_DIR = path.resolve(BACKEND_DIR, '..', 'frontend');
 let isRunning = false;
 let currentRun = null;
 let runCounter = 0;
+let runHistory = [];
+const MAX_HISTORY = 20;
 
 router.post('/run', async (req, res) => {
   if (isRunning) {
@@ -154,6 +156,26 @@ function finishRun() {
   };
   currentRun.finished = true;
   isRunning = false;
+
+  const snapshot = JSON.parse(JSON.stringify(currentRun));
+  runHistory.unshift({
+    runId: snapshot.runId,
+    timestamp: snapshot.summary.timestamp,
+    total: snapshot.summary.total,
+    passed: snapshot.summary.passed,
+    failed: snapshot.summary.failed,
+    totalDuration: snapshot.summary.totalDuration,
+    phases: snapshot.phases.map(p => ({
+      name: p.name,
+      label: p.label,
+      status: p.status,
+      totalTests: p.totalTests,
+      passedTests: p.passedTests,
+      failedTests: p.failedTests,
+      rawOutput: p.rawOutput,
+    })),
+  });
+  if (runHistory.length > MAX_HISTORY) runHistory.length = MAX_HISTORY;
 }
 
 function runPreflight(phase, done) {
@@ -320,5 +342,76 @@ router.post('/retry/:phaseIdx', (req, res) => {
   res.json({ success: true, data: { phaseIdx: idx } });
   runPhase(idx);
 });
+
+router.get('/history', (req, res) => {
+  res.json({
+    success: true,
+    data: runHistory.map(h => ({
+      runId: h.runId,
+      timestamp: h.timestamp,
+      total: h.total,
+      passed: h.passed,
+      failed: h.failed,
+      totalDuration: h.totalDuration,
+    })),
+  });
+});
+
+router.get('/history/:runId/report', (req, res) => {
+  const run = runHistory.find(h => h.runId === req.params.runId);
+  if (!run) return res.status(404).json({ success: false, message: 'Run introuvable' });
+
+  const phasesHtml = run.phases.map(p => {
+    const icon = p.status === 'passed' ? '✅' : '❌';
+    const detailLines = (p.rawOutput || '').split('\n').slice(-50).join('\n');
+    return `<div class="phase ${p.status}">
+      <h2>${icon} ${esc(p.label)} — ${p.passedTests}/${p.totalTests} tests</h2>
+      <pre>${esc(detailLines)}</pre>
+    </div>`;
+  }).join('');
+
+  const dur = (run.totalDuration / 1000).toFixed(1);
+  const date = new Date(run.timestamp).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const ok = run.failed === 0;
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Rapport de tests — #${run.runId}</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:2rem;background:#f5f5f5;color:#222}
+h1{font-size:1.4rem;margin:0 0 .3rem}
+.date{color:#666;font-size:.85rem;margin-bottom:1.5rem}
+.summary{display:flex;gap:1rem;margin-bottom:2rem}
+.card{padding:1rem 1.5rem;border-radius:8px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.card .num{font-size:1.6rem;font-weight:700}
+.card .lbl{font-size:.8rem;color:#666}
+.pass .num{color:#16a34a}
+.fail .num{color:#dc2626}
+.phase{margin-bottom:1rem;padding:1rem;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.phase.failed{border-left:4px solid #dc2626}
+.phase.passed{border-left:4px solid #16a34a}
+.phase h2{font-size:1rem;margin:0 0 .5rem}
+.phase pre{font-size:.78rem;background:#1e1e2e;color:#cdd6f4;padding:.75rem;border-radius:4px;overflow-x:auto;max-height:200px;white-space:pre-wrap;word-break:break-all;margin:0}
+</style></head>
+<body>
+<h1>Rapport de tests plateforme #${run.runId}</h1>
+<div class="date">${date} — ${dur}s</div>
+<div class="summary">
+  <div class="card pass"><div class="num">${run.passed.toLocaleString()}</div><div class="lbl">Réussis</div></div>
+  <div class="card fail"><div class="num">${run.failed}</div><div class="lbl">Échoués</div></div>
+  <div class="card"><div class="num">${run.total.toLocaleString()}</div><div class="lbl">Total</div></div>
+</div>
+${phasesHtml}
+<p style="text-align:center;color:#999;font-size:.8rem;margin-top:2rem">Généré par ACS Platform Tests</p>
+</body></html>`;
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="rapport-tests-${run.runId}.html"`);
+  res.send(html);
+});
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 module.exports = router;

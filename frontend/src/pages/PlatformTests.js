@@ -12,11 +12,21 @@ const PlatformTests = () => {
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState(null);
   const [suiteModal, setSuiteModal] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
   const pollRef = useRef(null);
 
   useEffect(() => {
+    fetchHistory();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  const fetchHistory = async () => {
+    try {
+      const res = await api.get('/platform-tests/history');
+      setHistory(res.data.data || []);
+    } catch {}
+  };
 
   const startPolling = (id) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -31,6 +41,7 @@ const PlatformTests = () => {
             pollRef.current = null;
             setLoading(false);
             setRetrying(false);
+            fetchHistory();
           }
         }
       } catch {
@@ -38,6 +49,22 @@ const PlatformTests = () => {
         pollRef.current = null;
       }
     }, POLL_INTERVAL);
+  };
+
+  const downloadHistoryReport = async (runId) => {
+    try {
+      const res = await api.get(`/platform-tests/history/${runId}/report`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rapport-tests-${runId}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Download history report failed', e);
+    }
   };
 
   const runTests = async () => {
@@ -199,6 +226,37 @@ const PlatformTests = () => {
           onDownloadLogs={downloadRawLogs}
           onDownloadReport={downloadReport}
         />
+      )}
+
+      {!loading && history.length > 0 && (
+        <div className="history-section">
+          <div className="history-header" onClick={() => setShowHistory(v => !v)}>
+            <Clock size={18} />
+            <span>Historique des tests ({history.length})</span>
+            <span className={`history-chevron ${showHistory ? 'open' : ''}`}>{showHistory ? '▲' : '▼'}</span>
+          </div>
+          {showHistory && (
+            <div className="history-list">
+              {history.map((h, i) => (
+                <div key={h.runId} className={`history-item ${h.failed > 0 ? 'has-fails' : 'all-good'}`}>
+                  <div className="history-item-main">
+                    <span className="history-date">{new Date(h.timestamp).toLocaleString('fr-FR')}</span>
+                    <span className="history-stats">
+                      <span className="h-pass">{h.passed}</span> / <span className="h-fail">{h.failed}</span> / <span className="h-total">{h.total}</span>
+                    </span>
+                    <span className="history-dur">{(h.totalDuration / 1000).toFixed(1)}s</span>
+                    <span className={`history-status ${h.failed > 0 ? 'fail' : 'pass'}`}>
+                      {h.failed > 0 ? <XCircle size={14} /> : <CheckCircle size={14} />}
+                    </span>
+                    <button className="history-dl-btn" onClick={() => downloadHistoryReport(h.runId)} title="Télécharger le rapport">
+                      <Download size={14} /> Rapport
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {suiteModal && (
