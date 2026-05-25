@@ -1,3 +1,7 @@
+.role-features-page {
+  padding: 0 4px;
+}
+
 .role-features-page .page-header {
   display: flex;
   justify-content: space-between;
@@ -48,7 +52,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin: 12px 0 24px;
   flex-wrap: wrap;
   gap: 10px;
 }
