@@ -261,15 +261,13 @@ const PhaseProgress = ({ phase, active }) => {
         </span>
       </div>
 
-      {active && phase.suites.length > 0 && (
+          {active && phase.suites.length > 0 && (
         <div className="suite-feed">
           {phase.suites.slice(-20).map((suite, i) => (
-            <div key={i} className={`suite-line ${suite.status} ${isPreflight ? 'preflight' : ''}`}>
+            <div key={i} className={`suite-line ${suite.status}`}>
               {suite.status === 'passed' ? <CheckCircle size={12} /> : <XCircle size={12} />}
-              <span className="suite-line-name" title={suite.name}>{suite.name}</span>
-              {isPreflight && suite.detail && (
-                <span className="suite-line-detail">{suite.detail}</span>
-              )}
+              <span>{suite.name}</span>
+              {suite.detail && <span className="suite-detail">{suite.detail}</span>}
             </div>
           ))}
         </div>
