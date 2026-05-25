@@ -228,15 +228,18 @@ const PlatformTests = () => {
         />
       )}
 
-      {!loading && history.length > 0 && (
+      {!loading && (
         <div className="history-section">
           <div className="history-header" onClick={() => setShowHistory(v => !v)}>
             <Clock size={18} />
-            <span>Historique des tests ({history.length})</span>
+            <span>Historique des tests{history.length > 0 ? ` (${history.length})` : ''}</span>
             <span className={`history-chevron ${showHistory ? 'open' : ''}`}>{showHistory ? '▲' : '▼'}</span>
           </div>
           {showHistory && (
             <div className="history-list">
+              {history.length === 0 && (
+                <div className="history-empty">Aucun historique de tests pour le moment.</div>
+              )}
               {history.map((h, i) => (
                 <div key={h.runId} className={`history-item ${h.failed > 0 ? 'has-fails' : 'all-good'}`}>
                   <div className="history-item-main">

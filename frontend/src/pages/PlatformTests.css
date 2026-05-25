@@ -963,3 +963,10 @@
   background: #eef2ff;
   border-color: #6366f1;
 }
+
+.history-empty {
+  padding: 24px 18px;
+  text-align: center;
+  color: #6c757d;
+  font-size: 14px;
+}
