@@ -233,6 +233,27 @@ const endpoints = {
       { method: 'GET', path: '/', description: 'Vérification rapide que le serveur et la base de données répondent.', auth: 'none', roles: ['public'] },
     ]
   },
+  platformTests: {
+    title: 'Tests de la Plateforme',
+    description: 'Exécution et suivi des tests automatisés (backend + frontend) avec vérifications d\'infrastructure.',
+    basePath: '/api/platform-tests',
+    endpoints: [
+      { method: 'POST', path: '/run', description: 'Lancer la suite complète de tests : pré-vérifications (env, DB, Redis, fichiers, dépendances, SSE) → Jest backend → Jest frontend → Tests QA E2E (Playwright: navigation, permissions, flux live). Retourne un runId immédiatement (asynchrone).', auth: 'jwt', roles: ['super_admin'] },
+      { method: 'GET', path: '/progress', description: 'Récupérer la progression en temps réel des tests (phase courante, pourcentage, suites complétées, résultats partiels).', auth: 'jwt', roles: ['super_admin'] },
+      { method: 'GET', path: '/status', description: 'Vérifier si une exécution de tests est en cours.', auth: 'jwt', roles: ['super_admin'] },
+      { method: 'GET', path: '/script/:phaseIdx/:suiteIdx', description: 'Récupérer le contenu d\'un script de test (phaseIndex/suiteIndex) pour visualisation et téléchargement.', auth: 'jwt', roles: ['super_admin'] },
+    ]
+  },
+  live: {
+    title: 'Flux en Direct',
+    description: 'Diffusion en temps réel des actions utilisateurs via SSE (Server-Sent Events). Connectez-vous au flux SSE pour recevoir les événements instantanément.',
+    basePath: '/api/live',
+    endpoints: [
+      { method: 'GET', path: '/stream', description: 'Flux SSE temps réel. Envoie un événement "connected", puis les 200 derniers événements, puis tout nouvel événement au fur et à mesure. Utilisez ?token= (query param) car EventSource ne supporte pas les headers personnalisés.', auth: 'jwt', roles: ['super_admin'] },
+      { method: 'POST', path: '/track', description: 'Tracker la page active d\'un utilisateur. Corps : { page: string, action: string, details?: string }. Utilisé par le frontend pour envoyer les changements de page en temps réel.', auth: 'jwt', roles: ['super_admin'] },
+      { method: 'GET', path: '/recent', description: 'Récupérer les événements récents depuis la base de données. Paramètre optionnel ?limit= (max 500, défaut 100).', auth: 'jwt', roles: ['super_admin'] },
+    ]
+  },
 };
 
 router.get('/', (req, res) => {

@@ -56,6 +56,7 @@ const Records = () => {
 
   useEffect(() => {
     fetchBanks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -65,6 +66,7 @@ const Records = () => {
       fetchXmlLogs();
       fetchXmlStats();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, filters, pagination.offset, xmlFilters, xmlPagination.offset]);
 
   const fetchBanks = async () => {
@@ -109,7 +111,7 @@ const Records = () => {
   const viewHistory = async (record) => {
     setHistoryModal({ isOpen: true, loading: true, data: null, record });
     try {
-      const response = await api.get('/records/history/' + record.id);
+      const response = await api.get('/record-history/by-record/' + record.id);
       setHistoryModal(prev => ({ ...prev, loading: false, data: response.data.data }));
     } catch (error) {
       setHistoryModal(prev => ({ ...prev, loading: false, data: null }));

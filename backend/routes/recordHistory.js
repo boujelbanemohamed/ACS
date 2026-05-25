@@ -171,6 +171,60 @@ router.get('/pan/:bankId/:pan', authMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /api/record-history/by-record/:recordId
+ * Historique complet via l'ID d'un enregistrement (processed_records)
+ * Résout le PAN réel depuis la base pour contourner le masquage
+ */
+router.get('/by-record/:recordId', authMiddleware, async (req, res) => {
+  try {
+    const { recordId } = req.params;
+
+    const recordResult = await db.query(
+      'SELECT pan, bank_id FROM processed_records WHERE id = $1',
+      [recordId]
+    );
+
+    if (recordResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Enregistrement non trouvé'
+      });
+    }
+
+    const { pan: encryptedPan, bank_id } = recordResult.rows[0];
+    const pan = decrypt(encryptedPan);
+
+    if (req.user.role === 'bank' && req.user.bank_id !== bank_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Accès non autorisé à cette banque'
+      });
+    }
+
+    const history = await recordHistoryService.getHistoryByPan(bank_id, pan);
+
+    if (!history.attempts || history.attempts.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Aucun historique trouvé pour cet enregistrement'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    console.error('Get record history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération de l\'historique',
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /api/record-history/pan-lookup
  * Recherche rapide par PAN (partiel ou complet)
  */
@@ -188,7 +242,7 @@ router.get('/pan-lookup', authMiddleware, async (req, res) => {
     const panHash = hashPan(pan);
     
     let query = `
-      SELECT DISTINCT 
+      SELECT 
         rh.pan_hash,
         rh.bank_id,
         b.code as bank_code,

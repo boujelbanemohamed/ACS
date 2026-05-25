@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Sentry (APM) — activé via SENTRY_DSN
 if (process.env.SENTRY_DSN) {
@@ -154,6 +155,7 @@ app.use('/api/audit-logs', authMiddleware, checkFeature('audit_logs'), require('
 app.use('/api/role-features', authMiddleware, require('./routes/roleFeatures'));
 app.use('/api/api-docs', authMiddleware, isSuperAdmin, apiDocsRoutes);
 app.use('/api/platform-tests', authMiddleware, isSuperAdmin, require('./routes/platformTests'));
+app.use('/api/live', authMiddleware, isSuperAdmin, require('./routes/live'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {

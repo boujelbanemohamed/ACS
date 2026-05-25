@@ -62,7 +62,7 @@ beforeEach(() => {
   useAuth.mockReturnValue({ user: { role: 'super_admin', bank_id: null } });
   mockGet.mockImplementation((url) => {
     if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
-    if (url && url.startsWith('/records/history/')) return Promise.resolve({ data: { data: { summary: { totalAttempts: 3, currentStatus: 'SUCCESS', firstAttempt: '2025-01-01T10:00:00Z', lastAttempt: '2025-01-15T10:00:00Z' }, attempts: [{ id: 1, attempt_number: 1, status: 'SUCCESS', processed_at: '2025-01-15T10:00:00Z', source_type: 'upload', username: 'admin', data_received: null, details: [] }] } } });
+    if (url && url.startsWith('/record-history/by-record/')) return Promise.resolve({ data: { data: { summary: { totalAttempts: 3, currentStatus: 'SUCCESS', firstAttempt: '2025-01-01T10:00:00Z', lastAttempt: '2025-01-15T10:00:00Z' }, attempts: [{ id: 1, attempt_number: 1, status: 'SUCCESS', processed_at: '2025-01-15T10:00:00Z', source_type: 'upload', username: 'admin', data_received: null, details: [] }] } } });
     if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
     if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
     if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });
@@ -374,7 +374,7 @@ describe('Records', () => {
     window.alert = jest.fn();
     mockGet.mockImplementation((url) => {
       if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
-      if (url && url.startsWith('/records/history/')) return Promise.reject(new Error('History error'));
+      if (url && url.startsWith('/record-history/by-record/')) return Promise.reject(new Error('History error'));
       if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
       if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
       if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });
@@ -450,7 +450,7 @@ describe('Records', () => {
     };
     mockGet.mockImplementation((url) => {
       if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
-      if (url && url.startsWith('/records/history/')) return Promise.resolve({ data: { data: historyData } });
+      if (url && url.startsWith('/record-history/by-record/')) return Promise.resolve({ data: { data: historyData } });
       if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
       if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
       if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });
@@ -585,7 +585,8 @@ describe('Records', () => {
     render(<MemoryRouter><Records /></MemoryRouter>);
     await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
     const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/records').length;
-    fireEvent.change(screen.getByDisplayValue('Toutes les banques'), { target: { value: '1' } });
+    const bankSelect = await screen.findByDisplayValue('Toutes les banques');
+    fireEvent.change(bankSelect, { target: { value: '1' } });
     await waitFor(() => {
       const calls = mockGet.mock.calls.filter(c => c[0] === '/records');
       expect(calls.length).toBe(callsBefore + 1);
@@ -605,7 +606,8 @@ describe('Records', () => {
     fireEvent.click(screen.getByText('Fichiers XML'));
     await waitFor(() => { expect(screen.getByText('Tous les statuts')).toBeInTheDocument(); });
     const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/xml-logs').length;
-    fireEvent.change(screen.getByDisplayValue('Tous les statuts'), { target: { value: 'error' } });
+    const statusSelect = await screen.findByDisplayValue('Tous les statuts');
+    fireEvent.change(statusSelect, { target: { value: 'error' } });
     await waitFor(() => {
       const calls = mockGet.mock.calls.filter(c => c[0] === '/xml-logs');
       expect(calls.length).toBe(callsBefore + 1);
@@ -684,7 +686,7 @@ describe('Records', () => {
     };
     mockGet.mockImplementation((url) => {
       if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
-      if (url && url.startsWith('/records/history/')) return Promise.resolve({ data: { data: historyWithDetails } });
+      if (url && url.startsWith('/record-history/by-record/')) return Promise.resolve({ data: { data: historyWithDetails } });
       if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
       if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
       if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });
@@ -705,7 +707,7 @@ describe('Records', () => {
     const historyPromise = new Promise((resolve) => { resolveHistory = resolve; });
     mockGet.mockImplementation((url) => {
       if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
-      if (url && url.startsWith('/records/history/')) return historyPromise;
+      if (url && url.startsWith('/record-history/by-record/')) return historyPromise;
       if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
       if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
       if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });
@@ -734,7 +736,8 @@ describe('Records', () => {
     fireEvent.click(screen.getByText('Fichiers XML'));
     await waitFor(() => { expect(screen.getByText('Tous les statuts')).toBeInTheDocument(); });
     const callsBefore = mockGet.mock.calls.filter(c => c[0] === '/xml-logs').length;
-    fireEvent.change(screen.getByDisplayValue('Toutes les banques'), { target: { value: '1' } });
+    const bankSelect = await screen.findByDisplayValue('Toutes les banques');
+    fireEvent.change(bankSelect, { target: { value: '1' } });
     await waitFor(() => {
       const calls = mockGet.mock.calls.filter(c => c[0] === '/xml-logs');
       expect(calls.length).toBe(callsBefore + 1);
@@ -798,7 +801,7 @@ describe('Records', () => {
   it('shows empty state when history has no data', async () => {
     mockGet.mockImplementation((url) => {
       if (url === '/banks') return Promise.resolve({ data: { data: banksData } });
-      if (url && url.startsWith('/records/history/')) return Promise.resolve({ data: { data: { summary: { totalAttempts: 0, currentStatus: null, firstAttempt: null, lastAttempt: null }, attempts: [] } } });
+      if (url && url.startsWith('/record-history/by-record/')) return Promise.resolve({ data: { data: { summary: { totalAttempts: 0, currentStatus: null, firstAttempt: null, lastAttempt: null }, attempts: [] } } });
       if (url === '/records') return Promise.resolve({ data: { data: recordsData, pagination: { total: 1 } } });
       if (url === '/xml-logs') return Promise.resolve({ data: { data: xmlLogsData, pagination: { total: 1 } } });
       if (url === '/xml-logs/stats/summary') return Promise.resolve({ data: { data: { total_xml: 10, success_count: 5, error_count: 3, pending_count: 2, total_entries: 50 } } });

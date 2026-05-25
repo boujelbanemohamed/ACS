@@ -112,7 +112,9 @@ describe('Processing', () => {
     await waitFor(() => {
       expect(screen.getByText('-- Choisir une banque --')).toBeInTheDocument();
     });
-    expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument();
+    });
     expect(screen.getByText('BIAT (BIAT)')).toBeInTheDocument();
   });
 
@@ -168,7 +170,9 @@ describe('Processing', () => {
     await waitFor(() => {
       expect(screen.getByText('Upload Manuel de Fichier CSV')).toBeInTheDocument();
     });
-    expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument();
+    });
   });
 
   it('opens API key creation modal in internal API tab', async () => {

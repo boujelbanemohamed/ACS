@@ -4,7 +4,7 @@ const db = require('../config/database');
 const authMiddleware = async (req, res, next) => {
   if (req.user) return next();
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const token = req.headers.authorization?.replace('Bearer ', '') || req.query?.token;
 
     if (!token) {
       return res.status(401).json({

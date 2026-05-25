@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText, Shield, BookOpen, FlaskConical } from 'lucide-react';
+import usePageTracking from '../hooks/usePageTracking';
+import { LayoutDashboard, Building2, FileText, Clock, Database, LogOut, History as HistoryIcon, Users, Mail, Terminal, Activity, ScrollText, Shield, BookOpen, FlaskConical, Radio } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './Layout.css';
@@ -33,6 +34,8 @@ const Layout = () => {
     if (isSuperAdmin) return true;
     return features[feature] !== false;
   };
+
+  usePageTracking();
 
   return (
     <div className="layout">
@@ -122,6 +125,13 @@ const Layout = () => {
             <NavLink to="/monitoring" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Activity size={20} />
               <span>Monitoring</span>
+            </NavLink>
+          )}
+
+          {isSuperAdmin && (
+            <NavLink to="/live" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Radio size={20} />
+              <span>Flux en direct</span>
             </NavLink>
           )}
 

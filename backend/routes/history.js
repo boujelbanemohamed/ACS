@@ -238,7 +238,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     const errorsQuery = `
       SELECT * FROM validation_errors 
       WHERE file_log_id = $1 
-      ORDER BY row_number
+      ORDER BY validation_errors.row_number
     `;
     const errorsResult = await db.query(errorsQuery, [req.params.id]);
 
