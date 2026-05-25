@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader, Info } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader, Info, RotateCcw, Database, Server, Wifi, HardDrive, Package } from 'lucide-react';
 import api from '../services/api';
 import './PlatformTests.css';
 
@@ -85,10 +85,6 @@ const PlatformTests = () => {
     <div className="platform-tests-page">
       <div className="page-header">
         <h1><Shield size={28} /> Tests Plateforme</h1>
-        <button className="btn-primary" onClick={runTests} disabled={loading}>
-          {loading ? <RefreshCw size={18} className="spin" /> : <Play size={18} />}
-          {loading ? 'Exécution en cours...' : 'Lancer les tests'}
-        </button>
       </div>
 
       {error && (
@@ -96,6 +92,28 @@ const PlatformTests = () => {
           <AlertCircle size={18} />
           <span>{error}</span>
           <button onClick={() => setError(null)} className="dismiss-btn">×</button>
+        </div>
+      )}
+
+      {!loading && !progress && (
+        <div className="tests-hero">
+          <div className="hero-icon"><Shield size={48} /></div>
+          <h2>Tests Plateforme Complète</h2>
+          <p className="hero-desc">
+            Vérifie l'intégralité de la plateforme en une seule exécution :
+          </p>
+          <div className="hero-checks">
+            <span><Database size={14} /> Base de données</span>
+            <span><Server size={14} /> Redis</span>
+            <span><Wifi size={14} /> Connexions</span>
+            <span><HardDrive size={14} /> Fichiers</span>
+            <span><Package size={14} /> Dépendances</span>
+            <span><Shield size={14} /> Tests Backend</span>
+            <span><Shield size={14} /> Tests Frontend</span>
+          </div>
+          <button className="btn-primary btn-large" onClick={runTests}>
+            <Play size={22} /> Lancer les tests
+          </button>
         </div>
       )}
 
@@ -110,7 +128,9 @@ const PlatformTests = () => {
         <RunningView progress={progress} percent={overallPercent()} currentPhase={currentPhaseObj()} />
       )}
 
-      {progress?.finished && <ResultsView data={progress} />}
+      {progress?.finished && (
+        <ResultsView data={progress} onRerun={runTests} loading={loading} />
+      )}
     </div>
   );
 };
@@ -180,7 +200,7 @@ const PhaseProgress = ({ phase, active }) => {
   );
 };
 
-const ResultsView = ({ data }) => {
+const ResultsView = ({ data, onRerun, loading }) => {
   const summary = data.summary;
   const allPassed = summary.failed === 0;
 
@@ -212,6 +232,10 @@ const ResultsView = ({ data }) => {
             <span className="summary-value">{(summary.totalDuration / 1000).toFixed(1)}s</span>
           </div>
         </div>
+        <button className="summary-rerun-btn" onClick={onRerun} disabled={loading} title="Relancer les tests">
+          {loading ? <RefreshCw size={18} className="spin" /> : <RotateCcw size={18} />}
+          Relancer
+        </button>
       </div>
 
       {data.phases.map((phase, i) => (
