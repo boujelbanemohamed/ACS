@@ -160,6 +160,24 @@ describe('response interceptor', () => {
       expect(localStorage.getItem('token')).toBe('test-token');
     });
 
+    it('redirects to /change-password when the server requires a password change', async () => {
+      localStorage.setItem('token', 'test-token');
+      const error = { response: { status: 403, data: { code: 'PASSWORD_CHANGE_REQUIRED' } } };
+
+      await expect(responseErrorHandler(error)).rejects.toEqual(error);
+      expect(localStorage.getItem('must_change_password')).toBe('true');
+      expect(localStorage.getItem('token')).toBe('test-token');
+      expect(window.location.href).toBe('/change-password');
+    });
+
+    it('does not loop when already on /change-password', async () => {
+      window.location.pathname = '/change-password';
+      const error = { response: { status: 403, data: { code: 'PASSWORD_CHANGE_REQUIRED' } } };
+
+      await expect(responseErrorHandler(error)).rejects.toEqual(error);
+      expect(window.location.href).toBe('');
+    });
+
     it('rejects with the original error for non-401 status codes', async () => {
       const error = { response: { status: 500, data: { message: 'Server Error' } } };
       await expect(responseErrorHandler(error)).rejects.toEqual(error);
@@ -179,10 +197,8 @@ describe('authAPI', () => {
     expect(mockAxiosInstance.post).toHaveBeenCalledWith('/auth/login', credentials);
   });
 
-  it('register calls api.post with userData', () => {
-    const userData = { name: 'Test', email: 'test@test.com' };
-    authAPI.register(userData);
-    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/auth/register', userData);
+  it('does not expose a register call (no such backend route)', () => {
+    expect(authAPI.register).toBeUndefined();
   });
 
   it('getMe calls api.get', () => {
@@ -299,18 +315,12 @@ describe('processingAPI', () => {
 });
 
 describe('dashboardAPI', () => {
-  it('getStats calls api.get', () => {
-    dashboardAPI.getStats();
-    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/stats');
+  it('getStats calls the existing /dashboard route with its filters', () => {
+    dashboardAPI.getStats({ bankId: 2 });
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard', { params: { bankId: 2 } });
   });
 
-  it('getUnresolvedErrors calls api.get', () => {
-    dashboardAPI.getUnresolvedErrors();
-    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/errors/unresolved');
-  });
-
-  it('getRecentRecords calls api.get with limit param', () => {
-    dashboardAPI.getRecentRecords(5);
-    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/records/recent', { params: { limit: 5 } });
+  it('only exposes routes that exist on the backend', () => {
+    expect(Object.keys(dashboardAPI)).toEqual(['getStats']);
   });
 });

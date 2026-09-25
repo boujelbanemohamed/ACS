@@ -7,13 +7,124 @@ const xmlGenerator = require('../services/xmlGenerator');
 const recordHistoryService = require('../services/recordHistoryService');
 const { decrypt, hashPan, maskPan } = require('../services/encryptionService');
 
+const { effectiveBankId } = require('../utils/bankScope');
+const remoteFileService = require('../utils/remoteFileService');
+const fs = require('fs');
+
 const router = express.Router();
+
+const csvCell = (value) => {
+  const str = value === undefined || value === null ? '' : String(value);
+  return /[;"\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+};
+
+// Contenu d'un fichier traité (CSV : enregistrements en base ; XML : fichier généré), PAN masqués
+router.get('/file-content/byname', authMiddleware, async (req, res) => {
+  try {
+    const { type, fileName } = req.query;
+    if (!fileName || typeof fileName !== 'string' || !['csv', 'xml'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Paramètres type (csv|xml) et fileName requis' });
+    }
+
+    const bankId = effectiveBankId(req.user, null);
+
+    if (type === 'csv') {
+      const params = [fileName];
+      let query = 'SELECT * FROM processed_records WHERE file_name = $1';
+      if (bankId !== null) {
+        query += ' AND bank_id = $2';
+        params.push(bankId);
+      }
+      query += ' ORDER BY id LIMIT 10000';
+      const result = await db.query(query, params);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Fichier non trouvé' });
+      }
+      const data = result.rows.map(row => ({
+        language: row.language,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        pan: maskPan(decrypt(row.pan)),
+        expiry: row.expiry,
+        phone: row.phone,
+        behaviour: row.behaviour,
+        action: row.action,
+        status: row.enrollment_status
+      }));
+      return res.json({ success: true, data });
+    }
+
+    const params = [fileName];
+    let query = 'SELECT xml_file_path, bank_id FROM xml_logs WHERE xml_file_name = $1';
+    if (bankId !== null) {
+      query += ' AND bank_id = $2';
+      params.push(bankId);
+    }
+    query += ' ORDER BY id DESC LIMIT 1';
+    const result = await db.query(query, params);
+    if (result.rows.length === 0 || !result.rows[0].xml_file_path) {
+      return res.status(404).json({ success: false, message: 'Fichier non trouvé' });
+    }
+
+    const filePath = result.rows[0].xml_file_path;
+    const content = remoteFileService.isRemote(filePath)
+      ? await remoteFileService.readFile(filePath)
+      : await fs.promises.readFile(filePath.replace('file://', ''), 'latin1');
+
+    // Le XML de l'ACS contient les PAN en clair : ils sont masqués pour l'affichage
+    const masked = content.replace(/cardNumber="(\d+)"/g, (match, pan) => `cardNumber="${maskPan(pan)}"`);
+    res.json({ success: true, data: masked });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return res.status(404).json({ success: false, message: 'Fichier XML introuvable sur le disque' });
+    }
+    console.error('File content error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de la lecture du fichier' });
+  }
+});
+
+// Export CSV des enregistrements (PAN masqué)
+router.get('/export/csv', authMiddleware, filterByBank, async (req, res) => {
+  try {
+    const bankId = effectiveBankId(req.user, req.query.bankId);
+    const maxRows = parseInt(process.env.RECORDS_EXPORT_MAX, 10) || 50000;
+    const params = [];
+    let query = `
+      SELECT pr.*, b.code as bank_code
+      FROM processed_records pr
+      JOIN banks b ON pr.bank_id = b.id
+    `;
+    if (bankId !== null) {
+      query += ' WHERE pr.bank_id = $1';
+      params.push(bankId);
+    }
+    query += ` ORDER BY pr.processed_at DESC LIMIT ${maxRows}`;
+
+    const result = await db.query(query, params);
+    const headers = ['bank_code', 'language', 'first_name', 'last_name', 'pan', 'expiry', 'phone', 'behaviour', 'action', 'enrollment_status', 'processed_at'];
+    let csv = headers.join(';') + '\n';
+    for (const row of result.rows) {
+      const record = { ...row, pan: maskPan(decrypt(row.pan)), processed_at: row.processed_at ? new Date(row.processed_at).toISOString() : '' };
+      csv += headers.map(h => csvCell(record[h])).join(';') + '\n';
+    }
+
+    await auditService.logAction('EXPORT_RECORDS', { tableName: 'processed_records', newData: { bankId, count: result.rows.length } }, req);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="enregistrements.csv"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(csv);
+  } catch (error) {
+    console.error('Export records error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors de l\'export' });
+  }
+});
 
 // Get all processed records with pagination and filters
 router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
-    const { 
-      bankId, 
+    const bankId = effectiveBankId(req.user, req.query.bankId);
+    const {
       search, 
       limit = 50, 
       offset = 0,
@@ -41,7 +152,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     const params = [];
     let paramCount = 1;
 
-    if (bankId) {
+    if (bankId !== null) {
       query += ` AND pr.bank_id = $${paramCount}`;
       params.push(bankId);
       paramCount++;
@@ -71,7 +182,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     const countParams = [];
     let countParamCount = 1;
 
-    if (bankId) {
+    if (bankId !== null) {
       countQuery += ` AND pr.bank_id = $${countParamCount}`;
       countParams.push(bankId);
       countParamCount++;

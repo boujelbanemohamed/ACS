@@ -1,4 +1,5 @@
 const express = require('express');
+const { isBankScoped, canAccessBank } = require('../utils/bankScope');
 const router = express.Router();
 const db = require('../config/database');
 const emailService = require('../services/emailService');
@@ -64,7 +65,7 @@ router.post('/smtp/test', authMiddleware, superAdminOnly, async (req, res) => {
 router.get('/emails/:bankId', authMiddleware, async (req, res) => {
   try {
     const { bankId } = req.params;
-    if (req.user.role === 'bank' && req.user.bank_id !== parseInt(bankId)) {
+    if (!canAccessBank(req.user, bankId)) {
       return res.status(403).json({ success: false, message: 'Acces refuse' });
     }
     const result = await db.query('SELECT * FROM bank_notification_emails WHERE bank_id = $1 ORDER BY created_at DESC', [bankId]);
@@ -145,11 +146,11 @@ router.get('/logs', authMiddleware, async (req, res) => {
     let countQuery = 'SELECT COUNT(*) as total FROM notification_logs nl LEFT JOIN banks b ON nl.bank_id = b.id';
     const params = [];
     const countParams = [];
-    if (req.user.role === 'bank') {
+    if (isBankScoped(req.user)) {
       query += ' WHERE nl.bank_id = $1';
       countQuery += ' WHERE nl.bank_id = $1';
-      params.push(req.user.bank_id);
-      countParams.push(req.user.bank_id);
+      params.push(req.user.bank_id || -1);
+      countParams.push(req.user.bank_id || -1);
     } else if (bankId) {
       query += ' WHERE nl.bank_id = $1';
       countQuery += ' WHERE nl.bank_id = $1';
@@ -201,13 +202,8 @@ router.put('/cron-config', authMiddleware, superAdminOnly, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Format cron invalide' });
     }
     
-    if (schedule) {
-      cronService.dailyReportSchedule = schedule;
-    }
-    cronService.dailyReportEnabled = enabled !== false;
-    
-    // Redemarrer le cron avec la nouvelle config
-    cronService.startDailyReportTask();
+    // Configuration enregistrée en base : partagée par toutes les instances et conservée au redémarrage
+    await cronService.setReportConfig({ schedule, enabled: enabled !== false });
 
     await auditService.logAction('UPDATE_CRON_CONFIG', { tableName: 'settings', newData: { schedule: cronService.dailyReportSchedule, enabled: cronService.dailyReportEnabled } }, req);
 

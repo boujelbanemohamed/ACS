@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TIMESTAMP,
     reset_token VARCHAR(255),
     reset_token_expires TIMESTAMP,
+    must_change_password BOOLEAN DEFAULT false,
+    password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

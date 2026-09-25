@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import './Profile.css';
 
 const Profile = () => {
-  const { user } = useAuth();
+  const { user, updateToken } = useAuth();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -65,8 +65,9 @@ const Profile = () => {
       return;
     }
 
-    if (passwordData.newPassword.length < 6) {
-      setMessage({ type: 'error', text: 'Le mot de passe doit contenir au moins 6 caracteres' });
+    const pwd = passwordData.newPassword;
+    if (pwd.length < 8 || !/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd) || !/\d/.test(pwd) || !/[^A-Za-z0-9]/.test(pwd)) {
+      setMessage({ type: 'error', text: 'Le mot de passe doit contenir au moins 8 caracteres dont une minuscule, une majuscule, un chiffre et un caractere special' });
       return;
     }
 
@@ -80,6 +81,8 @@ const Profile = () => {
       });
       
       if (response.data.success) {
+        // Les anciennes sessions sont révoquées : on conserve le nouveau jeton
+        if (response.data.token) updateToken(response.data.token);
         setMessage({ type: 'success', text: 'Mot de passe modifie avec succes!' });
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       }
@@ -180,7 +183,7 @@ const Profile = () => {
                   value={passwordData.newPassword}
                   onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
                   required
-                  minLength={6}
+                  minLength={8}
                 />
               </div>
               

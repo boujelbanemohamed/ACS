@@ -93,12 +93,16 @@ const Monitor = () => {
     } else {
       fetchDebug();
     }
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!autoRefresh || user?.role !== 'super_admin') return;
     const interval = setInterval(fetchHealth, refreshInterval);
     return () => clearInterval(interval);
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh, refreshInterval]);
 
   const getStatusIcon = (status) => {

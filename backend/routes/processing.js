@@ -7,44 +7,32 @@ const CSVProcessor = require('../services/csvProcessor');
 const { authMiddleware } = require('../middleware/auth');
 const { forceBankId } = require('../middleware/roleMiddleware');
 const { processingSchemas, validate } = require('../utils/validators');
-const { hashPan } = require('../services/encryptionService');
+const { hashPan, encrypt, decrypt, maskPan } = require('../services/encryptionService');
 const auditService = require('../services/auditService');
 const { enqueueJob, getJob, getQueueStats, getActiveJobs } = require('../services/queueService');
-
-const ALLOWED_API_DOMAINS = (process.env.ALLOWED_API_DOMAINS || '').split(',').filter(Boolean);
-
-function isAllowedApiUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname;
-
-    if (ALLOWED_API_DOMAINS.length > 0) {
-      return ALLOWED_API_DOMAINS.some(d => host === d || host.endsWith('.' + d));
-    }
-
-    const blocked = ['localhost', '127.0.0.1', '0.0.0.0', '::1', '169.254.169.254',
-      '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.',
-      '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.',
-      '172.29.', '172.30.', '172.31.', '192.168.'];
-    for (const b of blocked) {
-      if (host === b || host.startsWith(b)) return false;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
+const { canAccessBank, denyBankAccess, effectiveBankId } = require('../utils/bankScope');
+const { assertSafeUrl } = require('../utils/urlSafety');
+const { validateCards } = require('../utils/cardValidation');
+const { getUploadDir } = require('../utils/paths');
 
 const router = express.Router();
 const csvProcessor = new CSVProcessor();
 
 const fsPromises = fs.promises;
 
-// Configure multer for file uploads
+const MAX_MANUAL_ENTRIES = parseInt(process.env.MAX_MANUAL_ENTRIES, 10) || 1000;
+
+// Champs de job jamais renvoyés au client (secrets / données de cartes)
+const SENSITIVE_JOB_FIELDS = ['authToken', 'headers', 'body', 'entries', 'corrections', 'filePath', 'fileUrl'];
+
+// URL saisie par un utilisateur : jamais d'adresse interne, quel que soit le rôle
+// (sauf domaines explicitement listés dans ALLOWED_API_DOMAINS)
+const urlCheckOptions = (protocols) => ({ protocols, allowPrivate: false });
+
+// Configure multer for file uploads (dossier partagé entre l'API et le worker)
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
-    const uploadDir = '/tmp/uploads';
+    const uploadDir = getUploadDir();
     try {
       await fsPromises.mkdir(uploadDir, { recursive: true });
     } catch (e) {
@@ -54,7 +42,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    cb(null, `${Date.now()}-${sanitized}`);
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${sanitized}`);
   }
 });
 
@@ -68,6 +56,32 @@ const upload = multer({
     cb(null, true);
   }
 });
+
+// Charge un file_log et vérifie que l'utilisateur a accès à sa banque
+async function loadFileLog(req, res, fileLogId) {
+  const id = parseInt(fileLogId, 10);
+  if (Number.isNaN(id)) {
+    res.status(400).json({ success: false, message: 'Identifiant invalide' });
+    return null;
+  }
+  const result = await db.query('SELECT * FROM file_logs WHERE id = $1', [id]);
+  if (result.rows.length === 0) {
+    res.status(404).json({ success: false, message: 'Log de fichier non trouvé' });
+    return null;
+  }
+  const fileLog = result.rows[0];
+  if (!canAccessBank(req.user, fileLog.bank_id)) {
+    denyBankAccess(res);
+    return null;
+  }
+  return fileLog;
+}
+
+// Masque la valeur d'une erreur de validation portant sur le PAN
+function presentValidationError(row) {
+  if (!row || row.field_name !== 'pan' || !row.field_value) return row;
+  return { ...row, field_value: maskPan(decrypt(row.field_value)) };
+}
 
 // Download CSV template
 router.get('/template', authMiddleware, (req, res) => {
@@ -94,6 +108,12 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
       });
     }
 
+    try {
+      await assertSafeUrl(baseUrl, urlCheckOptions(['http', 'https', 'sftp', 'ftp']));
+    } catch (e) {
+      return res.status(400).json({ success: false, message: `URL non autorisée: ${e.message}` });
+    }
+
     const bankQuery = 'SELECT * FROM banks WHERE id = $1 AND is_active = true';
     const bankResult = await db.query(bankQuery, [bankId]);
 
@@ -105,7 +125,7 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
     }
 
     const bank = bankResult.rows[0];
-    const fileUrl = `${baseUrl}/${bank.code}`;
+    const fileUrl = `${baseUrl.replace(/\/+$/, '')}/${bank.code}`;
     const fileName = 'latest.csv';
     const fullUrl = `${fileUrl}/${fileName}`;
 
@@ -113,6 +133,7 @@ router.post('/process-url', authMiddleware, forceBankId, validate(processingSche
       bankId,
       fileUrl: fullUrl,
       fileName,
+      trustedUrl: false,
       userId: req.user?.id,
       username: req.user?.username || 'SYSTEM',
       ipAddress: req.ip,
@@ -194,8 +215,11 @@ router.post('/upload', authMiddleware, upload.single('file'), forceBankId, valid
 // Get validation errors for a file
 router.get('/errors/:fileLogId', authMiddleware, async (req, res) => {
   try {
+    const fileLog = await loadFileLog(req, res, req.params.fileLogId);
+    if (!fileLog) return;
+
     const query = `
-      SELECT 
+      SELECT
         ve.*,
         fl.file_name,
         b.name as bank_name
@@ -206,11 +230,11 @@ router.get('/errors/:fileLogId', authMiddleware, async (req, res) => {
       ORDER BY ve.row_number, ve.id
     `;
 
-    const result = await db.query(query, [req.params.fileLogId]);
+    const result = await db.query(query, [fileLog.id]);
 
     res.json({
       success: true,
-      data: result.rows
+      data: result.rows.map(presentValidationError)
     });
   } catch (error) {
     console.error('Get errors error:', error);
@@ -226,29 +250,59 @@ router.get('/errors/:fileLogId', authMiddleware, async (req, res) => {
 router.patch('/errors/:errorId/resolve', authMiddleware, async (req, res) => {
   try {
     const { correctedValue } = req.body;
+    const errorId = parseInt(req.params.errorId, 10);
 
-    const query = `
-      UPDATE validation_errors 
-      SET is_resolved = true, field_value = $1
-      WHERE id = $2
-      RETURNING *
-    `;
+    if (Number.isNaN(errorId)) {
+      return res.status(400).json({ success: false, message: 'Identifiant invalide' });
+    }
+    const hasCorrection = correctedValue !== undefined && correctedValue !== null;
+    if (hasCorrection && String(correctedValue).length > 255) {
+      return res.status(400).json({ success: false, message: 'Valeur corrigée invalide' });
+    }
 
-    const result = await db.query(query, [correctedValue, req.params.errorId]);
+    const existing = await db.query(
+      `SELECT ve.id, ve.field_name, fl.bank_id
+       FROM validation_errors ve
+       JOIN file_logs fl ON ve.file_log_id = fl.id
+       WHERE ve.id = $1`,
+      [errorId]
+    );
 
-    if (result.rows.length === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Erreur non trouvée'
       });
     }
 
-    await auditService.logAction('RESOLVE_ERROR', { tableName: 'validation_errors', recordId: req.params.errorId, newData: { correctedValue } }, req);
+    if (!canAccessBank(req.user, existing.rows[0].bank_id)) {
+      return denyBankAccess(res);
+    }
+
+    // Un PAN corrigé n'est jamais stocké en clair ; sans valeur, l'erreur est simplement acquittée
+    const fieldName = existing.rows[0].field_name;
+    const value = hasCorrection ? String(correctedValue).trim() : null;
+    const storedValue = value !== null && fieldName === 'pan' ? encrypt(value) : value;
+
+    const query = `
+      UPDATE validation_errors
+      SET is_resolved = true, field_value = CASE WHEN $3::boolean THEN $1 ELSE field_value END
+      WHERE id = $2
+      RETURNING *
+    `;
+
+    const result = await db.query(query, [storedValue, errorId, hasCorrection]);
+
+    await auditService.logAction('RESOLVE_ERROR', {
+      tableName: 'validation_errors',
+      recordId: errorId,
+      newData: { field: fieldName, correctedValue: fieldName === 'pan' && value ? maskPan(value) : value }
+    }, req);
 
     res.json({
       success: true,
       message: 'Erreur résolue avec succès',
-      data: result.rows[0]
+      data: presentValidationError(result.rows[0])
     });
   } catch (error) {
     console.error('Resolve error:', error);
@@ -263,12 +317,13 @@ router.patch('/errors/:errorId/resolve', authMiddleware, async (req, res) => {
 // Get file logs
 router.get('/logs', authMiddleware, async (req, res) => {
   try {
-    const { bankId, status, limit = 50, offset = 0 } = req.query;
+    const { status, limit = 50, offset = 0 } = req.query;
+    const bankId = effectiveBankId(req.user, req.query.bankId);
     const safeLimit = Math.min(parseInt(limit) || 50, 500);
     const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
     let query = `
-      SELECT 
+      SELECT
         fl.*,
         b.name as bank_name,
         b.code as bank_code
@@ -276,11 +331,11 @@ router.get('/logs', authMiddleware, async (req, res) => {
       JOIN banks b ON fl.bank_id = b.id
       WHERE 1=1
     `;
-    
+
     const params = [];
     let paramCount = 1;
 
-    if (bankId) {
+    if (bankId !== null) {
       query += ` AND fl.bank_id = $${paramCount}`;
       params.push(bankId);
       paramCount++;
@@ -302,7 +357,7 @@ router.get('/logs', authMiddleware, async (req, res) => {
     const countParams = [];
     let countParamCount = 1;
 
-    if (bankId) {
+    if (bankId !== null) {
       countQuery += ` AND fl.bank_id = $${countParamCount}`;
       countParams.push(bankId);
       countParamCount++;
@@ -317,7 +372,8 @@ router.get('/logs', authMiddleware, async (req, res) => {
 
     res.json({
       success: true,
-      data: result.rows,
+      // original_path peut contenir des identifiants SFTP/FTP
+      data: result.rows.map(({ original_path, ...row }) => row),
       pagination: {
         total: parseInt(countResult.rows[0].count),
         limit: safeLimit,
@@ -337,44 +393,30 @@ router.get('/logs', authMiddleware, async (req, res) => {
 // Download corrected CSV
 router.get('/download/:fileLogId', authMiddleware, async (req, res) => {
   try {
-    // Get file log details
-    const logQuery = 'SELECT * FROM file_logs WHERE id = $1';
-    const logResult = await db.query(logQuery, [req.params.fileLogId]);
-
-    if (logResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Log de fichier non trouvé'
-      });
-    }
-
-    const fileLog = logResult.rows[0];
+    const fileLog = await loadFileLog(req, res, req.params.fileLogId);
+    if (!fileLog) return;
 
     // Get all valid records from this file
     const recordsQuery = `
-      SELECT * FROM processed_records 
+      SELECT * FROM processed_records
       WHERE bank_id = $1 AND file_name = $2
       ORDER BY id
     `;
-    
+
     const recordsResult = await db.query(recordsQuery, [
       fileLog.bank_id,
       fileLog.file_name
     ]);
 
-    await auditService.logAction('DOWNLOAD_FILE', { tableName: 'file_logs', recordId: req.params.fileLogId, newData: { bankId: fileLog.bank_id, fileName: fileLog.file_name } }, req);
+    await auditService.logAction('DOWNLOAD_FILE', { tableName: 'file_logs', recordId: fileLog.id, newData: { bankId: fileLog.bank_id, fileName: fileLog.file_name } }, req);
 
-    const outputPath = path.join('/tmp', `corrected_${fileLog.file_name}`);
-    await csvProcessor.generateCorrectedCSV(recordsResult.rows, outputPath);
+    const csvContent = csvProcessor.buildCorrectedCSV(recordsResult.rows);
+    const downloadName = `corrected_${path.basename(String(fileLog.file_name)).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
-    res.download(outputPath, `corrected_${fileLog.file_name}`, (err) => {
-      if (err) {
-        console.error('Download error:', err);
-      }
-      if (fs.existsSync(outputPath)) {
-        fs.unlinkSync(outputPath);
-      }
-    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(csvContent);
   } catch (error) {
     console.error('Download error:', error);
     res.status(500).json({
@@ -388,28 +430,44 @@ router.get('/download/:fileLogId', authMiddleware, async (req, res) => {
 // Reprocess file after corrections
 router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
   try {
-    const logQuery = `
-      SELECT fl.*, b.* 
-      FROM file_logs fl
-      JOIN banks b ON fl.bank_id = b.id
-      WHERE fl.id = $1
-    `;
-    
-    const logResult = await db.query(logQuery, [req.params.fileLogId]);
+    const fileLog = await loadFileLog(req, res, req.params.fileLogId);
+    if (!fileLog) return;
 
-    if (logResult.rows.length === 0) {
-      return res.status(404).json({
+    const reprocessableSources = ['url', 'cron'];
+    if (!reprocessableSources.includes(fileLog.source_type) || !fileLog.original_path) {
+      return res.status(400).json({
         success: false,
-        message: 'Log de fichier non trouvé'
+        message: 'Ce type de source ne peut pas être retraité automatiquement. Importez à nouveau le fichier corrigé.'
       });
     }
 
-    const fileLog = logResult.rows[0];
+    if (fileLog.status === 'success') {
+      return res.status(400).json({
+        success: false,
+        message: 'Ce fichier a déjà été traité avec succès'
+      });
+    }
+
+    // Les corrections saisies par l'utilisateur sont appliquées lors du retraitement
+    const resolved = await db.query(
+      `SELECT row_number, field_name, field_value FROM validation_errors
+       WHERE file_log_id = $1 AND is_resolved = true AND row_number > 0`,
+      [fileLog.id]
+    );
+    const corrections = resolved.rows.map(r => ({
+      rowNumber: r.row_number,
+      field: r.field_name,
+      value: r.field_value,
+      encrypted: r.field_name === 'pan'
+    }));
 
     const { jobId } = await enqueueJob('process-url', {
       bankId: fileLog.bank_id,
       fileUrl: fileLog.original_path,
       fileName: fileLog.file_name,
+      sourceType: fileLog.source_type,
+      trustedUrl: true,
+      corrections,
       userId: req.user?.id,
       username: req.user?.username || 'SYSTEM',
       ipAddress: req.ip,
@@ -421,6 +479,7 @@ router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
       data: {
         jobId,
         status: 'pending',
+        correctionsApplied: corrections.length
       }
     });
   } catch (error) {
@@ -433,48 +492,49 @@ router.post('/reprocess/:fileLogId', authMiddleware, async (req, res) => {
   }
 });
 
-
 // Validate manual entries
 router.post('/validate-manual', authMiddleware, forceBankId, async (req, res) => {
   try {
     const { bankId, entries } = req.body;
-    
-    if (!bankId || !entries || entries.length === 0) {
+
+    if (!bankId || !Array.isArray(entries) || entries.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Banque et enregistrements requis'
       });
     }
 
-    const validatedEntries = [];
-    
-    for (const entry of entries) {
-      let status = 'valid';
-      let errorMessage = '';
-      
-      // Check for duplicate PAN in database
-      const panHash = hashPan(entry.pan);
+    if (entries.length > MAX_MANUAL_ENTRIES) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${MAX_MANUAL_ENTRIES} enregistrements par requête`
+      });
+    }
+
+    const { valid, invalid } = validateCards(entries);
+    const validatedEntries = new Array(entries.length);
+
+    for (const item of invalid) {
+      validatedEntries[item.index] = {
+        ...entries[item.index],
+        status: 'error',
+        errorMessage: item.errors.map(e => e.message).join(', '),
+        errors: item.errors
+      };
+    }
+
+    for (const item of valid) {
       const duplicateCheck = await db.query(
         'SELECT id FROM processed_records WHERE bank_id = $1 AND pan_hash = $2 LIMIT 1',
-        [bankId, panHash]
+        [bankId, hashPan(item.card.pan)]
       );
-      
-      if (duplicateCheck.rows.length > 0) {
-        status = 'duplicate';
-        errorMessage = 'PAN deja existant en base de donnees';
-      }
-      
-      // Validate PAN format
-      if (!/^\d{16}$/.test(entry.pan)) {
-        status = 'error';
-        errorMessage = 'PAN invalide (16 chiffres requis)';
-      }
-      
-      validatedEntries.push({
-        ...entry,
-        status,
-        errorMessage
-      });
+      const isDuplicate = duplicateCheck.rows.length > 0;
+      validatedEntries[item.index] = {
+        ...entries[item.index],
+        status: isDuplicate ? 'duplicate' : 'valid',
+        errorMessage: isDuplicate ? 'PAN deja existant en base de donnees' : '',
+        warnings: item.warnings
+      };
     }
 
     res.json({
@@ -504,11 +564,27 @@ router.post('/validate-manual', authMiddleware, forceBankId, async (req, res) =>
 router.post('/process-manual', authMiddleware, forceBankId, async (req, res) => {
   try {
     const { bankId, entries } = req.body;
-    
-    if (!bankId || !entries || entries.length === 0) {
+
+    if (!bankId || !Array.isArray(entries) || entries.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Banque et enregistrements requis'
+      });
+    }
+
+    if (entries.length > MAX_MANUAL_ENTRIES) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${MAX_MANUAL_ENTRIES} enregistrements par requête`
+      });
+    }
+
+    const { valid, invalid } = validateCards(entries);
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `${invalid.length} enregistrement(s) invalide(s)`,
+        data: { invalidEntries: invalid }
       });
     }
 
@@ -520,9 +596,12 @@ router.post('/process-manual', authMiddleware, forceBankId, async (req, res) => 
       });
     }
 
+    // Le PAN est chiffré avant d'être déposé dans la file d'attente (Redis)
+    const protectedEntries = valid.map(v => ({ ...v.card, pan: encrypt(v.card.pan) }));
+
     const { jobId } = await enqueueJob('process-manual', {
       bankId,
-      entries,
+      entries: protectedEntries,
       userId: req.user?.id,
       username: req.user?.username || 'SYSTEM',
       ipAddress: req.ip,
@@ -559,7 +638,9 @@ router.post('/call-api', authMiddleware, forceBankId, validate(processingSchemas
       });
     }
 
-    if (!isAllowedApiUrl(url)) {
+    try {
+      await assertSafeUrl(url, urlCheckOptions(['http', 'https']));
+    } catch (e) {
       return res.status(400).json({
         success: false,
         message: 'URL non autorisée'
@@ -573,8 +654,10 @@ router.post('/call-api', authMiddleware, forceBankId, validate(processingSchemas
       headers,
       body,
       authType,
-      authToken,
+      // Le secret d'authentification est chiffré avant d'être déposé dans Redis
+      authToken: authToken ? encrypt(authToken) : authToken,
       dataPath,
+      trustedUrl: false,
       userId: req.user?.id,
       username: req.user?.username || 'SYSTEM',
       ipAddress: req.ip,
@@ -602,16 +685,20 @@ router.post('/call-api', authMiddleware, forceBankId, validate(processingSchemas
 router.get('/status/:jobId', authMiddleware, async (req, res) => {
   try {
     const job = await getJob(req.params.jobId);
-    if (!job) {
+    if (!job || !canAccessBank(req.user, job.data?.bankId)) {
+      // Même réponse qu'un job inexistant : ne révèle pas l'existence d'un job d'une autre banque
       return res.status(404).json({
         success: false,
         message: 'Job non trouvé'
       });
     }
 
+    const safeData = { ...(job.data || {}) };
+    for (const field of SENSITIVE_JOB_FIELDS) delete safeData[field];
+
     res.json({
       success: true,
-      data: job
+      data: { ...job, data: safeData }
     });
   } catch (error) {
     console.error('Get job status error:', error);
@@ -627,7 +714,8 @@ router.get('/status/:jobId', authMiddleware, async (req, res) => {
 router.get('/queue/stats', authMiddleware, async (req, res) => {
   try {
     const stats = await getQueueStats();
-    const activeJobs = await getActiveJobs();
+    const activeJobs = (await getActiveJobs())
+      .filter(job => canAccessBank(req.user, job.bankId));
 
     res.json({
       success: true,

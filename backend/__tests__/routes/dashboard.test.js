@@ -4,7 +4,7 @@ const request = require('supertest');
 jest.mock('../../config/database');
 jest.mock('../../middleware/auth', () => ({
   authMiddleware: (req, res, next) => {
-    req.user = req.user || { id: 1, username: 'admin', role: 'admin', bank_id: null };
+    req.user = req.user || { id: 1, username: 'admin', role: 'super_admin', bank_id: null };
     next();
   }
 }));

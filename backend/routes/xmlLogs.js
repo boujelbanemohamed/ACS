@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { filterByBank } = require('../middleware/roleMiddleware');
+const { effectiveBankId, canAccessBank, denyBankAccess, redactBankUrls } = require('../utils/bankScope');
 
 const router = express.Router();
 
@@ -68,7 +69,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 
     res.json({
       success: true,
-      data: result.rows,
+      data: result.rows.map(redactBankUrls),
       pagination: {
         total: parseInt(countResult.rows[0].count),
         limit: parseInt(limit),
@@ -88,7 +89,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 // Get XML statistics
 router.get('/stats/summary', authMiddleware, filterByBank, async (req, res) => {
   try {
-    const { bankId } = req.query;
+    const bankId = effectiveBankId(req.user, req.query.bankId);
     
     let query = `
       SELECT 
@@ -103,9 +104,9 @@ router.get('/stats/summary', authMiddleware, filterByBank, async (req, res) => {
     `;
     
     const queryParams = [];
-    if (bankId) {
+    if (bankId !== null) {
       query += ' WHERE fl.bank_id = $1';
-      queryParams.push(parseInt(bankId));
+      queryParams.push(bankId);
     }
     
     const result = await db.query(query, queryParams);
@@ -148,9 +149,13 @@ router.get('/:id', authMiddleware, async (req, res) => {
       });
     }
 
+    if (!canAccessBank(req.user, result.rows[0].bank_id)) {
+      return denyBankAccess(res);
+    }
+
     res.json({
       success: true,
-      data: result.rows[0]
+      data: redactBankUrls(result.rows[0])
     });
   } catch (error) {
     console.error('Get XML log error:', error);

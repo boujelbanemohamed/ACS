@@ -76,9 +76,11 @@ describe('EncryptionService', () => {
       expect(decrypt('plainpan0001')).toBe('plainpan0001');
     });
 
-    it('returns plaintext if it has wrong format parts', () => {
+    it('returns null (never the raw value) for an unreadable encrypted value', () => {
       const { decrypt } = require('../../services/encryptionService');
-      expect(decrypt('abc:def')).toBe('abc:def');
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation();
+      expect(decrypt('abc:def')).toBeNull();
+      errorSpy.mockRestore();
     });
   });
 
@@ -172,14 +174,49 @@ describe('EncryptionService', () => {
       expect(() => encrypt('4741000000000006')).toThrow('PAN_ENCRYPTION_KEY');
     });
 
-    it('returns ciphertext unchanged on decrypt when key is missing (graceful degradation)', () => {
+    it('returns null on decrypt when key is missing (ciphertext never leaked as a PAN)', () => {
       const { encrypt } = require('../../services/encryptionService');
       const ciphertext = encrypt('4741000000000006');
       delete process.env.PAN_ENCRYPTION_KEY;
       jest.resetModules();
       const { decrypt } = require('../../services/encryptionService');
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation();
       const result = decrypt(ciphertext);
-      expect(result).toBe(ciphertext);
+      errorSpy.mockRestore();
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('hashPan (HMAC)', () => {
+    beforeEach(() => {
+      jest.resetModules();
+      process.env.PAN_ENCRYPTION_KEY = 'test-encryption-key-for-hash';
+      delete process.env.PAN_HASH_KEY;
+    });
+
+    it('is deterministic but differs from the unkeyed SHA-256 (not brute-forceable offline)', () => {
+      const { hashPan, hashPanLegacy } = require('../../services/encryptionService');
+      const crypto = require('crypto');
+      expect(hashPan('4741000000000006')).toBe(hashPan('4741000000000006'));
+      expect(hashPan('4741000000000006')).not.toBe(hashPanLegacy('4741000000000006'));
+      expect(hashPanLegacy('4741000000000006')).toBe(crypto.createHash('sha256').update('4741000000000006').digest('hex'));
+    });
+
+    it('depends on the secret key', () => {
+      const first = require('../../services/encryptionService').hashPan('4741000000000006');
+      jest.resetModules();
+      process.env.PAN_HASH_KEY = 'another-dedicated-hash-key';
+      const second = require('../../services/encryptionService').hashPan('4741000000000006');
+      expect(first).not.toBe(second);
+      delete process.env.PAN_HASH_KEY;
+    });
+  });
+
+  describe('maskPan on already masked values', () => {
+    it('does not lose the mask', () => {
+      const { maskPan, maskResponseData } = require('../../services/encryptionService');
+      expect(maskPan('************5556')).toBe('************5556');
+      expect(maskResponseData({ pan: '************5556' }).pan).toBe('************5556');
     });
   });
 });

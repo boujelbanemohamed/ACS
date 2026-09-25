@@ -15,7 +15,11 @@ jest.mock('../config/database', () => ({
 
 jest.mock('helmet', () => () => (req, res, next) => next());
 jest.mock('compression', () => () => (req, res, next) => next());
-jest.mock('morgan', () => () => (req, res, next) => next());
+jest.mock('morgan', () => {
+  const morgan = () => (req, res, next) => next();
+  morgan.token = jest.fn();
+  return morgan;
+});
 const corsConfigs = [];
 jest.mock('cors', () => jest.fn((opts) => {
   corsConfigs.push(opts);
@@ -27,7 +31,8 @@ jest.mock('../services/cronService', () => ({
   init: jest.fn(),
   schedule: '*/5 * * * *',
   describeCron: jest.fn().mockReturnValue('every 5 minutes'),
-  enabled: true
+  enabled: true,
+  stop: jest.fn()
 }));
 jest.mock('../services/roleFeaturesService', () => ({
   seedDefaults: jest.fn().mockResolvedValue()
@@ -219,10 +224,11 @@ describe('Server app', () => {
       expect(globalConfig.windowMs).toBe(15 * 60 * 1000);
     });
 
-    it('applies auth rate limiter with configurable max', () => {
-      const authConfig = rateLimitConfigs.find(c => c.max === 1000 || c.max === parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10));
+    it('applies a strict auth rate limiter (failed attempts only, 15 min window)', () => {
+      const expectedMax = parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 30;
+      const authConfig = rateLimitConfigs.find(c => c.max === expectedMax && c.skipSuccessfulRequests);
       expect(authConfig).toBeDefined();
-      expect(authConfig.windowMs).toBe(60 * 1000);
+      expect(authConfig.windowMs).toBe(15 * 60 * 1000);
     });
   });
 

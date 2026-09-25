@@ -93,7 +93,7 @@ const Live = () => {
       }
     }).catch(() => {}).finally(() => setLoading(false));
 
-    const url = `/api/live/stream?token=${encodeURIComponent(token)}`;
+    const url = `${api.defaults.baseURL}/live/stream?token=${encodeURIComponent(token)}`;
     const es = new EventSource(url);
 
     es.onopen = () => setConnected(true);

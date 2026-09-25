@@ -6,6 +6,7 @@ const { checkRole } = require('../middleware/roleMiddleware');
 const enrollmentService = require('../services/enrollmentService');
 const auditService = require('../services/auditService');
 
+const { isBankScoped, canAccessBank, effectiveBankId } = require('../utils/bankScope');
 const router = express.Router();
 
 // Configuration multer pour upload XML
@@ -62,8 +63,8 @@ router.get('/stats', authMiddleware, async (req, res) => {
     
     // Si utilisateur banque, forcer son bankId
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     const stats = await enrollmentService.getEnrollmentStats(filterBankId);
@@ -88,8 +89,8 @@ router.get('/logs', authMiddleware, async (req, res) => {
     
     // Si utilisateur banque, forcer son bankId
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     const logs = await enrollmentService.getEnrollmentLogs(
@@ -138,6 +139,10 @@ router.get('/logs/:id', authMiddleware, async (req, res) => {
         success: false,
         message: 'Log non trouve'
       });
+    }
+
+    if (!canAccessBank(req.user, result.rows[0].bank_id)) {
+      return res.status(403).json({ success: false, message: 'Accès non autorisé à cette banque' });
     }
     
     res.json({

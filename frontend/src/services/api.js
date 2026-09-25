@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5001/api";
+const API_URL = process.env.REACT_APP_API_URL || "/api";
 
 const api = axios.create({
   baseURL: API_URL,
@@ -28,6 +28,14 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    // Changement de mot de passe imposé par le serveur
+    if (error.response && error.response.status === 403 && error.response.data?.code === 'PASSWORD_CHANGE_REQUIRED') {
+      localStorage.setItem('must_change_password', 'true');
+      if (!window.location.pathname.includes('/change-password')) {
+        window.location.href = "/change-password";
+      }
+      return Promise.reject(error);
+    }
     if (error.response && error.response.status === 401 && !window.location.pathname.includes('/login')) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
@@ -40,7 +48,6 @@ api.interceptors.response.use(
 
 export const authAPI = {
   login: (credentials) => api.post("/auth/login", credentials),
-  register: (userData) => api.post("/auth/register", userData),
   getMe: () => api.get("/auth/me"),
   changePassword: (passwords) => api.put("/auth/change-password", passwords),
 };
@@ -72,10 +79,9 @@ export const processingAPI = {
   getQueueStats: () => api.get("/processing/queue/stats"),
 };
 
+// Seule route exposée par le backend : GET /dashboard (statistiques, filtres bankId / dateFrom / dateTo)
 export const dashboardAPI = {
-  getStats: () => api.get("/dashboard/stats"),
-  getUnresolvedErrors: () => api.get("/dashboard/errors/unresolved"),
-  getRecentRecords: (limit) => api.get("/dashboard/records/recent", { params: { limit } }),
+  getStats: (params) => api.get("/dashboard", { params }),
 };
 
 export default api;

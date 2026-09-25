@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
+import api from '../services/api';
 
 const PAGE_NAMES = {
   '/dashboard': 'Tableau de bord',
@@ -33,15 +34,9 @@ export default function usePageTracking() {
     if (!token) return;
 
     const pageName = PAGE_NAMES[path] || path;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-
-    fetch('/api/live/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ page: path, action: 'PAGE_VIEW', details: pageName }),
-      signal: controller.signal,
-    }).catch(() => {}).finally(() => clearTimeout(timeout));
+    // Même client HTTP que le reste de l'application (URL de l'API et jeton)
+    api.post('/live/track', { page: path, action: 'PAGE_VIEW', details: pageName }, { timeout: 3000 })
+      .catch(() => {});
 
   }, [location.pathname]);
 }

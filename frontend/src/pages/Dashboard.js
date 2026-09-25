@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Building2, FileText, CheckCircle, Clock, Database, Activity, AlertTriangle, Zap, BarChart3, ArrowRight, RefreshCw, Inbox, ChevronRight, Calendar, Filter } from 'lucide-react';
+import { Building2, FileText, CheckCircle, Clock, Database, Activity, AlertTriangle, Zap, BarChart3, RefreshCw, Inbox, ChevronRight, Calendar, Filter } from 'lucide-react';
 import api from '../services/api';
 import './Dashboard.css';
 

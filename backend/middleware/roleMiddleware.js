@@ -75,10 +75,10 @@ const filterByBank = (req, res, next) => {
     return next();
   }
 
-  if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
-    req.query.bankId = req.user.bank_id;
-    req.bankFilter = req.user.bank_id;
-  }
+  // Tout utilisateur non super_admin est limité à sa banque (-1 = aucune banque => aucun résultat)
+  const bankId = req.user.bank_id ? req.user.bank_id : -1;
+  req.query.bankId = bankId;
+  req.bankFilter = bankId;
 
   next();
 };
@@ -91,8 +91,14 @@ const forceBankId = (req, res, next) => {
     });
   }
 
-  if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
-    req.body.bankId = req.user.bank_id;
+  if (req.user.role !== 'super_admin') {
+    if (!req.user.bank_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Aucune banque associée à votre compte'
+      });
+    }
+    if (req.body) req.body.bankId = req.user.bank_id;
   }
 
   next();
@@ -119,7 +125,8 @@ const checkFeature = (featureName) => {
       }
       next();
     } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+      console.error('checkFeature error:', error);
+      res.status(500).json({ success: false, message: 'Erreur lors de la vérification des droits' });
     }
   };
 };

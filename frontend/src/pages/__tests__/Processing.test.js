@@ -71,8 +71,8 @@ const banksData = [
 ];
 
 const apiKeysData = [
-  { id: 1, name: 'Production Client A', api_key: 'sk-prod-a1b2c3d4e5f6g7h8i9j0', institution: 'Banque Centrale', is_active: true },
-  { id: 2, name: 'Test API', api_key: 'sk-test-x1y2z3w4v5u6t7s8r9q0', institution: 'BIAT', is_active: true },
+  { id: 1, name: 'Production Client A', key_prefix: 'acs_a1b2c3d4', institution: 'Banque Centrale', is_active: true },
+  { id: 2, name: 'Test API', key_prefix: 'acs_x1y2z3w4', institution: 'BIAT', is_active: true },
 ];
 
 let Processing;
@@ -705,7 +705,7 @@ describe('Processing', () => {
     await waitFor(() => expect(mockAlert).toHaveBeenCalledWith('Erreur: Delete failed'));
   });
 
-  it('copyToClipboard copies API key and shows notification', async () => {
+  it('lists API keys by prefix only (the full key is never displayed again)', async () => {
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
     fireEvent.click(screen.getByText('API Interne'));
@@ -714,9 +714,8 @@ describe('Processing', () => {
     await waitFor(() => expect(screen.getByText('Creer une nouvelle cle API')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Annuler'));
     await waitFor(() => expect(screen.getByText('Production Client A')).toBeInTheDocument());
-    fireEvent.click(screen.getAllByTitle('Copier')[0]);
-    await waitFor(() => expect(screen.getByText('Copie dans le presse-papier!')).toBeInTheDocument());
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('sk-prod-a1b2c3d4e5f6g7h8i9j0');
+    expect(screen.getByText('acs_a1b2c3d4...')).toBeInTheDocument();
+    expect(screen.queryAllByTitle('Copier')).toHaveLength(0);
   });
 
   it('fetchBanks error does not break rendering', async () => {

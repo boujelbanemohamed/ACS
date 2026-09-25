@@ -10,8 +10,9 @@ router.get('/', authMiddleware, async (req, res) => {
     let bankFilterId = bankId ? parseInt(bankId) : null;
     const hasDateFilter = dateFrom || dateTo;
 
-    if ((req.user.role === 'bank' || req.user.role === 'bank_admin') && req.user.bank_id) {
-      bankFilterId = req.user.bank_id;
+    // Tout utilisateur non super_admin ne voit que sa banque (-1 = aucune banque associée)
+    if (req.user.role !== 'super_admin') {
+      bankFilterId = req.user.bank_id || -1;
     }
 
     const bankClause = bankFilterId ? ' AND bank_id = $1' : '';

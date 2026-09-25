@@ -17,6 +17,8 @@ jest.mock('fs', () => {
       writeFile: jest.fn(),
       mkdir: jest.fn(),
       readFile: jest.fn(),
+      mkdtemp: jest.fn(),
+      rm: jest.fn(),
     },
   };
 });
@@ -65,6 +67,11 @@ function makeValidRow(overrides = {}) {
   };
 }
 
+// Flux de réponse HTTP simulé (pipe + événements)
+function mockStream() {
+  return { pipe: jest.fn().mockReturnThis(), on: jest.fn().mockReturnThis(), destroy: jest.fn() };
+}
+
 function setupCSVStream(dataRows, headers) {
   if (headers) {
     mockCSVStream.emit('headers', headers);
@@ -96,6 +103,9 @@ describe('CSVProcessor', () => {
     fs.promises.unlink.mockResolvedValue();
     fs.promises.writeFile.mockResolvedValue();
     fs.promises.mkdir.mockResolvedValue();
+    fs.promises.mkdtemp.mockResolvedValue('/tmp/acs-dl-TEST');
+    fs.promises.rm.mockResolvedValue();
+    fs.promises.readFile.mockResolvedValue(Buffer.from('language;pan\n'));
 
     remoteFileService.isRemote.mockReturnValue(false);
     remoteFileService.listFiles.mockReset();
@@ -117,7 +127,7 @@ describe('CSVProcessor', () => {
     hashPan.mockImplementation(v => `hash_${v}`);
 
     axios.mockReset();
-    axios.mockResolvedValue({ data: { pipe: jest.fn().mockReturnThis() } });
+    axios.mockResolvedValue({ data: mockStream() });
     axios.get = jest.fn();
   });
 
@@ -359,23 +369,38 @@ describe('CSVProcessor', () => {
   });
 
   describe('downloadFile', () => {
-    it('downloads file from HTTP URL', async () => {
-      const mockPipe = jest.fn().mockReturnThis();
-      axios.mockResolvedValue({ data: { pipe: mockPipe } });
+    it('downloads file from HTTP URL with a size limit', async () => {
+      axios.mockResolvedValue({ data: mockStream() });
 
       await processor.downloadFile('http://example.com/file.csv', '/tmp/file.csv');
 
-      expect(axios).toHaveBeenCalledWith({
+      expect(axios).toHaveBeenCalledWith(expect.objectContaining({
         method: 'GET',
         url: 'http://example.com/file.csv',
         responseType: 'stream',
-        timeout: 30000
-      });
+        timeout: 30000,
+        maxContentLength: expect.any(Number)
+      }));
       expect(fs.createWriteStream).toHaveBeenCalledWith('/tmp/file.csv');
     });
 
+    it('untrusted URL: refuses internal addresses and disables redirects', async () => {
+      await expect(processor.downloadFile('http://127.0.0.1/file.csv', '/tmp/file.csv', { trustedUrl: false }))
+        .rejects.toThrow('interne');
+      expect(axios).not.toHaveBeenCalled();
+
+      await processor.downloadFile('http://93.184.216.34/file.csv', '/tmp/file.csv', { trustedUrl: false });
+      expect(axios).toHaveBeenCalledWith(expect.objectContaining({ maxRedirects: 0 }));
+    });
+
+    it('untrusted URL: refuses local paths', async () => {
+      await expect(processor.downloadFile('/etc/passwd', '/tmp/file.csv', { trustedUrl: false }))
+        .rejects.toThrow('non autorisé');
+      expect(fs.promises.cp).not.toHaveBeenCalled();
+    });
+
     it('downloads file from HTTPS URL', async () => {
-      axios.mockResolvedValue({ data: { pipe: jest.fn().mockReturnThis() } });
+      axios.mockResolvedValue({ data: mockStream() });
 
       await processor.downloadFile('https://example.com/file.csv', '/tmp/file.csv');
 
@@ -417,7 +442,7 @@ describe('CSVProcessor', () => {
   describe('processFileFromURL', () => {
     beforeEach(() => {
       db.query.mockResolvedValue({ rows: [{ id: 42 }] });
-      axios.mockResolvedValue({ data: { pipe: jest.fn().mockReturnThis() } });
+      axios.mockResolvedValue({ data: mockStream() });
     });
 
     it('processes file from HTTP URL successfully', async () => {
@@ -434,6 +459,43 @@ describe('CSVProcessor', () => {
       expect(result.fileLogId).toBe(42);
       expect(result.stats.validRows).toBe(1);
       expect(result.validRecords).toHaveLength(1);
+      // "success" n'est posé qu'après l'enregistrement et le XML (pipelineService)
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('UPDATE file_logs'), expect.arrayContaining(['processing']));
+    });
+
+    it('warnings alone do not block the file', async () => {
+      jest.spyOn(processor, 'parseAndValidateCSV').mockResolvedValue({
+        rows: [makeValidRow()],
+        errors: [{ rowNumber: 1, field: 'pan', error: 'Luhn', severity: 'warning' }],
+        stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0, updatedRows: 0 },
+        allRows: [makeValidRow()]
+      });
+
+      const result = await processor.processFileFromURL(1, 'http://example.com/test.csv', 'test.csv');
+
+      expect(result.success).toBe(true);
+    });
+
+    it('skips an unchanged file already rejected (no new file log)', async () => {
+      db.query.mockResolvedValue({ rows: [{ status: 'validation_error', file_hash: require('crypto').createHash('sha256').update('language;pan\n').digest('hex') }] });
+      const createSpy = jest.spyOn(processor, 'createFileLog');
+
+      const result = await processor.processFileFromURL(1, 'http://example.com/test.csv', 'test.csv', { skipIfUnchanged: true });
+
+      expect(result.skipped).toBe(true);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(fs.promises.rm).toHaveBeenCalledWith('/tmp/acs-dl-TEST', { recursive: true, force: true });
+    });
+
+    it('applies user corrections before validation', async () => {
+      const parseSpy = jest.spyOn(processor, 'parseAndValidateCSV').mockResolvedValue({
+        rows: [], errors: [], stats: { totalRows: 0, validRows: 0, invalidRows: 0, duplicateRows: 0, updatedRows: 0 }, allRows: []
+      });
+      const corrections = [{ rowNumber: 2, field: 'phone', value: '21699123456' }];
+
+      await processor.processFileFromURL(1, 'http://example.com/test.csv', 'test.csv', { corrections });
+
+      expect(parseSpy).toHaveBeenCalledWith('/tmp/acs-dl-TEST/input.csv', 1, { corrections });
     });
 
     it('reports validation errors', async () => {
@@ -487,7 +549,7 @@ describe('CSVProcessor', () => {
       });
     });
 
-    it('cleans up temp file after processing', async () => {
+    it('uses a private temporary folder per job and removes it', async () => {
       jest.spyOn(processor, 'parseAndValidateCSV').mockResolvedValue({
         rows: [makeValidRow()], errors: [],
         stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0, updatedRows: 0 },
@@ -496,7 +558,9 @@ describe('CSVProcessor', () => {
 
       await processor.processFileFromURL(1, 'http://example.com/test.csv', 'test.csv');
 
-      expect(fs.promises.unlink).toHaveBeenCalledWith(path.join('/tmp', 'test.csv'));
+      // Jamais /tmp/<nom du fichier> partagé entre banques
+      expect(fs.createWriteStream).toHaveBeenCalledWith(path.join('/tmp/acs-dl-TEST', 'input.csv'));
+      expect(fs.promises.rm).toHaveBeenCalledWith('/tmp/acs-dl-TEST', { recursive: true, force: true });
     });
   });
 
@@ -660,8 +724,14 @@ describe('CSVProcessor', () => {
       expect(result).toBe(99);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO file_logs'),
-        [1, 'test.csv', '/path/file.csv']
+        [1, 'test.csv', '/path/file.csv', 'upload', null]
       );
+    });
+
+    it('records the source type and the content hash', async () => {
+      db.query.mockResolvedValue({ rows: [{ id: 5 }] });
+      await processor.createFileLog(1, 'a.csv', 'sftp://h/a.csv', { sourceType: 'cron', fileHash: 'abc' });
+      expect(db.query).toHaveBeenCalledWith(expect.any(String), [1, 'a.csv', 'sftp://h/a.csv', 'cron', 'abc']);
     });
   });
 
@@ -700,7 +770,8 @@ describe('CSVProcessor', () => {
       expect(db.query).toHaveBeenCalledTimes(1);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO validation_errors'),
-        [42, 1, 'pan', '1234', 'Invalid length', 'error', 42, 2, 'phone', 'abc', 'Invalid format', 'error']
+        // La valeur d'un PAN est chiffrée, les autres champs restent lisibles
+        [42, 1, 'pan', 'enc_1234', 'Invalid length', 'error', 42, 2, 'phone', 'abc', 'Invalid format', 'error']
       );
     });
 
@@ -859,30 +930,18 @@ describe('CSVProcessor', () => {
       expect(fs.promises.mkdir).toHaveBeenCalledWith('/archive', { recursive: true });
     });
 
-    it('handles SFTP source and archive', async () => {
+    it('handles SFTP source and archive (copy through a private temporary folder)', async () => {
       remoteFileService.isRemote.mockReturnValue(true);
-      const mockSftp = {
-        mkdir: jest.fn().mockResolvedValue(),
-        exists: jest.fn().mockResolvedValue(true),
-        fastGet: jest.fn().mockResolvedValue(),
-        fastPut: jest.fn().mockResolvedValue(),
-        end: jest.fn().mockResolvedValue(),
-      };
-      remoteFileService.connect = jest.fn().mockResolvedValue(mockSftp);
-      remoteFileService.parseUrl.mockImplementation(url => {
-        const cleaned = url.replace('sftp://', '');
-        const parts = cleaned.split('/');
-        return { remotePath: '/' + parts.slice(1).join('/') };
-      });
+      remoteFileService.copyToLocal.mockResolvedValue();
+      remoteFileService.copyFromLocal = jest.fn().mockResolvedValue();
+      fs.promises.mkdtemp.mockResolvedValue('/tmp/acs-archive-TEST');
 
       const result = await processor.archiveOldFile('sftp://source', 'sftp://archive', 'test.csv');
 
       expect(result.success).toBe(true);
-      expect(mockSftp.exists).toHaveBeenCalled();
-      expect(mockSftp.fastGet).toHaveBeenCalled();
-      expect(mockSftp.fastPut).toHaveBeenCalled();
-      expect(fs.promises.unlink).toHaveBeenCalledWith(expect.stringContaining('/tmp/OLD_'));
-      expect(mockSftp.end).toHaveBeenCalled();
+      expect(remoteFileService.copyToLocal).toHaveBeenCalledWith('sftp://source/test.csv', expect.stringMatching(/^\/tmp\/acs-archive-TEST\/OLD_.*_test\.csv$/));
+      expect(remoteFileService.copyFromLocal).toHaveBeenCalledWith(expect.stringContaining('/tmp/acs-archive-TEST/OLD_'), expect.stringMatching(/^sftp:\/\/archive\/OLD_.*_test\.csv$/));
+      expect(fs.promises.rm).toHaveBeenCalledWith('/tmp/acs-archive-TEST', { recursive: true, force: true });
     });
 
     it('handles SFTP source with local archive', async () => {
@@ -894,7 +953,8 @@ describe('CSVProcessor', () => {
       const result = await processor.archiveOldFile('sftp://source', 'file:///archive', 'test.csv');
 
       expect(result.success).toBe(true);
-      expect(remoteFileService.copyToLocal).toHaveBeenCalled();
+      // Copié dans le dossier d'archives (et non plus dans /tmp)
+      expect(remoteFileService.copyToLocal).toHaveBeenCalledWith('sftp://source/test.csv', expect.stringMatching(/^\/archive\/OLD_.*_test\.csv$/));
     });
 
     it('does not throw on non-existent source file', async () => {
@@ -904,7 +964,9 @@ describe('CSVProcessor', () => {
 
       const result = await processor.archiveOldFile('file:///source', 'file:///archive', 'test.csv');
 
-      expect(result.success).toBe(true);
+      // Ne lève pas d'exception mais signale l'échec (plus de faux succès)
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
       expect(fs.promises.cp).not.toHaveBeenCalled();
     });
 

@@ -3,14 +3,17 @@ const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { checkRole, filterByBank } = require('../middleware/roleMiddleware');
 const auditService = require('../services/auditService');
+const { effectiveBankId, canAccessBank, denyBankAccess, redactBankUrls, restoreRedactedUrl, URL_FIELDS } = require('../utils/bankScope');
+
+const BANK_CODE_REGEX = /^[A-Z0-9_]{2,10}$/;
 
 const router = express.Router();
 
 // Get all banks
 router.get('/', authMiddleware, filterByBank, async (req, res) => {
   try {
-    const { bankId } = req.query;
-    
+    const bankId = effectiveBankId(req.user, req.query.bankId);
+
     let query = `
       SELECT 
         b.*,
@@ -23,9 +26,9 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
     
     // Filtrer par bankId si fourni
     const queryParams = [];
-    if (bankId) {
+    if (bankId !== null) {
       query += ' WHERE b.id = $1';
-      queryParams.push(parseInt(bankId));
+      queryParams.push(bankId);
     }
     
     query += ' GROUP BY b.id ORDER BY b.name';
@@ -34,7 +37,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 
     res.json({
       success: true,
-      data: result.rows
+      data: result.rows.map(redactBankUrls)
     });
   } catch (error) {
     console.error('Get banks error:', error);
@@ -49,6 +52,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 // Get single bank
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
+    if (!canAccessBank(req.user, req.params.id)) return denyBankAccess(res);
     const query = 'SELECT * FROM banks WHERE id = $1';
     const result = await db.query(query, [req.params.id]);
 
@@ -61,7 +65,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 
     res.json({
       success: true,
-      data: result.rows[0]
+      data: redactBankUrls(result.rows[0])
     });
   } catch (error) {
     console.error('Get bank error:', error);
@@ -86,6 +90,13 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       });
     }
 
+    if (!BANK_CODE_REGEX.test(String(code).toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code banque invalide (2 a 10 caracteres : lettres, chiffres ou _)'
+      });
+    }
+
     const query = `
       INSERT INTO banks (code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -103,12 +114,12 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       is_active !== undefined ? is_active : true
     ]);
 
-    await auditService.logAction('CREATE_BANK', { tableName: 'banks', recordId: result.rows[0].id, newData: result.rows[0] }, req);
+    await auditService.logAction('CREATE_BANK', { tableName: 'banks', recordId: result.rows[0].id, newData: redactBankUrls(result.rows[0]) }, req);
 
     res.status(201).json({
       success: true,
       message: 'Banque creee avec succes',
-      data: result.rows[0]
+      data: redactBankUrls(result.rows[0])
     });
   } catch (error) {
     if (error.code === '23505') { // Unique violation
@@ -130,7 +141,31 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
 // Update bank (admin only)
 router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) => {
   try {
-    const { code, name, source_url, destination_url, old_url, xml_output_url, enrollment_report_url, is_active } = req.body;
+    const { code, name, is_active } = req.body;
+
+    if (code && !BANK_CODE_REGEX.test(String(code).toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code banque invalide (2 a 10 caracteres : lettres, chiffres ou _)'
+      });
+    }
+
+    const oldBank = await db.query('SELECT * FROM banks WHERE id = $1', [req.params.id]);
+    if (oldBank.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Banque non trouvee'
+      });
+    }
+    const previous = oldBank.rows[0];
+
+    // Une URL renvoyée masquée par l'API conserve le mot de passe déjà enregistré
+    const urls = {};
+    for (const field of URL_FIELDS) {
+      if (field === 'original_path') continue;
+      urls[field] = restoreRedactedUrl(req.body[field], previous[field]);
+    }
+    const { source_url, destination_url, old_url, xml_output_url, enrollment_report_url } = urls;
 
     const query = `
       UPDATE banks 
@@ -167,13 +202,12 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
       });
     }
 
-    const oldBank = await db.query('SELECT * FROM banks WHERE id = $1', [req.params.id]);
-    await auditService.logAction('UPDATE_BANK', { tableName: 'banks', recordId: req.params.id, oldData: oldBank.rows[0], newData: result.rows[0] }, req);
+    await auditService.logAction('UPDATE_BANK', { tableName: 'banks', recordId: req.params.id, oldData: redactBankUrls(previous), newData: redactBankUrls(result.rows[0]) }, req);
 
     res.json({
       success: true,
       message: 'Banque mise a jour avec succes',
-      data: result.rows[0]
+      data: redactBankUrls(result.rows[0])
     });
   } catch (error) {
     console.error('Update bank error:', error);
@@ -198,7 +232,7 @@ router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res)
       });
     }
 
-    await auditService.logAction('DELETE_BANK', { tableName: 'banks', recordId: req.params.id, oldData: result.rows[0] }, req);
+    await auditService.logAction('DELETE_BANK', { tableName: 'banks', recordId: req.params.id, oldData: redactBankUrls(result.rows[0]) }, req);
 
     res.json({
       success: true,
@@ -217,6 +251,7 @@ router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res)
 // Get bank statistics
 router.get('/:id/stats', authMiddleware, async (req, res) => {
   try {
+    if (!canAccessBank(req.user, req.params.id)) return denyBankAccess(res);
     const query = `
       SELECT 
         COUNT(DISTINCT pr.id) as total_records,

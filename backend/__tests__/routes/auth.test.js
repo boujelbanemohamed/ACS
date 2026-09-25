@@ -556,4 +556,107 @@ describe('Auth Routes', () => {
       expect(loginRes.body.data.user.role).toBe('bank');
     });
   });
+
+  describe('security hardening', () => {
+    const crypto = require('crypto');
+
+    it('forgot-password builds the link from FRONTEND_URL, never from the Host header', async () => {
+      process.env.FRONTEND_URL = 'https://acs.example.tn/';
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 5, username: '<b>jdoe</b>', email: 'j@test.com', role: 'bank' }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .post('/api/auth/forgot-password')
+        .set('Host', 'attacker.example')
+        .send({ email: 'j@test.com' });
+
+      expect(res.status).toBe(200);
+      const [, , html, text] = emailService.sendEmail.mock.calls[0];
+      expect(text).toContain('https://acs.example.tn/reset-password?token=');
+      expect(html).not.toContain('attacker.example');
+      expect(text).not.toContain('attacker.example');
+      // Nom d'utilisateur échappé dans le HTML
+      expect(html).toContain('&lt;b&gt;jdoe&lt;/b&gt;');
+      delete process.env.FRONTEND_URL;
+    });
+
+    it('stores only the SHA-256 of the reset token', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 5, username: 'jdoe', email: 'j@test.com', role: 'bank' }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      await request(createTestApp()).post('/api/auth/forgot-password').send({ email: 'j@test.com' });
+
+      const token = emailService.sendEmail.mock.calls[0][3].match(/token=([0-9a-f]{64})/)[1];
+      const [, params] = db.query.mock.calls[1];
+      expect(params[0]).toBe(crypto.createHash('sha256').update(token).digest('hex'));
+      expect(params[0]).not.toBe(token);
+    });
+
+    it('reset-password looks the token up by hash and revokes existing sessions', async () => {
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 5, username: 'jdoe', role: 'bank' }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp())
+        .post('/api/auth/reset-password')
+        .send({ token: 'abc', password: 'NewPass@2026' });
+
+      expect(res.status).toBe(200);
+      expect(db.query.mock.calls[0][1]).toEqual([crypto.createHash('sha256').update('abc').digest('hex')]);
+      expect(db.query.mock.calls[1][0]).toContain('token_version = COALESCE(token_version, 0) + 1');
+    });
+
+    it('reset-password applies the password policy', async () => {
+      const res = await request(createTestApp())
+        .post('/api/auth/reset-password')
+        .send({ token: 'abc', password: 'weakpass' });
+      expect(res.status).toBe(400);
+      expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('login does not reveal a disabled account to someone without the password', async () => {
+      const hashedPassword = await bcrypt.hash('RightPass@1', 10);
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, username: 'off', password: hashedPassword, role: 'bank', is_active: false }] });
+
+      const res = await request(createTestApp()).post('/api/auth/login').send({ username: 'off', password: 'WrongPass@1' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.message).toBe('Identifiants invalides');
+    });
+
+    it('login token carries the token version', async () => {
+      const jwt = require('jsonwebtoken');
+      const hashedPassword = await bcrypt.hash('RightPass@1', 10);
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, username: 'user1', password: hashedPassword, role: 'bank', is_active: true, token_version: 4 }] })
+        .mockResolvedValueOnce({ rows: [] });
+
+      const res = await request(createTestApp()).post('/api/auth/login').send({ username: 'user1', password: 'RightPass@1' });
+
+      expect(jwt.decode(res.body.data.token).tv).toBe(4);
+    });
+
+    it('login never returns internal error details', async () => {
+      db.query.mockRejectedValueOnce(new Error('relation users does not exist'));
+      const res = await request(createTestApp()).post('/api/auth/login').send({ username: 'user1', password: 'Whatever@1' });
+      expect(res.status).toBe(500);
+      expect(JSON.stringify(res.body)).not.toContain('relation');
+    });
+
+    it('limits failed logins per account', async () => {
+      process.env.ENABLE_RATE_LIMIT_IN_TESTS = 'true';
+      db.query.mockResolvedValue({ rows: [] });
+      const app = createTestApp();
+      const statuses = [];
+      for (let i = 0; i < 11; i++) {
+        const res = await request(app).post('/api/auth/login').send({ username: 'bruteforced', password: 'Wrong@123' });
+        statuses.push(res.status);
+      }
+      delete process.env.ENABLE_RATE_LIMIT_IN_TESTS;
+      expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
+      expect(statuses[10]).toBe(429);
+    });
+  });
 });

@@ -2,13 +2,31 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
+const crypto = require('crypto');
 const axios = require('axios');
 const db = require('../config/database');
 const recordHistoryService = require('./recordHistoryService');
 const CSVValidator = require('../utils/csvValidator');
 const { validateRowForHistory } = require('../utils/validationHelper');
 const remoteFileService = require('../utils/remoteFileService');
-const { encrypt, decrypt, hashPan } = require('./encryptionService');
+const { encrypt, decrypt, hashPan, maskPan } = require('./encryptionService');
+const { assertSafeUrl, safeAxiosOptions, isAllowlistedUrl } = require('../utils/urlSafety');
+const { makeTempDir, removeDir } = require('../utils/paths');
+
+const MAX_DOWNLOAD_SIZE = parseInt(process.env.MAX_DOWNLOAD_SIZE, 10) || 20 * 1024 * 1024;
+const CSV_FIELDS = ['language', 'firstName', 'lastName', 'pan', 'expiry', 'phone', 'behaviour', 'action'];
+
+// Une erreur "bloquante" empêche l'enregistrement du fichier ; un avertissement non
+const isBlocking = (error) => (error.severity || 'error') === 'error';
+
+// Retire les caractères de contrôle et échappe une valeur CSV (séparateur ;)
+const csvCell = (value) => {
+  const str = value === undefined || value === null ? '' : String(value);
+  return /[;"\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+};
+
+// Chemin local d'une URL file:// ou d'un chemin absolu (dossier conservé tel quel)
+const toLocalPath = (url) => (url.startsWith('file://') ? url.slice(7) : url).replace(/\/+$/, '') || '/';
 
 class CSVProcessor {
   constructor() {
@@ -33,42 +51,68 @@ class CSVProcessor {
   }
 
   /**
-   * Process CSV file from URL
+   * Regroupe les corrections par numéro de ligne : { rowNumber: { field: value } }
    */
-  async processFileFromURL(bankId, fileUrl, fileName) {
-    const fileLogId = await this.createFileLog(bankId, fileName, fileUrl);
-    
+  buildCorrectionMap(corrections = []) {
+    const map = new Map();
+    for (const c of corrections) {
+      if (!c || !c.rowNumber || !CSV_FIELDS.includes(c.field)) continue;
+      const value = c.encrypted ? decrypt(c.value) : c.value;
+      if (!map.has(c.rowNumber)) map.set(c.rowNumber, {});
+      map.get(c.rowNumber)[c.field] = value === undefined || value === null ? '' : String(value);
+    }
+    return map;
+  }
+
+  /**
+   * Process CSV file from URL
+   * @param {object} [options]
+   * @param {object[]} [options.corrections] corrections saisies par l'utilisateur
+   * @param {string} [options.sourceType] url | cron
+   * @param {boolean} [options.trustedUrl] URL configurée par un administrateur (réseau interne autorisé)
+   * @param {boolean} [options.skipIfUnchanged] ignore un fichier déjà rejeté et non modifié
+   */
+  async processFileFromURL(bankId, fileUrl, fileName, options = {}) {
+    const { corrections = [], sourceType = 'url', trustedUrl = true, skipIfUnchanged = false } = options;
+    const tempDir = await makeTempDir('acs-dl-');
+    const tempFilePath = path.join(tempDir, 'input.csv');
+    let fileLogId = null;
+
     try {
-      // Download file
-      const tempFilePath = path.join('/tmp', fileName);
-      await this.downloadFile(fileUrl, tempFilePath);
+      try {
+        await this.downloadFile(fileUrl, tempFilePath, { trustedUrl });
+      } catch (downloadError) {
+        // Échec de téléchargement tracé dans l'historique des fichiers
+        fileLogId = await this.createFileLog(bankId, fileName, fileUrl, { sourceType });
+        throw downloadError;
+      }
+      const fileHash = await this.hashFile(tempFilePath);
 
-      // Parse and validate CSV
-      const { rows, errors, stats, allRows } = await this.parseAndValidateCSV(
-        tempFilePath,
-        bankId
-      );
+      if (skipIfUnchanged && await this.isUnchangedRejectedFile(bankId, fileName, fileHash)) {
+        return { success: false, skipped: true, fileLogId: null, stats: null, errors: [], validRecords: [], allRows: [] };
+      }
 
-      // Update file log
+      fileLogId = await this.createFileLog(bankId, fileName, fileUrl, { sourceType, fileHash });
+
+      const { rows, errors, stats, allRows } = await this.parseAndValidateCSV(tempFilePath, bankId, { corrections });
+      const blockingCount = errors.filter(isBlocking).length;
+
+      // Le statut "success" n'est posé qu'une fois les enregistrements et le XML générés
       await this.updateFileLog(fileLogId, {
         total_rows: stats.totalRows,
         valid_rows: stats.validRows,
         invalid_rows: stats.invalidRows,
         duplicate_rows: stats.duplicateRows,
         updated_rows: stats.updatedRows,
-        status: errors.length > 0 ? 'validation_error' : 'success'
+        status: blockingCount > 0 ? 'validation_error' : 'processing'
       });
 
-      // Save validation errors
       if (errors.length > 0) {
         await this.saveValidationErrors(fileLogId, errors);
       }
 
-      // Clean up temp file
-      await fsp.unlink(tempFilePath);
-
       return {
-        success: errors.length === 0,
+        success: blockingCount === 0,
         fileLogId,
         stats,
         errors,
@@ -76,11 +120,15 @@ class CSVProcessor {
         allRows: allRows
       };
     } catch (error) {
-      await this.updateFileLog(fileLogId, {
-        status: 'error',
-        error_details: error.message
-      });
+      if (fileLogId) {
+        await this.updateFileLog(fileLogId, {
+          status: 'error',
+          error_details: error.message
+        });
+      }
       throw error;
+    } finally {
+      await removeDir(tempDir);
     }
   }
 
@@ -88,14 +136,16 @@ class CSVProcessor {
    * Process uploaded CSV file
    */
   async processUploadedFile(bankId, filePath, fileName) {
-    const fileLogId = await this.createFileLog(bankId, fileName, filePath);
-    
+    const fileHash = await this.hashFile(filePath).catch(() => null);
+    const fileLogId = await this.createFileLog(bankId, fileName, null, { sourceType: 'upload', fileHash });
+
     try {
       // Parse and validate CSV
       const { rows, errors, stats, allRows } = await this.parseAndValidateCSV(
         filePath,
         bankId
       );
+      const blockingCount = errors.filter(isBlocking).length;
 
       // Update file log
       await this.updateFileLog(fileLogId, {
@@ -104,7 +154,7 @@ class CSVProcessor {
         invalid_rows: stats.invalidRows,
         duplicate_rows: stats.duplicateRows,
         updated_rows: stats.updatedRows,
-        status: errors.length > 0 ? 'validation_error' : 'success'
+        status: blockingCount > 0 ? 'validation_error' : 'processing'
       });
 
       // Save validation errors
@@ -113,7 +163,7 @@ class CSVProcessor {
       }
 
       return {
-        success: errors.length === 0,
+        success: blockingCount === 0,
         fileLogId,
         stats,
         errors,
@@ -129,30 +179,75 @@ class CSVProcessor {
     }
   }
 
+  async hashFile(filePath) {
+    const content = await fsp.readFile(filePath);
+    return crypto.createHash('sha256').update(content).digest('hex');
+  }
+
+  /**
+   * Vrai si le même fichier (même contenu) a déjà été rejeté pour erreurs de validation :
+   * évite de le retraiter à chaque passage du scanner.
+   */
+  async isUnchangedRejectedFile(bankId, fileName, fileHash) {
+    if (!fileHash) return false;
+    const result = await db.query(
+      `SELECT status, file_hash FROM file_logs
+       WHERE bank_id = $1 AND file_name = $2
+       ORDER BY processed_at DESC, id DESC LIMIT 1`,
+      [bankId, fileName]
+    );
+    if (result.rows.length === 0) return false;
+    const last = result.rows[0];
+    return last.status === 'validation_error' && last.file_hash === fileHash;
+  }
+
   /**
    * Download file from URL or copy from local path
+   * @param {object} [options]
+   * @param {boolean} [options.trustedUrl] autorise le réseau interne et les chemins locaux
    */
-  async downloadFile(url, destPath) {
+  async downloadFile(url, destPath, { trustedUrl = true } = {}) {
     if (url.startsWith('http://') || url.startsWith('https://')) {
+      if (!trustedUrl) {
+        await assertSafeUrl(url, { protocols: ['http', 'https'] });
+      }
       const response = await axios({
         method: 'GET',
         url: url,
         responseType: 'stream',
-        timeout: 30000
+        timeout: 30000,
+        ...(trustedUrl
+          ? { maxRedirects: 5, maxContentLength: MAX_DOWNLOAD_SIZE }
+          : safeAxiosOptions({ maxContentLength: MAX_DOWNLOAD_SIZE, allowPrivate: isAllowlistedUrl(url) }))
       });
 
       const writer = fs.createWriteStream(destPath);
-      response.data.pipe(writer);
 
       return new Promise((resolve, reject) => {
+        let received = 0;
+        response.data.on('data', (chunk) => {
+          received += chunk.length;
+          if (received > MAX_DOWNLOAD_SIZE) {
+            response.data.destroy(new Error('Fichier trop volumineux'));
+          }
+        });
+        response.data.on('error', reject);
         writer.on('finish', resolve);
         writer.on('error', reject);
+        response.data.pipe(writer);
       });
     }
 
     if (remoteFileService.isRemote(url)) {
+      if (!trustedUrl) {
+        await assertSafeUrl(url, { protocols: ['sftp', 'ftp'] });
+      }
       await remoteFileService.copyToLocal(url, destPath);
       return;
+    }
+
+    if (!trustedUrl) {
+      throw new Error('Chemin local non autorisé');
     }
 
     const cleanPath = url.replace('file://', '');
@@ -166,15 +261,19 @@ class CSVProcessor {
 
   /**
    * Parse and validate CSV file
+   * @param {object} [options]
+   * @param {object[]} [options.corrections] corrections à appliquer avant validation
    */
-  async parseAndValidateCSV(filePath, bankId) {
+  async parseAndValidateCSV(filePath, bankId, { corrections = [] } = {}) {
+    const correctionMap = this.buildCorrectionMap(corrections);
+
     return new Promise((resolve, reject) => {
       const rows = [];
       const errors = [];
       const allRows = [];
       const seenPans = new Set();
       let rowNumber = 0;
-      
+
       const stats = {
         totalRows: 0,
         validRows: 0,
@@ -203,18 +302,24 @@ class CSVProcessor {
           rowNumber++;
           stats.totalRows++;
 
-          const normalizedRow = this.normalizeRowData(row, rowNumber);
+          const normalizedRow = {
+            ...this.normalizeRowData(row, rowNumber),
+            ...(correctionMap.get(rowNumber) || {})
+          };
           allRows.push(normalizedRow);
 
           if (Object.values(row).every(val => !val || val.trim() === '')) {
             return;
           }
 
-          const validation = this.validator.validateRow(row, rowNumber);
-          
+          // La validation porte sur les valeurs normalisées (et corrigées)
+          const { rowNumber: _ignored, ...canonical } = normalizedRow;
+          const validation = this.validator.validateRow({ ...row, ...canonical }, rowNumber);
+          const rowErrors = validation.errors || [];
+
           if (!validation.isValid) {
             stats.invalidRows++;
-            validation.errors.forEach(err => {
+            rowErrors.forEach(err => {
               errors.push({
                 ...err,
                 rowNumber: rowNumber,
@@ -222,8 +327,17 @@ class CSVProcessor {
               });
             });
           } else {
+            // Les avertissements sont conservés sans bloquer la ligne
+            rowErrors.forEach(err => {
+              errors.push({
+                ...err,
+                rowNumber: rowNumber,
+                rowData: { ...normalizedRow }
+              });
+            });
+
             const pan = normalizedRow.pan;
-            
+
             if (seenPans.has(pan)) {
               stats.duplicateRows++;
               stats.invalidRows++;
@@ -249,8 +363,14 @@ class CSVProcessor {
           }
         })
         .on('end', async () => {
-          await Promise.all(pendingChecks);
-          resolve({ rows, errors, stats, allRows });
+          try {
+            await Promise.all(pendingChecks);
+            // Les vérifications asynchrones peuvent terminer dans le désordre
+            rows.sort((a, b) => a.rowNumber - b.rowNumber);
+            resolve({ rows, errors, stats, allRows });
+          } catch (error) {
+            reject(error);
+          }
         })
         .on('error', (error) => {
           reject(error);
@@ -274,7 +394,7 @@ class CSVProcessor {
   async logRowHistory(bankId, row, fileLogId, fileName, sourceType, userId, username, ipAddress, status, processedRecordId = null, xmlId = null) {
     try {
       const validation = validateRowForHistory(row);
-      
+
       await recordHistoryService.logAttempt({
         bankId,
         pan: row.pan || '',
@@ -301,11 +421,13 @@ class CSVProcessor {
    * Process and log all rows with history
    */
   async processRowsWithHistory(bankId, allRows, validRows, errors, fileLogId, fileName, sourceType, userId = null, username = null, ipAddress = null) {
+    const validRowNumbers = new Set(validRows.map(v => v.rowNumber));
+    const blockingRows = new Set(errors.filter(isBlocking).map(e => e.rowNumber));
+
     for (const row of allRows) {
-      const rowErrors = errors.filter(e => e.rowNumber === row.rowNumber);
-      const isValid = rowErrors.length === 0 && validRows.some(v => v.pan === row.pan);
+      const isValid = validRowNumbers.has(row.rowNumber) && !blockingRows.has(row.rowNumber);
       const status = isValid ? 'SUCCESS' : 'REJECTED';
-      
+
       await this.logRowHistory(
         bankId,
         row,
@@ -322,22 +444,30 @@ class CSVProcessor {
 
   /**
    * Save validated records to database
+   * @param {object} [client] client de transaction (par défaut : pool)
+   * @returns {Promise<Array<{id:number, pan:string}>>} aligné sur l'ordre de `rows`
    */
-  async saveValidatedRecords(bankId, rows, fileName) {
+  async saveValidatedRecords(bankId, rows, fileName, client = db) {
     if (rows.length === 0) return [];
 
     const BATCH_SIZE = parseInt(process.env.DB_BATCH_SIZE) || 100;
-    const saved = [];
+    const idByHash = new Map();
 
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const batch = rows.slice(i, i + BATCH_SIZE);
+    // Un même PAN ne peut apparaître qu'une fois par INSERT ... ON CONFLICT (on garde la dernière occurrence)
+    const byHash = new Map();
+    for (const row of rows) {
+      byHash.set(hashPan(row.pan), row);
+    }
+    const uniqueRows = Array.from(byHash.entries());
+
+    for (let i = 0; i < uniqueRows.length; i += BATCH_SIZE) {
+      const batch = uniqueRows.slice(i, i + BATCH_SIZE);
       const values = [];
       const params = [];
       let paramIndex = 1;
 
-      for (const row of batch) {
+      for (const [panHash, row] of batch) {
         const encryptedPan = encrypt(row.pan);
-        const panHash = hashPan(row.pan);
         values.push(
           `($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7}, $${paramIndex + 8}, $${paramIndex + 9}, $${paramIndex + 10})`
         );
@@ -358,7 +488,7 @@ class CSVProcessor {
       }
 
       const query = `
-        INSERT INTO processed_records 
+        INSERT INTO processed_records
           (bank_id, language, first_name, last_name, pan, pan_hash, expiry, phone, behaviour, action, file_name)
         VALUES ${values.join(', ')}
         ON CONFLICT (bank_id, pan_hash) DO UPDATE SET
@@ -377,59 +507,69 @@ class CSVProcessor {
           enrollment_error_description = NULL,
           enrollment_date = NULL,
           processed_at = CURRENT_TIMESTAMP
-        RETURNING id, pan
+        RETURNING id, pan, pan_hash
       `;
 
-      const result = await db.query(query, params);
-      for (const row of result.rows) {
-        saved.push({ ...row, pan: decrypt(row.pan) });
-      }
+      const result = await client.query(query, params);
+      result.rows.forEach((saved, index) => {
+        const key = saved.pan_hash || (batch[index] && batch[index][0]);
+        idByHash.set(key, saved.id);
+      });
     }
 
-    return saved;
+    // Résultat aligné sur les lignes reçues (RETURNING ne garantit pas l'ordre)
+    return rows.map(row => ({ id: idByHash.get(hashPan(row.pan)), pan: row.pan }));
   }
 
   /**
    * Create file log entry
    */
-  async createFileLog(bankId, fileName, originalPath) {
+  async createFileLog(bankId, fileName, originalPath, { sourceType = 'upload', fileHash = null } = {}) {
     const query = `
-      INSERT INTO file_logs (bank_id, file_name, original_path, status)
-      VALUES ($1, $2, $3, 'processing')
+      INSERT INTO file_logs (bank_id, file_name, original_path, status, source_type, file_hash)
+      VALUES ($1, $2, $3, 'processing', $4, $5)
       RETURNING id
     `;
-    
-    const result = await db.query(query, [bankId, fileName, originalPath]);
+
+    const result = await db.query(query, [bankId, fileName, originalPath, sourceType, fileHash]);
     return result.rows[0].id;
   }
 
   /**
    * Update file log
    */
-  async updateFileLog(fileLogId, updates) {
+  async updateFileLog(fileLogId, updates, client = db) {
+    const allowedColumns = [
+      'total_rows', 'valid_rows', 'invalid_rows', 'duplicate_rows', 'updated_rows',
+      'status', 'error_details', 'destination_path', 'archive_path', 'output_path',
+      'archive_status', 'output_status', 'validation_status', 'file_hash'
+    ];
     const fields = [];
     const values = [];
     let paramCount = 1;
 
     Object.entries(updates).forEach(([key, value]) => {
+      if (!allowedColumns.includes(key)) return;
       fields.push(`${key} = $${paramCount}`);
       values.push(value);
       paramCount++;
     });
 
+    if (fields.length === 0) return;
+
     values.push(fileLogId);
 
     const query = `
-      UPDATE file_logs 
+      UPDATE file_logs
       SET ${fields.join(', ')}
       WHERE id = $${paramCount}
     `;
 
-    await db.query(query, values);
+    await client.query(query, values);
   }
 
   /**
-   * Save validation errors
+   * Save validation errors (la valeur d'un PAN est chiffrée)
    */
   async saveValidationErrors(fileLogId, errors) {
     if (errors.length === 0) return;
@@ -443,12 +583,14 @@ class CSVProcessor {
       let paramIndex = 1;
 
       for (const error of batch) {
+        const rawValue = error.value || '';
+        const value = error.field === 'pan' && rawValue ? encrypt(String(rawValue)) : rawValue;
         values.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5})`);
         params.push(
           fileLogId,
           error.rowNumber || null,
           error.field,
-          error.value || '',
+          value,
           error.error,
           error.severity || 'error'
         );
@@ -456,13 +598,25 @@ class CSVProcessor {
       }
 
       const query = `
-        INSERT INTO validation_errors 
+        INSERT INTO validation_errors
           (file_log_id, row_number, field_name, field_value, error_message, severity)
         VALUES ${values.join(', ')}
       `;
 
       await db.query(query, params);
     }
+  }
+
+  /**
+   * Version des erreurs sans PAN en clair (réponses API, résultats de job)
+   */
+  sanitizeErrors(errors = []) {
+    return errors.map(error => {
+      const safe = { ...error };
+      if (safe.field === 'pan' && safe.value) safe.value = maskPan(String(safe.value));
+      if (safe.rowData && safe.rowData.pan) safe.rowData = { ...safe.rowData, pan: maskPan(String(safe.rowData.pan)) };
+      return safe;
+    });
   }
 
   /**
@@ -483,7 +637,7 @@ class CSVProcessor {
       });
 
       const files = [];
-      
+
       if (response.status === 200 && response.data) {
         if (Array.isArray(response.data.files)) {
           files.push(...response.data.files.filter(f => f.endsWith('.csv')));
@@ -498,147 +652,140 @@ class CSVProcessor {
   }
 
   /**
-   * Move file to destination (local filesystem)
+   * Déplace le fichier source vers le dossier de destination.
+   * `sourceUrl` et `destinationUrl` désignent des dossiers.
    */
   async moveFileToDestination(sourceUrl, destinationUrl, fileName) {
     const isSftpSource = remoteFileService.isRemote(sourceUrl);
     const isSftpDest = remoteFileService.isRemote(destinationUrl);
+    const sourceDir = sourceUrl.replace(/\/+$/, '');
+    const destDir = destinationUrl.replace(/\/+$/, '');
 
-    console.log(`Moving file from ${sourceUrl}/${fileName} to ${destinationUrl}/${fileName}`);
+    console.log(`Moving file ${fileName} to destination`);
 
     try {
       if (isSftpSource || isSftpDest) {
-        const fullSourceUrl = `${sourceUrl}/${fileName}`;
-        const fullDestUrl = `${destinationUrl}/${fileName}`;
+        const fullSourceUrl = `${sourceDir}/${fileName}`;
+        const fullDestUrl = `${destDir}/${fileName}`;
 
         if (isSftpSource && isSftpDest) {
           await remoteFileService.moveFile(fullSourceUrl, fullDestUrl);
         } else if (isSftpSource) {
-          await remoteFileService.copyToLocal(fullSourceUrl, path.join(destinationUrl.replace('file://', ''), fileName));
+          const localDest = toLocalPath(destinationUrl);
+          await fsp.mkdir(localDest, { recursive: true });
+          await remoteFileService.copyToLocal(fullSourceUrl, path.join(localDest, fileName));
           await remoteFileService.deleteFile(fullSourceUrl);
         } else {
-          await remoteFileService.copyFromLocal(path.join(sourceUrl.replace('file://', ''), fileName), fullDestUrl);
-          await fsp.unlink(path.join(sourceUrl.replace('file://', ''), fileName));
+          const localSource = path.join(toLocalPath(sourceUrl), fileName);
+          await remoteFileService.copyFromLocal(localSource, fullDestUrl);
+          await fsp.unlink(localSource);
         }
       } else {
-        const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
-        const destPath = destinationUrl.startsWith('file://') ? destinationUrl.slice(7) : destinationUrl;
+        const sourcePath = toLocalPath(sourceUrl);
+        const destPath = toLocalPath(destinationUrl);
 
-        try {
-          await fsp.access(sourcePath);
-          await fsp.mkdir(destPath, { recursive: true });
-          await fsp.cp(path.join(sourcePath, fileName), path.join(destPath, fileName));
-          await fsp.unlink(path.join(sourcePath, fileName));
-        } catch (e) {
-          if (e.code === 'ENOENT') {
-            console.warn(`Source file not found: ${path.join(sourcePath, fileName)}`);
-          } else {
-            throw e;
-          }
-        }
+        await fsp.access(path.join(sourcePath, fileName));
+        await fsp.mkdir(destPath, { recursive: true });
+        await fsp.cp(path.join(sourcePath, fileName), path.join(destPath, fileName));
+        await fsp.unlink(path.join(sourcePath, fileName));
       }
       return {
         success: true,
-        destinationPath: `${destinationUrl}/${fileName}`
+        destinationPath: `${destDir}/${fileName}`
       };
     } catch (error) {
       console.error(`Failed to move file: ${error.message}`);
-      return { success: false, destinationPath: `${destinationUrl}/${fileName}` };
+      return { success: false, destinationPath: `${destDir}/${fileName}`, error: error.message };
     }
   }
 
+  /**
+   * Copie le fichier source dans le dossier d'archives sous le nom OLD_<date>_<fichier>.
+   * Doit être appelé AVANT moveFileToDestination (qui supprime la source).
+   */
   async archiveOldFile(sourceUrl, archiveUrl, fileName) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const oldFileName = `OLD_${timestamp}_${fileName}`;
     const isSftpSource = remoteFileService.isRemote(sourceUrl);
     const isSftpArchive = remoteFileService.isRemote(archiveUrl);
+    const sourceDir = sourceUrl.replace(/\/+$/, '');
+    const archiveDir = archiveUrl.replace(/\/+$/, '');
 
-    console.log(`Archiving file from ${sourceUrl}/${fileName} to ${archiveUrl}/${oldFileName}`);
+    console.log(`Archiving file ${fileName} as ${oldFileName}`);
 
+    let tempDir = null;
     try {
       if (isSftpSource || isSftpArchive) {
-        const fullSourceUrl = `${sourceUrl}/${fileName}`;
-        const fullArchiveUrl = `${archiveUrl}/${oldFileName}`;
+        const fullSourceUrl = `${sourceDir}/${fileName}`;
+        const fullArchiveUrl = `${archiveDir}/${oldFileName}`;
 
         if (isSftpSource && isSftpArchive) {
-          if (remoteFileService.isRemote(fullSourceUrl)) {
-            let sftp;
-            try {
-              sftp = await remoteFileService.connect(fullSourceUrl);
-              const srcConfig = remoteFileService.parseUrl(fullSourceUrl);
-              const dstConfig = remoteFileService.parseUrl(fullArchiveUrl);
-              const destDir = dstConfig.remotePath.substring(0, dstConfig.remotePath.lastIndexOf('/') + 1);
-              try { await sftp.mkdir(destDir, true); } catch {}
-              const exists = await sftp.exists(srcConfig.remotePath).catch(() => false);
-              if (exists) {
-                const temp = '/tmp/' + oldFileName;
-                await sftp.fastGet(srcConfig.remotePath, temp);
-                await sftp.fastPut(temp, dstConfig.remotePath);
-                await fsp.unlink(temp);
-              }
-            } finally {
-              if (sftp) await sftp.end();
-            }
-          }
+          // Copie via un fichier temporaire : fonctionne aussi entre deux serveurs différents
+          tempDir = await makeTempDir('acs-archive-');
+          const temp = path.join(tempDir, oldFileName);
+          await remoteFileService.copyToLocal(fullSourceUrl, temp);
+          await remoteFileService.copyFromLocal(temp, fullArchiveUrl);
         } else if (isSftpSource) {
-          await remoteFileService.copyToLocal(fullSourceUrl, '/tmp/' + oldFileName);
+          const localArchive = toLocalPath(archiveUrl);
+          await fsp.mkdir(localArchive, { recursive: true });
+          await remoteFileService.copyToLocal(fullSourceUrl, path.join(localArchive, oldFileName));
         } else {
-          const localPath = path.join(sourceUrl.replace('file://', ''), fileName);
-          if (fs.existsSync(localPath)) {
-            await remoteFileService.copyFromLocal(localPath, fullArchiveUrl);
-          }
+          const localPath = path.join(toLocalPath(sourceUrl), fileName);
+          await fsp.access(localPath);
+          await remoteFileService.copyFromLocal(localPath, fullArchiveUrl);
         }
       } else {
-        const sourcePath = sourceUrl.startsWith('file://') ? sourceUrl.slice(7) : sourceUrl.replace(/\/[^/]+$/, '');
-        const archivePath = archiveUrl.startsWith('file://') ? archiveUrl.slice(7) : archiveUrl;
+        const sourcePath = toLocalPath(sourceUrl);
+        const archivePath = toLocalPath(archiveUrl);
 
-        try {
-          await fsp.access(sourcePath);
-          await fsp.mkdir(archivePath, { recursive: true });
-          await fsp.cp(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
-        } catch (e) {
-          if (e.code === 'ENOENT') {
-            console.warn(`Source file not found: ${path.join(sourcePath, fileName)}`);
-          } else {
-            throw e;
-          }
-        }
+        await fsp.access(path.join(sourcePath, fileName));
+        await fsp.mkdir(archivePath, { recursive: true });
+        await fsp.cp(path.join(sourcePath, fileName), path.join(archivePath, oldFileName));
       }
       return {
         success: true,
-        archivePath: `${archiveUrl}/${oldFileName}`
+        archivePath: `${archiveDir}/${oldFileName}`
       };
     } catch (error) {
-      console.error(`Failed to move file: ${error.message}`);
-      return { success: false, archivePath: `${archiveUrl}/${oldFileName}` };
+      console.error(`Failed to archive file: ${error.message}`);
+      return { success: false, archivePath: `${archiveDir}/${oldFileName}`, error: error.message };
+    } finally {
+      await removeDir(tempDir);
     }
+  }
+
+  /**
+   * Construit le CSV corrigé à partir des enregistrements en base (PAN déchiffré)
+   */
+  buildCorrectedCSV(rows) {
+    let csvContent = CSV_FIELDS.join(';') + '\n';
+
+    rows.forEach(row => {
+      const record = {
+        language: row.language,
+        firstName: row.firstName ?? row.first_name,
+        lastName: row.lastName ?? row.last_name,
+        pan: row.pan ? decrypt(row.pan) : '',
+        expiry: row.expiry,
+        phone: row.phone,
+        behaviour: row.behaviour,
+        action: row.action
+      };
+      csvContent += CSV_FIELDS.map(field => csvCell(record[field])).join(';') + '\n';
+    });
+
+    return csvContent;
   }
 
   /**
    * Generate corrected CSV file
    */
   async generateCorrectedCSV(rows, outputPath) {
-    const headers = [
-      'language',
-      'firstName',
-      'lastName',
-      'pan',
-      'expiry',
-      'phone',
-      'behaviour',
-      'action'
-    ];
-
-    let csvContent = headers.join(';') + '\n';
-    
-    rows.forEach(row => {
-      const values = headers.map(header => row[header] || '');
-      csvContent += values.join(';') + '\n';
-    });
-
-    await fsp.writeFile(outputPath, csvContent);
+    await fsp.writeFile(outputPath, this.buildCorrectedCSV(rows));
     return outputPath;
   }
 }
+
+CSVProcessor.isBlocking = isBlocking;
 
 module.exports = CSVProcessor;

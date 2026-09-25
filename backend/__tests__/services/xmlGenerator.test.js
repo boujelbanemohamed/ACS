@@ -1,16 +1,24 @@
-let mockMkdir, mockWriteFile;
+let mockMkdir, mockWriteFile, mockAccess, mockUnlink, mockRename;
 jest.mock('fs', () => {
   mockMkdir = jest.fn().mockResolvedValue();
   mockWriteFile = jest.fn().mockResolvedValue();
+  mockAccess = jest.fn();
+  mockUnlink = jest.fn().mockResolvedValue();
+  mockRename = jest.fn().mockResolvedValue();
   return {
-    promises: { mkdir: mockMkdir, writeFile: mockWriteFile }
+    promises: { mkdir: mockMkdir, writeFile: mockWriteFile, access: mockAccess, unlink: mockUnlink, rename: mockRename }
   };
 });
 jest.mock('../../config/database');
 jest.mock('../../utils/remoteFileService', () => ({
   isRemote: jest.fn(),
-  writeFile: jest.fn()
+  writeFile: jest.fn(),
+  exists: jest.fn(),
+  moveFile: jest.fn(),
+  deleteFile: jest.fn()
 }));
+
+const enoent = () => Object.assign(new Error('not found'), { code: 'ENOENT' });
 
 const db = require('../../config/database');
 const remoteFileService = require('../../utils/remoteFileService');
@@ -22,6 +30,10 @@ describe('XMLGenerator', () => {
     db.query.mockReset();
     remoteFileService.isRemote.mockReset();
     remoteFileService.writeFile.mockReset();
+    remoteFileService.exists.mockReset().mockResolvedValue(false);
+    remoteFileService.moveFile.mockReset().mockResolvedValue();
+    mockWriteFile.mockReset().mockResolvedValue();
+    mockAccess.mockReset().mockRejectedValue(enoent());
   });
 
   describe('convertPAN', () => {
@@ -97,12 +109,16 @@ describe('XMLGenerator', () => {
       );
     });
 
-    it('falls back to Date.now() on DB error', async () => {
+    it('propagates DB errors instead of using an identifier outside the sequence', async () => {
       db.query.mockRejectedValue(new Error('connection refused'));
 
-      const result = await xmlGenerator.getNextId(10);
+      await expect(xmlGenerator.getNextId(10)).rejects.toThrow('connection refused');
+    });
 
-      expect(result).toBeGreaterThan(0);
+    it('throws when the sequence row is missing', async () => {
+      db.query.mockResolvedValue({ rows: [] });
+
+      await expect(xmlGenerator.getNextId(2)).rejects.toThrow('xml_id_sequence');
     });
   });
 
@@ -167,20 +183,29 @@ describe('XMLGenerator', () => {
       );
     });
 
-    it('skips records with missing/invalid PAN (console.warn)', async () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
-      db.query.mockResolvedValueOnce({ rows: [{ last_id: '10' }] });
+    it('skips records with missing/invalid PAN and reserves ids only for kept cards', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ last_id: '11' }] });
 
       const badRecords = [
         { id: 1, pan: '4741000000000006', phone: '98765432' },
         { id: 2, pan: '', phone: '12345678' },
         { id: 3, pan: '123', phone: '87654321' }
       ];
-      const xml = await xmlGenerator.generateXML(badRecords, bankCode);
+      const doc = await xmlGenerator.generateXMLDocument(badRecords, bankCode);
 
-      expect(xml.match(/<add /g)).toHaveLength(1);
-      expect(warnSpy).toHaveBeenCalledTimes(2);
-      warnSpy.mockRestore();
+      expect(doc.xmlContent.match(/<add /g)).toHaveLength(1);
+      expect(doc.entriesCount).toBe(2);
+      expect(doc.skipped.map(s => s.recordId)).toEqual([2, 3]);
+      // 2 identifiants réservés (1 carte retenue), pas 6
+      expect(db.query.mock.calls[0][1]).toEqual([2]);
+    });
+
+    it('escapes the profile id in XML attributes', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ last_id: '2' }] });
+
+      const xml = await xmlGenerator.generateXML([{ id: 1, pan: '4741000000000006', phone: '98765432' }], 'A"B<C');
+
+      expect(xml).toContain('profileId="A&quot;B&lt;C"');
     });
 
     it('handles phone formatting for Tunisia (216...)', async () => {
@@ -206,32 +231,56 @@ describe('XMLGenerator', () => {
   });
 
   describe('saveXML', () => {
-    it('local path: calls fs.mkdir, fs.writeFile, returns filePath', async () => {
+    it('local path: writes a temporary file then renames it (atomic), returns filePath', async () => {
       const result = await xmlGenerator.saveXML('<xml/>', '/output', 'test.xml');
 
       expect(mockMkdir).toHaveBeenCalledWith('/output', { recursive: true });
-      expect(mockWriteFile).toHaveBeenCalledWith('/output/test.xml', '<xml/>', 'utf8');
+      expect(mockWriteFile).toHaveBeenCalledWith('/output/test.xml.tmp', '<xml/>', { encoding: 'latin1', flag: 'wx' });
+      expect(mockRename).toHaveBeenCalledWith('/output/test.xml.tmp', '/output/test.xml');
       expect(result).toBe('/output/test.xml');
     });
 
-    it('remote sftp path calls remoteFileService.writeFile', async () => {
+    it('local path: never overwrites an existing XML file', async () => {
+      mockAccess.mockReset()
+        .mockResolvedValueOnce()              // test.xml existe déjà
+        .mockRejectedValueOnce(enoent());     // test_1.xml est libre
+
+      const result = await xmlGenerator.saveXML('<xml/>', '/output', 'test.xml');
+
+      expect(result).toBe('/output/test_1.xml');
+      expect(mockUnlink).toHaveBeenCalledWith('/output/test.xml.tmp');
+      expect(mockRename).toHaveBeenCalledWith('/output/test_1.xml.tmp', '/output/test_1.xml');
+    });
+
+    it('local path: skips a name reserved concurrently by another job (EEXIST)', async () => {
+      mockWriteFile.mockReset()
+        .mockRejectedValueOnce(Object.assign(new Error('exists'), { code: 'EEXIST' }))
+        .mockResolvedValueOnce();
+
+      const result = await xmlGenerator.saveXML('<xml/>', '/output', 'test.xml');
+
+      expect(result).toBe('/output/test_1.xml');
+    });
+
+    it('remote sftp path writes a temporary file then moves it', async () => {
       remoteFileService.isRemote.mockReturnValue(true);
       remoteFileService.writeFile.mockResolvedValue();
 
       const result = await xmlGenerator.saveXML('<xml/>', 'sftp://host/xml', 'test.xml');
 
-      expect(remoteFileService.writeFile).toHaveBeenCalledWith('sftp://host/xml/test.xml', '<xml/>');
+      expect(remoteFileService.writeFile).toHaveBeenCalledWith('sftp://host/xml/test.xml.tmp', '<xml/>');
+      expect(remoteFileService.moveFile).toHaveBeenCalledWith('sftp://host/xml/test.xml.tmp', 'sftp://host/xml/test.xml');
       expect(result).toBe('sftp://host/xml/test.xml');
     });
 
-    it('remote ftp path calls remoteFileService.writeFile', async () => {
+    it('remote ftp path picks a free name when the file already exists', async () => {
       remoteFileService.isRemote.mockReturnValue(true);
       remoteFileService.writeFile.mockResolvedValue();
+      remoteFileService.exists.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
       const result = await xmlGenerator.saveXML('<xml/>', 'ftp://host/xml', 'test.xml');
 
-      expect(remoteFileService.writeFile).toHaveBeenCalledWith('ftp://host/xml/test.xml', '<xml/>');
-      expect(result).toBe('ftp://host/xml/test.xml');
+      expect(result).toBe('ftp://host/xml/test_1.xml');
     });
 
     it('throws if fs.writeFile fails', async () => {
@@ -244,41 +293,45 @@ describe('XMLGenerator', () => {
   describe('processAndGenerateXML', () => {
     const bank = { code: 'BNK', xml_output_url: '/xml/output' };
 
-    it('orchestrates generateXML + generateFileName + saveXML', async () => {
-      jest.spyOn(xmlGenerator, 'generateXML').mockResolvedValue('<xml/>');
+    it('orchestrates generation and save, and counts only the cards written', async () => {
+      jest.spyOn(xmlGenerator, 'generateXMLDocument').mockResolvedValue({ xmlContent: '<xml/>', entriesCount: 4, recordsCount: 2, skipped: [{ recordId: 3 }] });
       jest.spyOn(xmlGenerator, 'generateFileName').mockReturnValue('ACS_CARDS_BNK_20250101120000.xml');
-      jest.spyOn(xmlGenerator, 'saveXML').mockResolvedValue('/xml/output/ACS_CARDS_BNK_20250101120000.xml');
+      jest.spyOn(xmlGenerator, 'saveXMLFile').mockResolvedValue({ filePath: '/xml/output/ACS_CARDS_BNK_20250101120000.xml', fileName: 'ACS_CARDS_BNK_20250101120000.xml' });
 
-      const result = await xmlGenerator.processAndGenerateXML(
-        [{ id: 1, pan: '4741000000000006', phone: '98765432' }], bank
-      );
+      const result = await xmlGenerator.processAndGenerateXML([{ id: 1 }, { id: 2 }, { id: 3 }], bank);
 
       expect(result).toEqual({
         success: true,
         filePath: '/xml/output/ACS_CARDS_BNK_20250101120000.xml',
         fileName: 'ACS_CARDS_BNK_20250101120000.xml',
-        xmlEntriesCount: 2
+        xmlEntriesCount: 4,
+        recordsCount: 2,
+        skipped: [{ recordId: 3 }]
       });
+      expect(xmlGenerator.saveXMLFile).toHaveBeenCalledWith('<xml/>', '/xml/output', 'ACS_CARDS_BNK_20250101120000.xml');
     });
 
-    it('xmlEntriesCount = records.length * 2', async () => {
-      jest.spyOn(xmlGenerator, 'generateXML').mockResolvedValue('<xml/>');
-      jest.spyOn(xmlGenerator, 'generateFileName').mockReturnValue('test.xml');
-      jest.spyOn(xmlGenerator, 'saveXML').mockResolvedValue('/path/test.xml');
+    it('writes no file when no card is usable', async () => {
+      jest.spyOn(xmlGenerator, 'generateXMLDocument').mockResolvedValue({ xmlContent: '<x/>', entriesCount: 0, recordsCount: 0, skipped: [{ recordId: 1 }] });
+      const saveSpy = jest.spyOn(xmlGenerator, 'saveXMLFile');
 
-      const result = await xmlGenerator.processAndGenerateXML(
-        [{ id: 1 }, { id: 2 }, { id: 3 }], bank
-      );
+      const result = await xmlGenerator.processAndGenerateXML([{ id: 1 }], bank);
 
-      expect(result.xmlEntriesCount).toBe(6);
+      expect(result.success).toBe(false);
+      expect(result.xmlEntriesCount).toBe(0);
+      expect(saveSpy).not.toHaveBeenCalled();
     });
 
-    it('throws when generateXML fails', async () => {
-      jest.spyOn(xmlGenerator, 'generateXML').mockRejectedValue(new Error('generation failed'));
+    it('throws when generation fails', async () => {
+      jest.spyOn(xmlGenerator, 'generateXMLDocument').mockRejectedValue(new Error('generation failed'));
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation();
 
       await expect(xmlGenerator.processAndGenerateXML(
         [{ id: 1, pan: '4741000000000006', phone: '98765432' }], bank
       )).rejects.toThrow('generation failed');
+      errorSpy.mockRestore();
     });
+
+    afterEach(() => jest.restoreAllMocks());
   });
 });

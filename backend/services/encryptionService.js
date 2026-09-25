@@ -4,12 +4,28 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
+// La dérivation scrypt est coûteuse : la clé est calculée une seule fois par secret
+const keyCache = new Map();
+
 function getKey() {
   const secret = process.env.PAN_ENCRYPTION_KEY;
   if (!secret) {
     throw new Error('PAN_ENCRYPTION_KEY non définie dans les variables d\'environnement');
   }
-  return crypto.scryptSync(secret, 'pan-encryption-salt', 32);
+  if (!keyCache.has(secret)) {
+    keyCache.clear();
+    keyCache.set(secret, crypto.scryptSync(secret, 'pan-encryption-salt', 32));
+  }
+  return keyCache.get(secret);
+}
+
+// Clé HMAC de l'empreinte du PAN : PAN_HASH_KEY, sinon dérivée de PAN_ENCRYPTION_KEY
+function getHashKey() {
+  if (process.env.PAN_HASH_KEY) return process.env.PAN_HASH_KEY;
+  if (process.env.PAN_ENCRYPTION_KEY) {
+    return crypto.createHmac('sha256', process.env.PAN_ENCRYPTION_KEY).update('pan-hash-v2').digest();
+  }
+  return null;
 }
 
 function encrypt(plaintext) {
@@ -37,13 +53,17 @@ function decrypt(ciphertext) {
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
-  } catch {
-    return ciphertext;
+  } catch (error) {
+    // Valeur chiffrée illisible (mauvaise clé ou donnée corrompue) : ne jamais renvoyer le texte chiffré
+    console.error('Déchiffrement impossible:', error.message);
+    return null;
   }
 }
 
 function maskPan(pan) {
   if (!pan) return pan;
+  // Déjà masqué : ne pas re-masquer (sinon "****1234" deviendrait "1234")
+  if (pan.toString().includes('*')) return pan.toString();
   const clean = pan.toString().replace(/[^0-9]/g, '');
   if (clean.length <= 4) return clean;
   return '*'.repeat(clean.length - 4) + clean.slice(-4);
@@ -72,9 +92,18 @@ function maskResponseData(data) {
   return data;
 }
 
-function hashPan(pan) {
+// Ancienne empreinte (SHA-256 sans clé, vulnérable à la force brute) : conservée pour la migration
+function hashPanLegacy(pan) {
   if (!pan) return pan;
   return crypto.createHash('sha256').update(pan.toString()).digest('hex');
 }
 
-module.exports = { encrypt, decrypt, maskPan, maskResponseData, hashPan };
+// Empreinte du PAN pour les recherches et la déduplication : HMAC-SHA256 avec clé secrète
+function hashPan(pan) {
+  if (!pan) return pan;
+  const key = getHashKey();
+  if (!key) return hashPanLegacy(pan);
+  return crypto.createHmac('sha256', key).update(pan.toString()).digest('hex');
+}
+
+module.exports = { encrypt, decrypt, maskPan, maskResponseData, hashPan, hashPanLegacy };

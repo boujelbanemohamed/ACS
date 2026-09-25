@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { Send, Code, Key, Globe, RefreshCw, CheckCircle, XCircle, Clock, Copy, Terminal, Trash2, BookOpen, ChevronDown, ChevronRight, Info, Shield, ExternalLink, Database, FileText, MapPin, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Send, Code, Key, RefreshCw, CheckCircle, XCircle, Copy, Terminal, Trash2, BookOpen, ChevronDown, ChevronRight, Info, Shield, ExternalLink, Database, FileText, MapPin, AlertTriangle, ArrowRight } from 'lucide-react';
 import api from '../services/api';
 import './ApiTester.css';
 
@@ -289,7 +288,6 @@ const perCardErrors = {
 };
 
 const ApiTester = () => {
-  const { user } = useAuth();
   const [activeEndpoint, setActiveEndpoint] = useState('validate');
   const [apiKey, setApiKey] = useState('');
   const [requestBody, setRequestBody] = useState(endpoints[0].bodyTemplate);

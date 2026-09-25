@@ -9,6 +9,7 @@ const { filterByBank } = require('../middleware/roleMiddleware');
 const recordHistoryService = require('../services/recordHistoryService');
 const { decrypt, hashPan } = require('../services/encryptionService');
 
+const { isBankScoped, canAccessBank, effectiveBankId } = require('../utils/bankScope');
 const router = express.Router();
 
 /**
@@ -31,8 +32,8 @@ router.get('/search', authMiddleware, filterByBank, async (req, res) => {
     
     // Si utilisateur banque, forcer son bankId
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     const result = await recordHistoryService.searchHistory({
@@ -76,8 +77,8 @@ router.get('/stats', authMiddleware, async (req, res) => {
     
     // Si utilisateur banque, forcer son bankId
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     const stats = await recordHistoryService.getStats(
@@ -106,8 +107,8 @@ router.get('/top-errors', authMiddleware, async (req, res) => {
     const { bankId, limit = 10 } = req.query;
     
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     const errors = await recordHistoryService.getTopErrors(
@@ -137,7 +138,7 @@ router.get('/pan/:bankId/:pan', authMiddleware, async (req, res) => {
     const { bankId, pan } = req.params;
     
     // Vérifier accès banque
-    if (req.user.role === 'bank' && req.user.bank_id !== parseInt(bankId)) {
+    if (!canAccessBank(req.user, bankId)) {
       return res.status(403).json({
         success: false,
         message: 'Accès non autorisé à cette banque'
@@ -194,7 +195,7 @@ router.get('/by-record/:recordId', authMiddleware, async (req, res) => {
     const { pan: encryptedPan, bank_id } = recordResult.rows[0];
     const pan = decrypt(encryptedPan);
 
-    if (req.user.role === 'bank' && req.user.bank_id !== bank_id) {
+    if (!canAccessBank(req.user, bank_id)) {
       return res.status(403).json({
         success: false,
         message: 'Accès non autorisé à cette banque'
@@ -258,12 +259,10 @@ router.get('/pan-lookup', authMiddleware, async (req, res) => {
     const params = [panHash];
     let paramCount = 2;
     
-    if (bankId) {
+    const scopedBankId = effectiveBankId(req.user, bankId);
+    if (scopedBankId !== null) {
       query += ` AND rh.bank_id = $${paramCount}`;
-      params.push(parseInt(bankId));
-    } else if (req.user.role === 'bank' && req.user.bank_id) {
-      query += ` AND rh.bank_id = $${paramCount}`;
-      params.push(req.user.bank_id);
+      params.push(scopedBankId);
     }
     
     query += `
@@ -300,8 +299,8 @@ router.get('/corrections', authMiddleware, async (req, res) => {
     const { bankId, limit = 50, offset = 0 } = req.query;
     
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     let query = `
@@ -374,8 +373,8 @@ router.get('/timeline/:days', authMiddleware, async (req, res) => {
     const { bankId } = req.query;
     
     let filterBankId = bankId;
-    if (req.user.role === 'bank' && req.user.bank_id) {
-      filterBankId = req.user.bank_id;
+    if (isBankScoped(req.user)) {
+      filterBankId = req.user.bank_id || -1;
     }
     
     let query = `

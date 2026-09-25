@@ -4,6 +4,23 @@ const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const cronService = require('../services/cronService');
 const emailService = require('../services/emailService');
+const { decrypt, maskPan } = require('../services/encryptionService');
+
+// Masque les valeurs de PAN contenues dans les erreurs de validation (chiffrées ou anciennes données)
+const maskPanEntries = (data) => {
+  if (Array.isArray(data)) return data.map(maskPanEntries);
+  if (data && typeof data === 'object' && !(data instanceof Date)) {
+    const out = {};
+    for (const [key, value] of Object.entries(data)) out[key] = maskPanEntries(value);
+    const field = out.field || out.field_name;
+    if (field === 'pan') {
+      if (typeof out.value === 'string' && out.value) out.value = maskPan(decrypt(out.value));
+      if (typeof out.field_value === 'string' && out.field_value) out.field_value = maskPan(decrypt(out.field_value));
+    }
+    return out;
+  }
+  return data;
+};
 
 const superAdminOnly = (req, res, next) => {
   if (req.user.role !== 'super_admin') {
@@ -144,7 +161,8 @@ router.get('/health', authMiddleware, async (req, res) => {
 router.get('/debug', authMiddleware, async (req, res) => {
   try {
     const isSuperAdmin = req.user.role === 'super_admin';
-    const bankId = req.query.bankId || (!isSuperAdmin ? req.user.bank_id : null);
+    // Un utilisateur non super_admin est toujours limité à sa banque (bankId en paramètre ignoré)
+    const bankId = isSuperAdmin ? (req.query.bankId || null) : (req.user.bank_id || -1);
 
     const bankFilter = bankId ? 'AND fl.bank_id = $1' : '';
     const bankFilterVE = bankId
@@ -237,8 +255,8 @@ router.get('/debug', authMiddleware, async (req, res) => {
       data: {
         summary,
         file_errors_by_status: fileProcessingErrors.rows,
-        top_field_validation_errors: topFieldErrors.rows,
-        recent_file_errors: recentFileErrors.rows,
+        top_field_validation_errors: maskPanEntries(topFieldErrors.rows),
+        recent_file_errors: maskPanEntries(recentFileErrors.rows),
         recent_scan_errors: recentScanLogs.rows,
       }
     });

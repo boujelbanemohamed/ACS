@@ -287,13 +287,20 @@ describe('Records', () => {
     });
   });
 
-  it('triggers window.open on CSV export', async () => {
-    window.open = jest.fn();
+  it('downloads the CSV export through the authenticated API client', async () => {
+    window.URL.createObjectURL = jest.fn(() => 'blob:export');
+    window.URL.revokeObjectURL = jest.fn();
+    const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     useAuth.mockReturnValue({ user: { role: 'super_admin' } });
     render(<MemoryRouter><Records /></MemoryRouter>);
     await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
     fireEvent.click(screen.getByText('Exporter CSV'));
-    expect(window.open).toHaveBeenCalledWith(expect.stringContaining('/records/export/csv'), '_blank');
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalledWith('/records/export/csv', expect.objectContaining({ responseType: 'blob' }));
+    });
+    await waitFor(() => { expect(clickSpy).toHaveBeenCalled(); });
+    expect(window.URL.revokeObjectURL).toHaveBeenCalledWith('blob:export');
+    clickSpy.mockRestore();
   });
 
   it('handles enrollment upload and displays result', async () => {
@@ -421,7 +428,8 @@ describe('Records', () => {
 
   it('shows alert when export fails', async () => {
     window.alert = jest.fn();
-    window.open = jest.fn(() => { throw new Error('Export error'); });
+    const base = mockGet.getMockImplementation();
+    mockGet.mockImplementation((url, ...rest) => (url === '/records/export/csv' ? Promise.reject(new Error('Export error')) : base(url, ...rest)));
     render(<MemoryRouter><Records /></MemoryRouter>);
     await waitFor(() => { expect(screen.getByText('Enregistrements')).toBeInTheDocument(); });
     fireEvent.click(screen.getByText('Exporter CSV'));

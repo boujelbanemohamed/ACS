@@ -29,9 +29,19 @@ const CronService = require('../../services/cronService');
 
 describe('CronService', () => {
   let cronService;
+  let lockClient;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Client dédié au verrou de cluster (pg_try_advisory_lock)
+    lockClient = {
+      query: jest.fn(async (sql) => {
+        if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }] };
+        return { rows: [] };
+      }),
+      release: jest.fn()
+    };
+    db.pool = { connect: jest.fn().mockResolvedValue(lockClient) };
     cron.schedule.mockReturnValue({ stop: jest.fn() });
     cron.validate.mockReturnValue(true);
     db.query.mockResolvedValue({ rows: [] });
@@ -114,10 +124,11 @@ describe('CronService', () => {
   });
 
   describe('updateSchedule()', () => {
-    it('updates schedule and restarts task', () => {
+    it('updates schedule, persists it for every instance and restarts task', async () => {
       const spy = jest.spyOn(cronService, 'startScanTask').mockImplementation(() => {});
-      cronService.updateSchedule('0 * * * *');
+      await cronService.updateSchedule('0 * * * *');
       expect(cronService.schedule).toBe('0 * * * *');
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'), ['cron_schedule', '0 * * * *']);
       expect(spy).toHaveBeenCalled();
     });
 
@@ -142,6 +153,62 @@ describe('CronService', () => {
       await cronService.setEnabled(false);
       expect(stopMock).toHaveBeenCalled();
       expect(cronService.scanTask).toBeNull();
+    });
+  });
+
+  describe('run() in a cluster', () => {
+    it('skips the scan when another instance holds the lock', async () => {
+      lockClient.query.mockImplementation(async (sql) => {
+        if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: false }] };
+        return { rows: [] };
+      });
+      const scanSpy = jest.spyOn(cronService, 'runScan');
+
+      const result = await cronService.run();
+
+      expect(result).toBeNull();
+      expect(scanSpy).not.toHaveBeenCalled();
+      expect(lockClient.release).toHaveBeenCalled();
+      expect(cronService.isScanning).toBe(false);
+    });
+
+    it('skips the scan when another instance just ran it', async () => {
+      lockClient.query.mockImplementation(async (sql) => {
+        if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }] };
+        if (sql.includes('SELECT value FROM settings')) return { rows: [{ value: new Date().toISOString() }] };
+        return { rows: [] };
+      });
+      const scanSpy = jest.spyOn(cronService, 'runScan');
+
+      const result = await cronService.run();
+
+      expect(result).toBeNull();
+      expect(scanSpy).not.toHaveBeenCalled();
+      expect(lockClient.query).toHaveBeenCalledWith('SELECT pg_advisory_unlock($1)', [expect.any(Number)]);
+    });
+
+    it('loadSettings() applies the shared configuration (schedule, enabled, reports)', async () => {
+      db.query.mockResolvedValueOnce({ rows: [
+        { key: 'cron_schedule', value: '*/10 * * * *' },
+        { key: 'cron_enabled', value: 'false' },
+        { key: 'report_schedule', value: '0 7 * * *' },
+        { key: 'report_enabled', value: 'false' }
+      ] });
+
+      const changed = await cronService.loadSettings();
+
+      expect(changed).toBe(true);
+      expect(cronService.schedule).toBe('*/10 * * * *');
+      expect(cronService.enabled).toBe(false);
+      expect(cronService.dailyReportSchedule).toBe('0 7 * * *');
+      expect(cronService.dailyReportEnabled).toBe(false);
+    });
+
+    it('setReportConfig() persists the daily report configuration', async () => {
+      jest.spyOn(cronService, 'startReportTask').mockImplementation(() => {});
+      await cronService.setReportConfig({ schedule: '0 9 * * *', enabled: true });
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'), ['report_schedule', '0 9 * * *']);
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'), ['report_enabled', 'true']);
     });
   });
 

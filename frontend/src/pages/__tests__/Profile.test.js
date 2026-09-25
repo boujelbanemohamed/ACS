@@ -112,7 +112,24 @@ describe('Profile', () => {
     const submitBtn = pwBtns[pwBtns.length - 1];
     fireEvent.click(submitBtn);
     await waitFor(() => {
-      expect(screen.getByText('Le mot de passe doit contenir au moins 6 caracteres')).toBeInTheDocument();
+      expect(screen.getByText(/au moins 8 caracteres dont une minuscule, une majuscule, un chiffre et un caractere special/)).toBeInTheDocument();
+    });
+  });
+
+  it('stores the new token returned after a password change', async () => {
+    const updateToken = jest.fn();
+    useAuth.mockReturnValue({ user: { username: 'admin', role: 'super_admin' }, updateToken });
+    mockPut.mockResolvedValue({ data: { success: true, token: 'fresh-jwt' } });
+    render(<MemoryRouter><Profile /></MemoryRouter>);
+    await waitFor(() => { expect(screen.getByText('Informations personnelles')).toBeInTheDocument(); });
+    const passInputs = document.querySelectorAll('input[type="password"]');
+    fireEvent.change(passInputs[0], { target: { value: 'OldPass@1' } });
+    fireEvent.change(passInputs[1], { target: { value: 'NewPass@123' } });
+    fireEvent.change(passInputs[2], { target: { value: 'NewPass@123' } });
+    const pwBtns = screen.getAllByText('Changer le mot de passe');
+    fireEvent.click(pwBtns[pwBtns.length - 1]);
+    await waitFor(() => {
+      expect(updateToken).toHaveBeenCalledWith('fresh-jwt');
     });
   });
 
@@ -122,9 +139,9 @@ describe('Profile', () => {
     await waitFor(() => { expect(screen.getByText('Informations personnelles')).toBeInTheDocument(); });
     const passInputs = document.querySelectorAll('input[type="password"]');
     if (passInputs.length >= 3) {
-      fireEvent.change(passInputs[0], { target: { value: 'oldpass' } });
-      fireEvent.change(passInputs[1], { target: { value: 'newpass123' } });
-      fireEvent.change(passInputs[2], { target: { value: 'newpass123' } });
+      fireEvent.change(passInputs[0], { target: { value: 'OldPass@1' } });
+      fireEvent.change(passInputs[1], { target: { value: 'NewPass@123' } });
+      fireEvent.change(passInputs[2], { target: { value: 'NewPass@123' } });
     }
     const pwBtns = screen.getAllByText('Changer le mot de passe');
     const submitBtn = pwBtns[pwBtns.length - 1];
@@ -140,9 +157,9 @@ describe('Profile', () => {
     await waitFor(() => { expect(screen.getByText('Informations personnelles')).toBeInTheDocument(); });
     const passInputs = document.querySelectorAll('input[type="password"]');
     if (passInputs.length >= 3) {
-      fireEvent.change(passInputs[0], { target: { value: 'wrongold' } });
-      fireEvent.change(passInputs[1], { target: { value: 'newpass123' } });
-      fireEvent.change(passInputs[2], { target: { value: 'newpass123' } });
+      fireEvent.change(passInputs[0], { target: { value: 'WrongOld@1' } });
+      fireEvent.change(passInputs[1], { target: { value: 'NewPass@123' } });
+      fireEvent.change(passInputs[2], { target: { value: 'NewPass@123' } });
     }
     const pwBtns = screen.getAllByText('Changer le mot de passe');
     const submitBtn = pwBtns[pwBtns.length - 1];

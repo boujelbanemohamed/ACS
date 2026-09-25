@@ -141,7 +141,7 @@ describe('Users Routes', () => {
       auditService.logAction.mockResolvedValue();
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass1234' })
+        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass@1234' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
@@ -161,7 +161,7 @@ describe('Users Routes', () => {
       db.query.mockResolvedValueOnce({ rows: [{ id: 1 }] });
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'existing', email: 'existing@test.com', password: 'Pass1234' })
+        .send({ username: 'existing', email: 'existing@test.com', password: 'Pass@1234' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(400);
@@ -171,7 +171,7 @@ describe('Users Routes', () => {
     it('bank_admin can only create bank users', async () => {
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'newadmin', email: 'admin2@test.com', password: 'Pass1234', role: 'super_admin' })
+        .send({ username: 'newadmin', email: 'admin2@test.com', password: 'Pass@1234', role: 'super_admin' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'bank_admin')
         .set('x-test-bank-id', '3');
@@ -185,7 +185,7 @@ describe('Users Routes', () => {
       auditService.logAction.mockResolvedValue();
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'bankuser', email: 'bu@test.com', password: 'Pass1234', role: 'bank' })
+        .send({ username: 'bankuser', email: 'bu@test.com', password: 'Pass@1234', role: 'bank' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'bank_admin')
         .set('x-test-bank-id', '3');
@@ -195,7 +195,7 @@ describe('Users Routes', () => {
     it('blocks bank user from creating users', async () => {
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass1234' })
+        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass@1234' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'bank');
       expect(res.status).toBe(403);
@@ -204,7 +204,7 @@ describe('Users Routes', () => {
     it('rejects bank role without bankId', async () => {
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'bankuser', email: 'b@test.com', password: 'Pass1234', role: 'bank' })
+        .send({ username: 'bankuser', email: 'b@test.com', password: 'Pass@1234', role: 'bank' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(400);
@@ -215,7 +215,7 @@ describe('Users Routes', () => {
       db.query.mockRejectedValue(new Error('DB error'));
       const res = await request(createTestApp())
         .post('/api/users')
-        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass1234' })
+        .send({ username: 'newuser', email: 'new@test.com', password: 'Pass@1234' })
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(500);

@@ -65,20 +65,35 @@ services:
       DB_NAME: ${DB_NAME:-banking_db}
       DB_USER: ${DB_USER:-banking_user}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_POOL_MAX: 100
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_BATCH_SIZE: ${DB_BATCH_SIZE:-100}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRE: ${JWT_EXPIRE:-8h}
       CORS_ORIGIN: ${CORS_ORIGIN}
+      FRONTEND_URL: ${FRONTEND_URL}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       PAN_ENCRYPTION_KEY: ${PAN_ENCRYPTION_KEY}
+      PAN_HASH_KEY: ${PAN_HASH_KEY:-}
       TZ: ${TZ:-Africa/Tunis}
       CRON_SCHEDULE: ${CRON_SCHEDULE:-*/5 * * * *}
       AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-20}
       PASSWORD_EXPIRY_DAYS: ${PASSWORD_EXPIRY_DAYS:-90}
+      ALLOWED_API_DOMAINS: ${ALLOWED_API_DOMAINS:-}
+      UPLOAD_DIR: /data/uploads
+      SFTP_HOST_FINGERPRINTS: ${SFTP_HOST_FINGERPRINTS:-}
+      SFTP_STRICT_HOST_KEY: ${SFTP_STRICT_HOST_KEY:-false}
+      FTP_SECURE: ${FTP_SECURE:-false}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
       PM2_INSTANCES: ${PM2_INSTANCES:-max}
       PM2_MAX_MEMORY: ${PM2_MAX_MEMORY:-512M}
+      QUEUE_JOB_ATTEMPTS: ${QUEUE_JOB_ATTEMPTS:-1}
+      QUEUE_BACKOFF_DELAY: ${QUEUE_BACKOFF_DELAY:-5000}
+      QUEUE_JOB_TIMEOUT: ${QUEUE_JOB_TIMEOUT:-600000}
+      QUEUE_KEEP_COMPLETE: ${QUEUE_KEEP_COMPLETE:-100}
+      QUEUE_KEEP_FAILED: ${QUEUE_KEEP_FAILED:-50}
+      QUEUE_MAX_PER_SECOND: ${QUEUE_MAX_PER_SECOND:-5}
     expose:
       - "5000"
     healthcheck:
@@ -96,17 +111,8 @@ services:
         condition: service_healthy
     networks:
       - banking_network_prod
-    environment:
-      PM2_INSTANCES: ${PM2_INSTANCES:-max}
-      PM2_MAX_MEMORY: ${PM2_MAX_MEMORY:-512M}
-      QUEUE_JOB_ATTEMPTS: ${QUEUE_JOB_ATTEMPTS:-3}
-      QUEUE_BACKOFF_DELAY: ${QUEUE_BACKOFF_DELAY:-5000}
-      QUEUE_JOB_TIMEOUT: ${QUEUE_JOB_TIMEOUT:-120000}
-      QUEUE_KEEP_COMPLETE: ${QUEUE_KEEP_COMPLETE:-100}
-      QUEUE_KEEP_FAILED: ${QUEUE_KEEP_FAILED:-50}
-      QUEUE_MAX_PER_SECOND: ${QUEUE_MAX_PER_SECOND:-5}
-      DB_BATCH_SIZE: ${DB_BATCH_SIZE:-100}
     volumes:
+      # Volume partagé avec le worker (fichiers importés, dossiers des banques)
       - banking_data:/data
 
   worker:
@@ -115,6 +121,8 @@ services:
       dockerfile: Dockerfile
     container_name: banking_worker_prod
     restart: always
+    # Sans commande explicite, l'image démarre l'API (CMD du Dockerfile) au lieu du worker
+    command: ["node", "services/worker.js"]
     environment:
       NODE_ENV: production
       DB_HOST: pgbouncer
@@ -122,9 +130,20 @@ services:
       DB_NAME: ${DB_NAME:-banking_db}
       DB_USER: ${DB_USER:-banking_user}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_POOL_MAX: 100
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_BATCH_SIZE: ${DB_BATCH_SIZE:-100}
       REDIS_URL: redis://redis:6379
       PAN_ENCRYPTION_KEY: ${PAN_ENCRYPTION_KEY}
+      PAN_HASH_KEY: ${PAN_HASH_KEY:-}
+      TZ: ${TZ:-Africa/Tunis}
+      ALLOWED_API_DOMAINS: ${ALLOWED_API_DOMAINS:-}
+      UPLOAD_DIR: /data/uploads
+      SFTP_HOST_FINGERPRINTS: ${SFTP_HOST_FINGERPRINTS:-}
+      SFTP_STRICT_HOST_KEY: ${SFTP_STRICT_HOST_KEY:-false}
+      FTP_SECURE: ${FTP_SECURE:-false}
+      QUEUE_JOB_ATTEMPTS: ${QUEUE_JOB_ATTEMPTS:-1}
+      QUEUE_JOB_TIMEOUT: ${QUEUE_JOB_TIMEOUT:-600000}
+      QUEUE_MAX_PER_SECOND: ${QUEUE_MAX_PER_SECOND:-5}
     depends_on:
       pgbouncer:
         condition: service_started
@@ -134,9 +153,6 @@ services:
         condition: service_healthy
     networks:
       - banking_network_prod
-    environment:
-      WORKER_INSTANCES: ${WORKER_INSTANCES:-2}
-      WORKER_MAX_MEMORY: ${WORKER_MAX_MEMORY:-512M}
     volumes:
       - banking_data:/data
 

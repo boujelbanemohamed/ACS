@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
-import { Activity, RefreshCw, Filter, Search, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Activity, RefreshCw, Filter, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import './AuditLogs.css';
 
 const ACTION_LABELS = {
@@ -130,6 +130,8 @@ const AuditLogs = () => {
 
   useEffect(() => {
     fetchLogs();
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagination.offset]);
 
   const handleFilter = () => {

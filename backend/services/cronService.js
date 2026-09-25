@@ -7,6 +7,11 @@ const enrollmentService = require('./enrollmentService');
 const emailService = require('./emailService');
 const remoteFileService = require('../utils/remoteFileService');
 
+// Identifiants de verrous PostgreSQL (un seul processus du cluster exécute la tâche)
+const SCAN_LOCK_ID = 7340001;
+const REPORT_LOCK_ID = 7340002;
+const SETTINGS_SYNC_INTERVAL_MS = parseInt(process.env.CRON_SETTINGS_SYNC_MS, 10) || 60000;
+
 class CronService {
   constructor() {
     this.scanner = new FileScanner();
@@ -18,21 +23,98 @@ class CronService {
     this.enabled = true;
     this.dailyReportSchedule = process.env.REPORT_CRON || '0 8 * * *';
     this.dailyReportEnabled = process.env.REPORT_ENABLED !== 'false';
+    this.settingsTimer = null;
+  }
+
+  // Lit la configuration partagée (table settings) ; retourne true si elle a changé
+  async loadSettings() {
+    const before = JSON.stringify([this.schedule, this.enabled, this.dailyReportSchedule, this.dailyReportEnabled]);
+    const result = await db.query(
+      "SELECT key, value FROM settings WHERE key IN ('cron_schedule', 'cron_enabled', 'report_schedule', 'report_enabled')"
+    );
+    (result.rows || []).forEach(row => {
+      if (row.key === 'cron_schedule' && row.value && cron.validate(row.value)) this.schedule = row.value;
+      if (row.key === 'cron_enabled') this.enabled = row.value === 'true';
+      if (row.key === 'report_schedule' && row.value && cron.validate(row.value)) this.dailyReportSchedule = row.value;
+      if (row.key === 'report_enabled') this.dailyReportEnabled = row.value === 'true';
+    });
+    return before !== JSON.stringify([this.schedule, this.enabled, this.dailyReportSchedule, this.dailyReportEnabled]);
   }
 
   async init() {
     try {
-      const result = await db.query("SELECT * FROM settings WHERE key IN ('cron_schedule', 'cron_enabled')");
-      result.rows.forEach(row => {
-        if (row.key === 'cron_schedule' && row.value) this.schedule = row.value;
-        if (row.key === 'cron_enabled') this.enabled = row.value === 'true';
-      });
+      await this.loadSettings();
     } catch {
       console.log('Using default cron settings');
     }
 
     this.startScanTask();
     this.startReportTask();
+    this.startSettingsSync();
+  }
+
+  // Chaque instance (cluster PM2) se resynchronise sur la configuration enregistrée
+  startSettingsSync() {
+    if (this.settingsTimer) clearInterval(this.settingsTimer);
+    this.settingsTimer = setInterval(async () => {
+      try {
+        const scanBefore = `${this.schedule}|${this.enabled}`;
+        const reportBefore = `${this.dailyReportSchedule}|${this.dailyReportEnabled}`;
+        if (await this.loadSettings()) {
+          if (scanBefore !== `${this.schedule}|${this.enabled}`) this.startScanTask();
+          if (reportBefore !== `${this.dailyReportSchedule}|${this.dailyReportEnabled}`) this.startReportTask();
+        }
+      } catch (error) {
+        console.error('Cron settings sync error:', error.message);
+      }
+    }, SETTINGS_SYNC_INTERVAL_MS);
+    if (this.settingsTimer.unref) this.settingsTimer.unref();
+  }
+
+  stop() {
+    if (this.scanTask) { this.scanTask.stop(); this.scanTask = null; }
+    if (this.reportTask) { this.reportTask.stop(); this.reportTask = null; }
+    if (this.settingsTimer) { clearInterval(this.settingsTimer); this.settingsTimer = null; }
+  }
+
+  async saveSetting(key, value) {
+    await db.query(
+      `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP`,
+      [key, String(value)]
+    );
+  }
+
+  /**
+   * Exécute fn sous verrou PostgreSQL : si une autre instance détient le verrou, retourne null.
+   * minIntervalMs : ignore l'exécution si la même tâche a démarré il y a moins longtemps
+   * (deux instances déclenchées à la même minute).
+   */
+  async withClusterLock(lockId, lastRunKey, minIntervalMs, fn) {
+    if (!db.pool || typeof db.pool.connect !== 'function') return fn();
+
+    const client = await db.pool.connect();
+    let locked = false;
+    try {
+      const lock = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [lockId]);
+      locked = lock.rows[0] && lock.rows[0].locked;
+      if (!locked) return null;
+
+      const last = await client.query('SELECT value FROM settings WHERE key = $1', [lastRunKey]);
+      const lastRun = last.rows[0] ? Date.parse(last.rows[0].value) : NaN;
+      if (!Number.isNaN(lastRun) && Date.now() - lastRun < minIntervalMs) return null;
+
+      await client.query(
+        `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP`,
+        [lastRunKey, new Date().toISOString()]
+      );
+
+      return await fn();
+    } finally {
+      if (locked) await client.query('SELECT pg_advisory_unlock($1)', [lockId]).catch(() => {});
+      client.release();
+    }
   }
 
   startScanTask() {
@@ -50,7 +132,21 @@ class CronService {
   async updateSchedule(newSchedule) {
     if (!cron.validate(newSchedule)) throw new Error('Invalid cron schedule');
     this.schedule = newSchedule;
+    await this.saveSetting('cron_schedule', newSchedule);
     this.startScanTask();
+  }
+
+  async setReportConfig({ schedule, enabled }) {
+    if (schedule) {
+      if (!cron.validate(schedule)) throw new Error('Invalid cron schedule');
+      this.dailyReportSchedule = schedule;
+      await this.saveSetting('report_schedule', schedule);
+    }
+    if (enabled !== undefined) {
+      this.dailyReportEnabled = enabled !== false;
+      await this.saveSetting('report_enabled', this.dailyReportEnabled);
+    }
+    this.startReportTask();
   }
 
   async setEnabled(enabled) {
@@ -63,6 +159,16 @@ class CronService {
     if (this.isScanning) { console.log('⚠️ Scan already in progress'); return null; }
 
     this.isScanning = true;
+    try {
+      const result = await this.withClusterLock(SCAN_LOCK_ID, 'scan_last_run', 30000, () => this.runScan());
+      if (result === null) console.log('⏭️  Scan ignoré : déjà exécuté par une autre instance');
+      return result;
+    } finally {
+      this.isScanning = false;
+    }
+  }
+
+  async runScan() {
     this.lastScanTime = new Date();
     console.log('🔍 Starting scan...');
 
@@ -105,8 +211,6 @@ class CronService {
     } catch (error) {
       console.error('Scan error:', error);
       result.errors.push({ error: error.message });
-    } finally {
-      this.isScanning = false;
     }
 
     return result;
@@ -231,8 +335,15 @@ class CronService {
     if (!this.dailyReportEnabled) { console.log('🔴 Daily reports disabled'); return; }
     if (!cron.validate(this.dailyReportSchedule)) { console.error('Invalid report cron:', this.dailyReportSchedule); return; }
     this.reportTask = cron.schedule(this.dailyReportSchedule, async () => {
-      console.log('Sending daily reports...');
-      try { await emailService.sendAllDailyReports(new Date()); } catch (e) { console.error('Report error:', e); }
+      try {
+        // Une seule instance envoie les rapports (pas de doublons en cluster)
+        const sent = await this.withClusterLock(REPORT_LOCK_ID, 'report_last_run', 10 * 60 * 1000, async () => {
+          console.log('Sending daily reports...');
+          await emailService.sendAllDailyReports(new Date());
+          return true;
+        });
+        if (sent === null) console.log('⏭️  Rapports déjà envoyés par une autre instance');
+      } catch (e) { console.error('Report error:', e); }
     }, { scheduled: true, timezone: process.env.TZ || 'Africa/Tunis' });
     console.log(`✅ Daily report cron started: ${this.dailyReportSchedule}`);
   }

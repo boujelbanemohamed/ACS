@@ -7,7 +7,8 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'banking_db',
   user: process.env.DB_USER || 'banking_user',
   password: process.env.DB_PASSWORD || 'banking_password',
-  max: parseInt(process.env.DB_POOL_MAX) || 100,
+  // Par processus : avec PM2 en cluster, le total = DB_POOL_MAX x nombre d'instances
+  max: parseInt(process.env.DB_POOL_MAX) || 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 });

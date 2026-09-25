@@ -293,3 +293,38 @@ describe('checkBankAccess', () => {
     expect(next).not.toHaveBeenCalled();
   });
 });
+
+describe('bank scoping hardening', () => {
+  const res = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn() });
+
+  it('filterByBank forces the bank of a bank_admin and ignores the requested bank', () => {
+    const req = { user: { role: 'bank_admin', bank_id: 4 }, query: { bankId: '9' } };
+    const next = jest.fn();
+    filterByBank(req, res(), next);
+    expect(req.query.bankId).toBe(4);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('filterByBank gives no data to a restricted user without bank', () => {
+    const req = { user: { role: 'bank', bank_id: null }, query: {} };
+    filterByBank(req, res(), jest.fn());
+    expect(req.query.bankId).toBe(-1);
+  });
+
+  it('forceBankId overrides the bankId sent by a restricted user', () => {
+    const req = { user: { role: 'bank_admin', bank_id: 4 }, body: { bankId: 9 } };
+    const next = jest.fn();
+    forceBankId(req, res(), next);
+    expect(req.body.bankId).toBe(4);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('forceBankId refuses a restricted user without bank', () => {
+    const req = { user: { role: 'bank', bank_id: null }, body: { bankId: 9 } };
+    const r = res();
+    const next = jest.fn();
+    forceBankId(req, r, next);
+    expect(r.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+});

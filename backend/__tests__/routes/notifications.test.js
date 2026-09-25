@@ -10,7 +10,11 @@ const mockEmailService = {
 const mockCronService = {
   dailyReportSchedule: '0 8 * * *',
   dailyReportEnabled: true,
-  startDailyReportTask: jest.fn()
+  startDailyReportTask: jest.fn(),
+  setReportConfig: jest.fn(async function ({ schedule, enabled }) {
+    if (schedule) this.dailyReportSchedule = schedule;
+    if (enabled !== undefined) this.dailyReportEnabled = enabled;
+  })
 };
 
 jest.mock('../../config/database');
@@ -421,7 +425,8 @@ describe('Notifications Routes', () => {
         .set('Authorization', 'Bearer token')
         .set('x-test-role', 'super_admin');
       expect(res.status).toBe(200);
-      expect(mockCronService.startDailyReportTask).toHaveBeenCalled();
+      // La configuration est enregistrée (partagée entre instances) puis appliquée
+      expect(mockCronService.setReportConfig).toHaveBeenCalledWith({ schedule: '0 9 * * *', enabled: true });
     });
 
     it('rejects invalid cron format', async () => {

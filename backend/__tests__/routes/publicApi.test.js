@@ -1,50 +1,100 @@
 const express = require('express');
 const request = require('supertest');
+const crypto = require('crypto');
 
-const mockSaveValidatedRecords = jest.fn();
-jest.mock('../../services/csvProcessor', () => jest.fn(() => ({
-  saveValidatedRecords: mockSaveValidatedRecords
-})));
+const mockCommitValidRecords = jest.fn();
+jest.mock('../../services/pipelineService', () => ({
+  commitValidRecords: (...args) => mockCommitValidRecords(...args)
+}));
 
 jest.mock('../../config/database');
-jest.mock('../../services/xmlGenerator');
 jest.mock('../../services/auditService');
 
 const db = require('../../config/database');
-const xmlGenerator = require('../../services/xmlGenerator');
 const auditService = require('../../services/auditService');
 const publicApiRoutes = require('../../routes/publicApi');
 
-const validKeyRow = {
-  id: 1, api_key: 'test-key-123', name: 'Test App', institution: 'Bank',
+const API_KEY = 'acs_test-key-123';
+const API_KEY_HASH = crypto.createHash('sha256').update(API_KEY).digest('hex');
+
+// Carte de test valide : PAN conforme Luhn, expiration future
+const futureExpiry = () => {
+  const d = new Date();
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String((d.getFullYear() + 3) % 100).padStart(2, '0')}`;
+};
+const validCard = () => ({ pan: '4000056655665556', phone: '+21699123456', expiry: futureExpiry(), firstName: 'Ali', lastName: 'Ben' });
+
+const baseKey = {
+  id: 1, name: 'Test App', institution: 'Bank', key_hash: API_KEY_HASH,
   bank_id: 1, bank_code: 'BANK01', rate_limit: 100, is_active: true,
   permissions: ['read', 'write'], expires_at: null, last_used_at: null
 };
+
+const banks = {
+  BANK01: { id: 1, code: 'BANK01', name: 'Bank A', is_active: true, xml_output_url: '/tmp/xml' },
+  BANK02: { id: 2, code: 'BANK02', name: 'Bank B', is_active: true, xml_output_url: '/tmp/xml' }
+};
+
+let state;
+
+// Base simulée : chaque requête SQL est routée selon son contenu
+function installDb() {
+  db.query.mockImplementation(async (sql, params = []) => {
+    if (state.failOn && sql.includes(state.failOn)) throw new Error('DB error');
+    if (sql.includes('FROM api_keys')) {
+      return { rows: params[0] === API_KEY_HASH && state.key ? [{ ...state.key }] : [] };
+    }
+    if (sql.startsWith('UPDATE api_keys SET last_used_at')) return { rows: [] };
+    if (sql.includes('INSERT INTO api_rate_limits')) {
+      state.requestCount += 1;
+      return { rows: [{ request_count: state.requestCount }] };
+    }
+    if (sql.includes('DELETE FROM api_rate_limits')) return { rows: [] };
+    if (sql.includes('INSERT INTO api_logs')) {
+      state.apiLogs.push(params);
+      return { rows: [] };
+    }
+    if (sql.includes('FROM banks WHERE is_active = true AND id = $1')) {
+      return { rows: Object.values(banks).filter(b => b.id === params[0]) };
+    }
+    if (sql.includes('FROM banks WHERE is_active = true ORDER BY name')) {
+      return { rows: Object.values(banks) };
+    }
+    if (sql.includes('FROM banks WHERE code = $1')) {
+      return { rows: banks[params[0]] ? [banks[params[0]]] : [] };
+    }
+    if (sql.includes('INSERT INTO file_logs')) return { rows: [{ id: 42 }] };
+    if (sql.includes('FROM file_logs fl')) {
+      return { rows: state.fileLog && state.fileLog.id === params[0] ? [state.fileLog] : [] };
+    }
+    return { rows: [] };
+  });
+}
 
 function createTestApp() {
   const app = express();
   app.use(express.json());
   app.use('/api/v1', publicApiRoutes);
-  app.use((err, req, res, next) => {
-    res.status(err.status || 500).json({ success: false, message: err.message });
-  });
   return app;
 }
 
-function authHeader(key) {
-  return { 'X-API-Key': key || 'test-key-123' };
-}
+const api = () => request(createTestApp());
 
 describe('Public API Routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    state = { key: { ...baseKey }, requestCount: 0, apiLogs: [], fileLog: null, failOn: null };
+    installDb();
+    mockCommitValidRecords.mockImplementation(async ({ rows, generateXml }) => ({
+      savedRecords: rows.map((r, i) => ({ id: i + 1, pan: r.pan })),
+      xmlResult: generateXml === false ? null : { success: true, fileName: 'ACS_CARDS_BANK01.xml', xmlEntriesCount: rows.length * 2 }
+    }));
+    auditService.log.mockResolvedValue();
   });
 
   describe('GET /api/v1/docs', () => {
     it('returns JSON with name, version, endpoints array', async () => {
-      const res = await request(createTestApp())
-        .get('/api/v1/docs');
-
+      const res = await api().get('/api/v1/docs');
       expect(res.status).toBe(200);
       expect(res.body.name).toBe('ACS Banking CSV Processor API');
       expect(res.body.version).toBe('1.0.0');
@@ -52,482 +102,247 @@ describe('Public API Routes', () => {
     });
 
     it('includes /banks, /cards/validate, /cards/register, /status/:fileLogId', async () => {
-      const res = await request(createTestApp())
-        .get('/api/v1/docs');
-
+      const res = await api().get('/api/v1/docs');
       const paths = res.body.endpoints.map(e => e.path);
-      expect(paths).toContain('/banks');
-      expect(paths).toContain('/cards/validate');
-      expect(paths).toContain('/cards/register');
-      expect(paths).toContain('/status/:fileLogId');
+      expect(paths).toEqual(expect.arrayContaining(['/banks', '/cards/validate', '/cards/register', '/status/:fileLogId']));
     });
   });
 
   describe('Authentication', () => {
-    it('GET /api/v1/banks without API key returns 401 with API_KEY_REQUIRED', async () => {
-      const res = await request(createTestApp())
-        .get('/api/v1/banks');
-
+    it('returns 401 API_KEY_REQUIRED without API key', async () => {
+      const res = await api().get('/api/v1/banks');
       expect(res.status).toBe(401);
       expect(res.body.error).toBe('API_KEY_REQUIRED');
     });
 
-    it('GET /api/v1/banks with invalid key returns 401 with INVALID_API_KEY', async () => {
-      db.query.mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'bad-key');
-
+    it('returns 401 INVALID_API_KEY with an unknown key', async () => {
+      const res = await api().get('/api/v1/banks').set('X-API-Key', 'bad-key');
       expect(res.status).toBe(401);
       expect(res.body.error).toBe('INVALID_API_KEY');
     });
 
-    it('GET /api/v1/banks with expired key returns 401 with API_KEY_EXPIRED', async () => {
-      const expiredKey = { ...validKeyRow, expires_at: '2020-01-01T00:00:00Z' };
-      db.query.mockResolvedValueOnce({ rows: [expiredKey] });
+    it('looks the key up by its SHA-256 hash, never in clear text', async () => {
+      await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
+      const lookup = db.query.mock.calls.find(([sql]) => sql.includes('FROM api_keys'));
+      expect(lookup[0]).toContain('key_hash = $1');
+      expect(lookup[1]).toEqual([API_KEY_HASH]);
+    });
 
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'expired-key');
-
+    it('returns 401 API_KEY_EXPIRED with an expired key', async () => {
+      state.key.expires_at = '2020-01-01T00:00:00Z';
+      const res = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
       expect(res.status).toBe(401);
       expect(res.body.error).toBe('API_KEY_EXPIRED');
     });
 
-    it('GET /api/v1/banks with valid key returns 200 with bank list', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
-
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'test-key-123');
-
+    it('accepts Authorization: Bearer <key> and updates last_used_at', async () => {
+      const res = await api().get('/api/v1/banks').set('Authorization', `Bearer ${API_KEY}`);
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data).toHaveLength(1);
+      expect(db.query.mock.calls.some(([sql]) => sql.startsWith('UPDATE api_keys SET last_used_at'))).toBe(true);
     });
 
-    it('updates last_used_at on successful auth', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
-
-      await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'test-key-123');
-
-      expect(db.query.mock.calls[1][0]).toContain('UPDATE api_keys SET last_used_at');
-      expect(db.query.mock.calls[1][1]).toEqual([1]);
-    });
-
-    it('auth middleware returns 500 on database error', async () => {
-      db.query.mockRejectedValue(new Error('DB down'));
-
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'test-key-123');
-
+    it('returns 500 when the key lookup fails', async () => {
+      state.failOn = 'FROM api_keys';
+      const res = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('AUTH_ERROR');
     });
   });
 
   describe('GET /api/v1/banks', () => {
-    it('returns only active banks ordered by name', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [
-        { id: 1, name: 'Alpha Bank', code: 'ALPHA' },
-        { id: 2, name: 'Beta Bank', code: 'BETA' }
-      ] });
-
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'test-key-123');
-
+    it('a key bound to a bank only sees that bank', async () => {
+      const res = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
       expect(res.status).toBe(200);
-      expect(db.query.mock.calls[2][0]).toContain('is_active = true');
-      expect(db.query.mock.calls[2][0]).toContain('ORDER BY name');
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].code).toBe('BANK01');
     });
 
-    it('returns { success: true, data: [...] }', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BA' }] });
-
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'test-key-123');
-
-      expect(res.body).toEqual({
-        success: true,
-        data: [{ id: 1, name: 'Bank A', code: 'BA' }]
-      });
+    it('a global key (no bank) sees every active bank', async () => {
+      state.key.bank_id = null;
+      const res = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(2);
     });
 
     it('returns 500 on database error', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockRejectedValueOnce(new Error('DB error'));
-
-      const res = await request(createTestApp())
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'test-key-123');
-
+      state.failOn = 'FROM banks';
+      const res = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('SERVER_ERROR');
     });
   });
 
   describe('POST /api/v1/cards/validate', () => {
-    it('missing bankCode or cards returns 400 with INVALID_REQUEST', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({});
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({});
-
+    it('returns 400 INVALID_REQUEST without bankCode or cards', async () => {
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01' });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('INVALID_REQUEST');
     });
 
-    it('invalid cards return with invalidCards', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, code: 'BANK01' }] });
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234', phone: null, expiry: '13/99' }] });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.invalidCount).toBeGreaterThan(0);
-      expect(res.body.data.invalidCards.length).toBeGreaterThan(0);
-    });
-
-    it('all valid cards return with validCards', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, code: 'BANK01' }] });
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({
-          bankCode: 'BANK01',
-          cards: [{
-            pan: '1234567890123456',
-            phone: '+21650123456',
-            expiry: '12/28',
-            firstName: 'John',
-            lastName: 'Doe'
-          }]
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.validCount).toBe(1);
-      expect(res.body.data.validCards).toHaveLength(1);
-      expect(res.body.data.validCards[0].pan).toBe('1234567890123456');
-    });
-
-    it('bank not found returns 404 with BANK_NOT_FOUND', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({ bankCode: 'NONEXIST', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '12/28' }] });
-
+    it('returns 404 BANK_NOT_FOUND for an unknown bank', async () => {
+      state.key.bank_id = null;
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({ bankCode: 'NOPE', cards: [validCard()] });
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('BANK_NOT_FOUND');
     });
 
-    it('rejects invalid month in expiry', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, code: 'BANK01' }] });
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '13/28' }] });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.invalidCards[0].errors[0].message).toContain('Mois');
+    it('returns 403 BANK_FORBIDDEN when the key belongs to another bank', async () => {
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({ bankCode: 'BANK02', cards: [validCard()] });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('BANK_FORBIDDEN');
     });
 
-    it('rejects expired card', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, code: 'BANK01' }] });
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/25' }] });
-
+    it('separates valid and invalid cards', async () => {
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({
+        bankCode: 'BANK01',
+        cards: [validCard(), { pan: '123', phone: '', expiry: 'bad' }]
+      });
       expect(res.status).toBe(200);
-      expect(res.body.data.invalidCards.length).toBeGreaterThan(0);
+      expect(res.body.data.validCount).toBe(1);
+      expect(res.body.data.invalidCount).toBe(1);
+      const fields = res.body.data.invalidCards[0].errors.map(e => e.field);
+      expect(fields).toEqual(expect.arrayContaining(['pan', 'phone', 'expiry']));
     });
 
-    it('rejects invalid expiry format in validate', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, code: 'BANK01' }] });
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: 'bad' }] });
+    it('rejects an invalid month, an expired card and a bad expiry format', async () => {
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({
+        bankCode: 'BANK01',
+        cards: [
+          { ...validCard(), expiry: '13/30' },
+          { ...validCard(), pan: '5555555555554444', expiry: '01/20' },
+          { ...validCard(), pan: '4111111111111111', expiry: '2030-01' }
+        ]
+      });
       expect(res.status).toBe(200);
-      expect(res.body.data.invalidCards[0].errors[0].message).toContain('Format expiry');
+      expect(res.body.data.invalidCount).toBe(3);
+      const messages = res.body.data.invalidCards.map(c => c.errors[0].message);
+      expect(messages[0]).toContain('Mois invalide');
+      expect(messages[1]).toContain('expirée');
+      expect(messages[2]).toContain('Format expiry');
     });
 
-    it('returns 500 on database error in validate', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockRejectedValueOnce(new Error('DB error'));
+    it('rejects values outside the allowed lists and duplicate PANs in the request', async () => {
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({
+        bankCode: 'BANK01',
+        cards: [{ ...validCard(), language: 'xx' }, validCard(), validCard()]
+      });
+      expect(res.body.data.validCount).toBe(1);
+      expect(res.body.data.invalidCount).toBe(2);
+    });
 
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/validate')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '12/28' }] });
+    it('returns 403 without the read permission', async () => {
+      state.key.permissions = ['write'];
+      const res = await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [validCard()] });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('PERMISSION_DENIED');
+    });
 
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('SERVER_ERROR');
+    it('never writes a clear PAN in api_logs', async () => {
+      await api().post('/api/v1/cards/validate').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [validCard()] });
+      expect(state.apiLogs.length).toBe(1);
+      const [, , , requestBody, , responseBody] = state.apiLogs[0];
+      expect(requestBody).not.toContain('4000056655665556');
+      expect(responseBody).not.toContain('4000056655665556');
+      expect(requestBody).toContain('5556');
     });
   });
 
   describe('POST /api/v1/cards/register', () => {
-    it('missing bankCode or cards returns 400', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({});
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({});
-
+    it('returns 400 without bankCode or cards', async () => {
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ cards: [] });
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('INVALID_REQUEST');
     });
 
-    it('full flow: validates, creates file_log, saves records, generates XML, returns success', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01', xml_output_url: '/tmp/xml' }] });
-      db.query.mockResolvedValueOnce({ rows: [{ id: 10 }] });
-      mockSaveValidatedRecords.mockResolvedValueOnce([{ id: 100 }, { id: 101 }]);
-      xmlGenerator.processAndGenerateXML.mockResolvedValueOnce({ filePath: '/tmp/xml/out.xml', xmlEntriesCount: 4 });
-      db.query.mockResolvedValueOnce({ rows: [] });
-      auditService.log.mockResolvedValue();
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({
-          bankCode: 'BANK01',
-          cards: [
-            { pan: '1234567890123456', phone: '+21650123456', expiry: '12/28', firstName: 'John', lastName: 'Doe' },
-            { pan: '6543210987654321', phone: '+21650654321', expiry: '01/30', firstName: 'Jane', lastName: 'Doe' }
-          ]
-        });
-
+    it('registers valid cards and generates the XML atomically', async () => {
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [validCard()] });
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.fileLogId).toBe(10);
-      expect(res.body.data.registered).toBe(2);
-      expect(res.body.data.xmlFileName).toContain('ACS_CARDS_BANK01');
-      expect(res.body.data.xmlEntriesGenerated).toBe(4);
-      expect(auditService.log).toHaveBeenCalled();
+      expect(res.body.data.fileLogId).toBe(42);
+      expect(res.body.data.registered).toBe(1);
+      expect(res.body.data.xmlEntriesGenerated).toBe(2);
+      expect(mockCommitValidRecords).toHaveBeenCalledWith(expect.objectContaining({ fileLogId: 42, generateXml: true }));
+      expect(mockCommitValidRecords.mock.calls[0][0].bank.id).toBe(1);
     });
 
-    it('with generateXml=false skips XML generation', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01', xml_output_url: '/tmp/xml' }] });
-      db.query.mockResolvedValueOnce({ rows: [{ id: 11 }] });
-      mockSaveValidatedRecords.mockResolvedValueOnce([{ id: 100 }]);
-      auditService.log.mockResolvedValue();
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({
-          bankCode: 'BANK01',
-          generateXml: false,
-          cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '12/28' }]
-        });
-
+    it('skips XML generation with generateXml=false', async () => {
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [validCard()], generateXml: false });
       expect(res.status).toBe(200);
       expect(res.body.data.xmlFileName).toBeNull();
-      expect(xmlGenerator.processAndGenerateXML).not.toHaveBeenCalled();
+      expect(mockCommitValidRecords.mock.calls[0][0].generateXml).toBe(false);
     });
 
-    it('no valid cards returns 400 with NO_VALID_CARDS', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
-
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: 'bad', phone: null, expiry: null }] });
-
+    it('returns 400 NO_VALID_CARDS when every card is invalid', async () => {
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [{ pan: '1' }] });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('NO_VALID_CARDS');
+      expect(mockCommitValidRecords).not.toHaveBeenCalled();
     });
 
-    it('bank not found returns 404', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [] });
+    it('cannot register cards for another bank', async () => {
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'BANK02', cards: [validCard()] });
+      expect(res.status).toBe(403);
+      expect(mockCommitValidRecords).not.toHaveBeenCalled();
+    });
 
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({ bankCode: 'NONEXIST', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '12/28' }] });
-
+    it('returns 404 for an unknown bank', async () => {
+      state.key.bank_id = null;
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'NOPE', cards: [validCard()] });
       expect(res.status).toBe(404);
-      expect(res.body.error).toBe('BANK_NOT_FOUND');
     });
 
-    it('returns 500 on database error in register', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockRejectedValueOnce(new Error('DB error'));
+    it('returns 403 without the write permission', async () => {
+      state.key.permissions = ['read'];
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [validCard()] });
+      expect(res.status).toBe(403);
+    });
 
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '12/28' }] });
-
+    it('returns 500 when saving fails', async () => {
+      mockCommitValidRecords.mockRejectedValueOnce(new Error('XML write failed'));
+      const res = await api().post('/api/v1/cards/register').set('X-API-Key', API_KEY).send({ bankCode: 'BANK01', cards: [validCard()] });
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('SERVER_ERROR');
-    });
-
-    it('rejects invalid month in register', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '13/28' }] });
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('NO_VALID_CARDS');
-    });
-
-    it('rejects invalid year in register', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/99' }] });
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('NO_VALID_CARDS');
-    });
-
-    it('rejects expired card in register', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ rows: [{ id: 1, name: 'Bank A', code: 'BANK01' }] });
-      const res = await request(createTestApp())
-        .post('/api/v1/cards/register')
-        .set(authHeader())
-        .send({ bankCode: 'BANK01', cards: [{ pan: '1234567890123456', phone: '+21650123456', expiry: '01/25' }] });
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('NO_VALID_CARDS');
     });
   });
 
   describe('GET /api/v1/status/:fileLogId', () => {
-    it('returns file_log with bank and XML info', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [{
-        id: 10, file_name: 'API_BANK01_2026-01-01.csv', status: 'success',
-        bank_name: 'Bank A', bank_code: 'BANK01',
-        xml_file_name: 'ACS_CARDS_BANK01_20260101.xml', xml_status: 'success', xml_entries_count: 2
-      }] });
-
-      const res = await request(createTestApp())
-        .get('/api/v1/status/10')
-        .set(authHeader());
-
+    it('returns the processing status without internal paths', async () => {
+      state.fileLog = { id: 42, bank_id: 1, status: 'success', original_path: 'sftp://u:secret@h/in', bank_code: 'BANK01', xml_file_name: 'a.xml' };
+      const res = await api().get('/api/v1/status/42').set('X-API-Key', API_KEY);
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.id).toBe(10);
-      expect(res.body.data.bank_name).toBe('Bank A');
-      expect(res.body.data.xml_file_name).toContain('.xml');
+      expect(res.body.data.status).toBe('success');
+      expect(res.body.data.original_path).toBeUndefined();
+      expect(JSON.stringify(res.body)).not.toContain('secret');
     });
 
-    it('not found returns 404 with NOT_FOUND', async () => {
-      db.query.mockResolvedValueOnce({ rows: [validKeyRow] });
-      db.query.mockResolvedValueOnce({});
-      db.query.mockResolvedValueOnce({ rows: [] });
-
-      const res = await request(createTestApp())
-        .get('/api/v1/status/999')
-        .set(authHeader());
-
+    it('hides the processing of another bank (404)', async () => {
+      state.fileLog = { id: 42, bank_id: 2, status: 'success' };
+      const res = await api().get('/api/v1/status/42').set('X-API-Key', API_KEY);
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
 
-    it('returns 500 on database error in status', async () => {
-      db.query
-        .mockResolvedValueOnce({ rows: [validKeyRow] })
-        .mockResolvedValueOnce({})
-        .mockRejectedValueOnce(new Error('DB error'));
+    it('returns 404 NOT_FOUND for an unknown id', async () => {
+      const res = await api().get('/api/v1/status/999').set('X-API-Key', API_KEY);
+      expect(res.status).toBe(404);
+    });
 
-      const res = await request(createTestApp())
-        .get('/api/v1/status/10')
-        .set(authHeader());
-
+    it('returns 500 on database error', async () => {
+      state.failOn = 'FROM file_logs fl';
+      const res = await api().get('/api/v1/status/42').set('X-API-Key', API_KEY);
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('SERVER_ERROR');
     });
   });
 
-  describe('Rate Limiting', () => {
-    it('apiRateLimiter blocks after rate_limit requests within window', async () => {
-      const keyRow = { ...validKeyRow, rate_limit: 2 };
-      db.query.mockResolvedValue({ rows: [keyRow] });
-
-      const app = createTestApp();
-
-      await request(app).get('/api/v1/banks').set('X-API-Key', 'rate-limited-key');
-      await request(app).get('/api/v1/banks').set('X-API-Key', 'rate-limited-key');
-
-      const res = await request(app)
-        .get('/api/v1/banks')
-        .set('X-API-Key', 'rate-limited-key');
-
-      expect(res.status).toBe(429);
-      expect(res.body.error).toBe('RATE_LIMIT_EXCEEDED');
+  describe('Rate limiting', () => {
+    it('blocks requests beyond the key rate_limit (counter shared in database)', async () => {
+      state.key.rate_limit = 2;
+      const first = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
+      const second = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
+      const third = await api().get('/api/v1/banks').set('X-API-Key', API_KEY);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(third.status).toBe(429);
+      expect(third.body.error).toBe('RATE_LIMIT_EXCEEDED');
     });
-
   });
 });

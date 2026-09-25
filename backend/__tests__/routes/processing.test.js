@@ -10,8 +10,16 @@ const mockCsvProcessor = {
   createFileLog: jest.fn(),
   updateFileLog: jest.fn(),
   saveValidationErrors: jest.fn(),
-  generateCorrectedCSV: jest.fn()
+  generateCorrectedCSV: jest.fn(),
+  buildCorrectedCSV: jest.fn(() => 'language;firstName;lastName;pan;expiry;phone;behaviour;action\n')
 };
+
+// Résolution DNS simulée : les tests ne dépendent pas du réseau
+jest.spyOn(require('dns').promises, 'lookup').mockImplementation(async (host) => {
+  if (host === 'localhost') return [{ address: '127.0.0.1', family: 4 }];
+  if (host.endsWith('.internal')) return [{ address: '10.0.0.5', family: 4 }];
+  return [{ address: '93.184.216.34', family: 4 }];
+});
 
 jest.mock('../../config/database');
 jest.mock('axios');
@@ -25,7 +33,8 @@ jest.mock('../../services/xmlGenerator', () => ({
 jest.mock('../../services/encryptionService', () => ({
   encrypt: jest.fn(pan => `encrypted:${pan}`),
   decrypt: jest.fn(val => val),
-  hashPan: jest.fn(pan => `hash:${pan}`)
+  hashPan: jest.fn(pan => `hash:${pan}`),
+  maskPan: jest.fn(pan => (pan ? '****' + String(pan).slice(-4) : pan))
 }));
 jest.mock('../../utils/validationHelper', () => ({
   validateRowForHistory: jest.fn(() => ({ isValid: true, results: [], errorCount: 0 }))
@@ -274,9 +283,11 @@ describe('Processing Routes', () => {
   describe('GET /api/processing/errors/:fileLogId', () => {
     it('returns validation errors for a file log', async () => {
       const errorRows = [
-        { id: 1, file_log_id: 1, row_number: 1, field_name: 'pan', field_value: '1234', error_message: 'PAN invalide', severity: 'error', file_name: 'test.csv', bank_name: 'Bank A' }
+        { id: 1, file_log_id: 1, row_number: 1, field_name: 'pan', field_value: '4000056655665556', error_message: 'PAN invalide', severity: 'error', file_name: 'test.csv', bank_name: 'Bank A' }
       ];
-      db.query.mockResolvedValueOnce({ rows: errorRows });
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 1, file_name: 'test.csv' }] })
+        .mockResolvedValueOnce({ rows: errorRows });
 
       const res = await request(createTestApp())
         .get('/api/processing/errors/1')
@@ -286,10 +297,26 @@ describe('Processing Routes', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data).toHaveLength(1);
       expect(res.body.data[0].field_name).toBe('pan');
+      // Le PAN n'est jamais renvoyé en clair
+      expect(res.body.data[0].field_value).toBe('****5556');
+    });
+
+    it('refuses errors of another bank (403)', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, bank_id: 2, file_name: 'test.csv' }] });
+
+      const res = await request(createTestApp())
+        .get('/api/processing/errors/1')
+        .set('Authorization', 'Bearer test-token')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '1');
+
+      expect(res.status).toBe(403);
     });
 
     it('returns empty array when no errors exist', async () => {
-      db.query.mockResolvedValueOnce({ rows: [] });
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 999, bank_id: 1, file_name: 'test.csv' }] })
+        .mockResolvedValueOnce({ rows: [] });
 
       const res = await request(createTestApp())
         .get('/api/processing/errors/999')
@@ -314,8 +341,10 @@ describe('Processing Routes', () => {
 
   describe('PATCH /api/processing/errors/:errorId/resolve', () => {
     it('resolves validation error successfully', async () => {
-      const resolvedRow = { id: 1, file_log_id: 1, field_name: 'pan', is_resolved: true, field_value: '4000056655665556' };
-      db.query.mockResolvedValueOnce({ rows: [resolvedRow] });
+      const resolvedRow = { id: 1, file_log_id: 1, field_name: 'pan', is_resolved: true, field_value: 'encrypted:4000056655665556' };
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, field_name: 'pan', bank_id: 1 }] })
+        .mockResolvedValueOnce({ rows: [resolvedRow] });
 
       const res = await request(createTestApp())
         .patch('/api/processing/errors/1/resolve')
@@ -325,6 +354,21 @@ describe('Processing Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.is_resolved).toBe(true);
+      // Le PAN corrigé est stocké chiffré
+      expect(db.query.mock.calls[1][1][0]).toBe('encrypted:4000056655665556');
+    });
+
+    it('refuses to resolve an error of another bank', async () => {
+      db.query.mockResolvedValueOnce({ rows: [{ id: 1, field_name: 'phone', bank_id: 2 }] });
+
+      const res = await request(createTestApp())
+        .patch('/api/processing/errors/1/resolve')
+        .set('Authorization', 'Bearer test-token')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '1')
+        .send({ correctedValue: '21699123456' });
+
+      expect(res.status).toBe(403);
     });
 
     it('returns 404 for non-existent error', async () => {
@@ -354,7 +398,9 @@ describe('Processing Routes', () => {
 
     it('resolves error without correctedValue', async () => {
       const resolvedRow = { id: 1, file_log_id: 1, is_resolved: true, field_value: null };
-      db.query.mockResolvedValueOnce({ rows: [resolvedRow] });
+      db.query
+        .mockResolvedValueOnce({ rows: [{ id: 1, field_name: 'expiry', bank_id: 1 }] })
+        .mockResolvedValueOnce({ rows: [resolvedRow] });
 
       const res = await request(createTestApp())
         .patch('/api/processing/errors/1/resolve')
@@ -497,8 +543,8 @@ describe('Processing Routes', () => {
   describe('POST /api/processing/reprocess/:fileLogId', () => {
     it('reprocesses file successfully', async () => {
       db.query.mockResolvedValueOnce({
-        rows: [{ id: 1, bank_id: 1, file_name: 'test.csv', original_path: '/tmp/test.csv', status: 'validation_error', name: 'Bank A', code: 'BA' }]
-      });
+        rows: [{ id: 1, bank_id: 1, file_name: 'test.csv', original_path: '/tmp/test.csv', source_type: 'url', status: 'validation_error', name: 'Bank A', code: 'BA' }]
+      }).mockResolvedValueOnce({ rows: [] });
 
       const res = await request(createTestApp())
         .post('/api/processing/reprocess/1')
@@ -524,8 +570,8 @@ describe('Processing Routes', () => {
 
     it('handles csvProcessor error during reprocess', async () => {
       db.query.mockResolvedValueOnce({
-        rows: [{ id: 1, bank_id: 1, file_name: 'test.csv', original_path: '/tmp/test.csv', status: 'validation_error', name: 'Bank A', code: 'BA' }]
-      });
+        rows: [{ id: 1, bank_id: 1, file_name: 'test.csv', original_path: '/tmp/test.csv', source_type: 'url', status: 'validation_error', name: 'Bank A', code: 'BA' }]
+      }).mockResolvedValueOnce({ rows: [] });
 
       const res = await request(createTestApp())
         .post('/api/processing/reprocess/1')

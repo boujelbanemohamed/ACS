@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
@@ -10,7 +10,8 @@ RUN npm ci --omit=dev && npm install -g pm2 && npm cache clean --force
 
 COPY . .
 
-RUN chown -R appuser:appgroup /app
+# Dossier d'upload partagé avec le worker (un volume nommé hérite de ce propriétaire)
+RUN mkdir -p /data/uploads && chown -R appuser:appgroup /app /data
 
 USER appuser
 

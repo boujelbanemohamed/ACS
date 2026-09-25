@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
 const { filterByBank } = require('../middleware/roleMiddleware');
+const { effectiveBankId, canAccessBank, denyBankAccess, redactBankUrls } = require('../utils/bankScope');
+const { decrypt, maskPan } = require('../services/encryptionService');
 
 const router = express.Router();
 
@@ -142,7 +144,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 
     res.json({
       success: true,
-      data: result.rows,
+      data: result.rows.map(redactBankUrls),
       pagination: {
         total: parseInt(countResult.rows[0].count),
         limit: safeLimit,
@@ -162,7 +164,7 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
 // Get history stats
 router.get('/stats', authMiddleware, async (req, res) => {
   try {
-    const { bankId } = req.query;
+    const bankId = effectiveBankId(req.user, req.query.bankId);
     
     let statsQuery = `
       SELECT 
@@ -179,10 +181,10 @@ router.get('/stats', authMiddleware, async (req, res) => {
       FROM file_logs
     `;
     
-    if (bankId) {
+    if (bankId !== null) {
       statsQuery += ' WHERE bank_id = $1';
     }
-    const statsParams = bankId ? [bankId] : [];
+    const statsParams = bankId !== null ? [bankId] : [];
     
     const result = await db.query(statsQuery, statsParams);
 
@@ -235,6 +237,10 @@ router.get('/:id', authMiddleware, async (req, res) => {
       });
     }
 
+    if (!canAccessBank(req.user, result.rows[0].bank_id)) {
+      return denyBankAccess(res);
+    }
+
     const errorsQuery = `
       SELECT * FROM validation_errors 
       WHERE file_log_id = $1 
@@ -245,8 +251,10 @@ router.get('/:id', authMiddleware, async (req, res) => {
     res.json({
       success: true,
       data: {
-        ...result.rows[0],
-        validation_errors: errorsResult.rows
+        ...redactBankUrls(result.rows[0]),
+        validation_errors: errorsResult.rows.map(e =>
+          e.field_name === 'pan' && e.field_value ? { ...e, field_value: maskPan(decrypt(e.field_value)) } : e
+        )
       }
     });
   } catch (error) {

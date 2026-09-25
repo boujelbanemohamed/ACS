@@ -160,14 +160,15 @@ describe('RemoteFileService', () => {
 
     it('FTP: downloads to temp, reads file, cleans up temp', async () => {
       jest.spyOn(fs, 'readFileSync').mockReturnValueOnce('ftp file content');
-      jest.spyOn(fs, 'unlinkSync').mockImplementationOnce(() => {});
+      jest.spyOn(fs, 'rmSync').mockImplementationOnce(() => {});
 
       const content = await remoteFileService.readFile('ftp://user:pass@host/path/file.txt');
 
       expect(mockFtpClient.access).toHaveBeenCalled();
       expect(mockFtpClient.downloadTo).toHaveBeenCalled();
       expect(fs.readFileSync).toHaveBeenCalled();
-      expect(fs.unlinkSync).toHaveBeenCalled();
+      // Fichier temporaire unique, supprimé même en cas d'erreur
+      expect(fs.rmSync).toHaveBeenCalledWith(expect.stringMatching(/ftp_\d+_[0-9a-f]{16}$/), { force: true });
       expect(content).toBe('ftp file content');
       expect(mockFtpClient.close).toHaveBeenCalled();
     });
@@ -190,7 +191,7 @@ describe('RemoteFileService', () => {
 
     it('FTP: ensureDir, upload from temp, close, cleanup temp', async () => {
       jest.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {});
-      jest.spyOn(fs, 'unlinkSync').mockImplementationOnce(() => {});
+      jest.spyOn(fs, 'rmSync').mockImplementationOnce(() => {});
 
       await remoteFileService.writeFile('ftp://user:pass@host/path/file.txt', 'hello');
 
@@ -198,7 +199,7 @@ describe('RemoteFileService', () => {
       expect(mockFtpClient.ensureDir).toHaveBeenCalledWith('/path/');
       expect(fs.writeFileSync).toHaveBeenCalled();
       expect(mockFtpClient.uploadFrom).toHaveBeenCalled();
-      expect(fs.unlinkSync).toHaveBeenCalled();
+      expect(fs.rmSync).toHaveBeenCalled();
       expect(mockFtpClient.close).toHaveBeenCalled();
     });
 

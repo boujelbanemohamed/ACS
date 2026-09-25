@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../config/database');
 const CSVProcessor = require('./csvProcessor');
-const xmlGenerator = require('./xmlGenerator');
+const { commitValidRecords } = require('./pipelineService');
 const remoteFileService = require('../utils/remoteFileService');
 
 class FileScanner {
@@ -15,7 +15,9 @@ class FileScanner {
     const result = { filesFound: 0, filesProcessed: 0, xmlGenerated: false, errors: [] };
 
     try {
-      const files = await this.listFiles(bank.source_url);
+      const files = (await this.listFiles(bank.source_url))
+        // Un nom de fichier ne doit jamais permettre de sortir du dossier source
+        .filter(name => typeof name === 'string' && !name.includes('/') && !name.includes('\\') && !name.startsWith('.'));
       result.filesFound = files.length;
 
       if (files.length === 0) {
@@ -34,46 +36,60 @@ class FileScanner {
           }
 
           console.log(`   🔄 Processing ${fileName}...`);
-          const fileUrl = `${bank.source_url}/${fileName}`;
-          const processResult = await this.csvProcessor.processFileFromURL(bank.id, fileUrl, fileName);
+          const sourceDir = bank.source_url.replace(/\/+$/, '');
+          const fileUrl = `${sourceDir}/${fileName}`;
+          const processResult = await this.csvProcessor.processFileFromURL(bank.id, fileUrl, fileName, {
+            sourceType: 'cron',
+            trustedUrl: true,
+            // Un fichier rejeté n'est retraité que si son contenu a changé
+            skipIfUnchanged: true
+          });
+
+          if (processResult.skipped) {
+            console.log(`   ⏭️  Skipping ${fileName} (unchanged since last validation error)`);
+            continue;
+          }
+
+          await this.csvProcessor.processRowsWithHistory(
+            bank.id, processResult.allRows || [], processResult.validRecords || [],
+            processResult.errors || [], processResult.fileLogId, fileName, 'cron'
+          );
 
           if (processResult.success) {
-            console.log(`   ✅ Successfully processed ${fileName}`);
-
-            await this.csvProcessor.processRowsWithHistory(
-              bank.id, processResult.allRows || [], processResult.validRecords || [],
-              processResult.errors || [], processResult.fileLogId, fileName, 'cron'
-            );
+            console.log(`   ✅ Successfully validated ${fileName}`);
 
             if (processResult.validRecords && processResult.validRecords.length > 0) {
-              const savedRecords = await this.csvProcessor.saveValidatedRecords(bank.id, processResult.validRecords, fileName);
-              for (let i = 0; i < processResult.validRecords.length; i++) {
-                if (savedRecords[i]) {
-                  processResult.validRecords[i].id = savedRecords[i].id;
-                }
-              }
-
-              try {
-                const xmlResult = await xmlGenerator.processAndGenerateXML(processResult.validRecords, bank);
-                await db.query(
-                  `INSERT INTO xml_logs (bank_id, file_log_id, xml_file_name, xml_file_path, records_count, xml_entries_count, status, processed_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
-                  [bank.id, processResult.fileLogId, xmlResult.fileName, xmlResult.filePath, processResult.validRecords.length, xmlResult.xmlEntriesCount, 'success']
-                );
+              // Enregistrement + XML atomiques : en cas d'échec le fichier reste dans le dossier source
+              const { xmlResult } = await commitValidRecords({
+                bank,
+                fileLogId: processResult.fileLogId,
+                fileName,
+                rows: processResult.validRecords
+              });
+              if (xmlResult && xmlResult.success) {
                 result.xmlGenerated = true;
                 console.log(`   📄 XML generated: ${xmlResult.fileName}`);
-              } catch (xmlError) {
-                console.error(`   ❌ XML generation failed: ${xmlError.message}`);
-                result.errors.push({ bank: bank.name, file: fileName, error: `XML generation failed: ${xmlError.message}` });
               }
+            } else {
+              await this.csvProcessor.updateFileLog(processResult.fileLogId, { status: 'success' });
             }
 
-            await this.csvProcessor.archiveOldFile(bank.source_url, bank.old_url, fileName);
-            await this.csvProcessor.moveFileToDestination(bank.source_url, bank.destination_url, fileName);
+            // Archivage AVANT déplacement : le déplacement supprime le fichier source
+            const archive = await this.csvProcessor.archiveOldFile(bank.source_url, bank.old_url, fileName);
+            const move = await this.csvProcessor.moveFileToDestination(bank.source_url, bank.destination_url, fileName);
+            await this.csvProcessor.updateFileLog(processResult.fileLogId, {
+              archive_status: archive.success ? 'success' : 'error',
+              destination_path: move.success ? move.destinationPath : null
+            });
+            if (!archive.success || !move.success) {
+              result.errors.push({ bank: bank.name, file: fileName, error: `Archivage/deplacement: ${archive.error || move.error}` });
+            }
             result.filesProcessed++;
           } else {
             console.log(`   ⚠️  Processed ${fileName} with errors`);
-            result.errors.push({ bank: bank.name, file: fileName, error: 'Validation errors detected', details: processResult.errors });
+            const blocking = (processResult.errors || []).filter(e => (e.severity || 'error') === 'error');
+            // Pas de détail des lignes (données de cartes) dans les journaux de scan
+            result.errors.push({ bank: bank.name, file: fileName, error: 'Validation errors detected', errorCount: blocking.length, fileLogId: processResult.fileLogId });
           }
         } catch (error) {
           console.error(`   ❌ Error processing ${fileName}:`, error.message);
@@ -144,11 +160,18 @@ class FileScanner {
 
   async isFileProcessed(bankId, fileName) {
     const result = await db.query(
-      'SELECT status FROM file_logs WHERE bank_id = $1 AND file_name = $2 ORDER BY processed_at DESC LIMIT 1',
+      `SELECT status, processed_at FROM file_logs WHERE bank_id = $1 AND file_name = $2
+       ORDER BY processed_at DESC, id DESC LIMIT 1`,
       [bankId, fileName]
     );
     if (result.rows.length === 0) return false;
-    return result.rows[0].status === 'success' || result.rows[0].status === 'processing';
+    const { status, processed_at: processedAt } = result.rows[0];
+    if (status === 'success') return true;
+    // Un traitement "processing" interrompu (plantage) redevient éligible après 1 heure
+    if (status === 'processing') {
+      return !processedAt || Date.now() - new Date(processedAt).getTime() < 60 * 60 * 1000;
+    }
+    return false;
   }
 }
 

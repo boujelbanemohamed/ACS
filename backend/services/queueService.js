@@ -126,14 +126,16 @@ function createQueue() {
 
   const queue = new Queue('csv-processing', REDIS_URL, {
     defaultJobOptions: {
-      attempts: parseInt(process.env.QUEUE_JOB_ATTEMPTS) || 3,
+      // 1 seule tentative par défaut : un traitement génère un XML transmis à l'ACS,
+      // une relance automatique après un échec partiel produirait des doublons.
+      attempts: parseInt(process.env.QUEUE_JOB_ATTEMPTS) || 1,
       backoff: {
         type: 'exponential',
         delay: parseInt(process.env.QUEUE_BACKOFF_DELAY) || 5000,
       },
       removeOnComplete: parseInt(process.env.QUEUE_KEEP_COMPLETE) || 100,
       removeOnFail: parseInt(process.env.QUEUE_KEEP_FAILED) || 50,
-      timeout: parseInt(process.env.QUEUE_JOB_TIMEOUT) || 120000,
+      timeout: parseInt(process.env.QUEUE_JOB_TIMEOUT) || 600000,
     },
     limiter: {
       max: parseInt(process.env.QUEUE_MAX_PER_SECOND) || 5,
@@ -174,7 +176,7 @@ async function enqueueJob(jobType, data) {
   const job = await processingQueue.add(
     { jobType, ...data },
     {
-      jobId: `${jobType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      jobId: `${jobType}-${Date.now()}-${require('crypto').randomBytes(8).toString('hex')}`,
     }
   );
   return { jobId: job.id };
@@ -218,7 +220,8 @@ async function getActiveJobs() {
   return Promise.all(jobs.map(async (j) => ({
     jobId: j.id,
     type: j.data.jobType,
-    progress: j.progress,
+    bankId: j.data.bankId,
+    progress: typeof j.progress === 'function' ? j.progress() : j.progress,
     startedAt: j.processedOn,
   })));
 }

@@ -5,11 +5,31 @@ const { authMiddleware } = require('../middleware/auth');
 const { checkRole, filterByBank, isSuperAdmin } = require('../middleware/roleMiddleware');
 const auditService = require('../services/auditService');
 
+const { effectiveBankId } = require('../utils/bankScope');
+
 const router = express.Router();
 
 // Générer une API Key
 const generateApiKey = () => {
   return 'acs_' + crypto.randomBytes(32).toString('hex');
+};
+
+// Seule l'empreinte de la clé est conservée ; la clé complète n'est affichée qu'à sa création
+const hashApiKey = (apiKey) => crypto.createHash('sha256').update(apiKey).digest('hex');
+const keyPrefix = (apiKey) => apiKey.slice(0, 12);
+
+// Ne jamais renvoyer la clé ni son empreinte
+const presentKey = (row) => {
+  if (!row) return row;
+  const { api_key, key_hash, ...rest } = row;
+  return rest;
+};
+
+const VALID_PERMISSIONS = ['read', 'write'];
+const sanitizePermissions = (permissions) => {
+  if (!Array.isArray(permissions)) return null;
+  const filtered = permissions.filter(p => VALID_PERMISSIONS.includes(p));
+  return filtered.length > 0 ? filtered : null;
 };
 
 // GET - Liste des API Keys
@@ -23,14 +43,15 @@ router.get('/', authMiddleware, filterByBank, async (req, res) => {
       LEFT JOIN banks b ON ak.bank_id = b.id
     `;
     const params = [];
-    if (req.query.bankId) {
+    const bankId = effectiveBankId(req.user, req.query.bankId);
+    if (bankId !== null) {
       query += ' WHERE ak.bank_id = $1';
-      params.push(parseInt(req.query.bankId));
+      params.push(bankId);
     }
     query += ' ORDER BY ak.created_at DESC';
     
     const result = await db.query(query, params);
-    res.json({ success: true, data: result.rows });
+    res.json({ success: true, data: result.rows.map(presentKey) });
   } catch (error) {
     console.error('Get API keys error:', error);
     res.status(500).json({ success: false, message: error.message });
@@ -88,17 +109,19 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
     }
 
     const apiKey = generateApiKey();
+    const safeRateLimit = Math.min(Math.max(parseInt(rateLimit, 10) || 100, 1), 100000);
 
     const result = await db.query(
-      `INSERT INTO api_keys (name, api_key, institution, bank_id, permissions, rate_limit, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO api_keys (name, api_key, key_hash, key_prefix, institution, bank_id, permissions, rate_limit, expires_at, created_by)
+       VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [
         name,
-        apiKey,
+        hashApiKey(apiKey),
+        keyPrefix(apiKey),
         institution || null,
         bankId || null,
-        permissions || ['read', 'write'],
-        rateLimit || 100,
+        sanitizePermissions(permissions) || ['read', 'write'],
+        safeRateLimit,
         expiresAt || null,
         req.user.id
       ]
@@ -110,7 +133,7 @@ router.post('/', authMiddleware, checkRole('super_admin'), async (req, res) => {
       success: true,
       message: 'API Key creee avec succes',
       data: {
-        ...result.rows[0],
+        ...presentKey(result.rows[0]),
         api_key: apiKey
       }
     });
@@ -135,16 +158,25 @@ router.put('/:id', authMiddleware, checkRole('super_admin'), async (req, res) =>
         expires_at = COALESCE($6, expires_at),
         is_active = COALESCE($7, is_active)
        WHERE id = $8 RETURNING *`,
-      [name, institution, bankId, permissions, rateLimit, expiresAt, isActive, req.params.id]
+      [
+        name,
+        institution,
+        bankId,
+        permissions === undefined ? null : sanitizePermissions(permissions),
+        rateLimit === undefined || rateLimit === null ? null : Math.min(Math.max(parseInt(rateLimit, 10) || 100, 1), 100000),
+        expiresAt,
+        isActive,
+        req.params.id
+      ]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'API Key non trouvee' });
     }
 
-    await auditService.logAction('UPDATE_API_KEY', { tableName: 'api_keys', recordId: req.params.id, newData: result.rows[0] }, req);
+    await auditService.logAction('UPDATE_API_KEY', { tableName: 'api_keys', recordId: req.params.id, newData: presentKey(result.rows[0]) }, req);
 
-    res.json({ success: true, data: result.rows[0] });
+    res.json({ success: true, data: presentKey(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -161,7 +193,7 @@ router.delete('/:id', authMiddleware, checkRole('super_admin'), async (req, res)
       return res.status(404).json({ success: false, message: 'API Key non trouvee' });
     }
 
-    await auditService.logAction('DELETE_API_KEY', { tableName: 'api_keys', recordId: req.params.id, oldData: oldKey.rows[0] }, req);
+    await auditService.logAction('DELETE_API_KEY', { tableName: 'api_keys', recordId: req.params.id, oldData: presentKey(oldKey.rows[0]) }, req);
 
     res.json({ success: true, message: 'API Key supprimee' });
   } catch (error) {
@@ -175,16 +207,20 @@ router.post('/:id/regenerate', authMiddleware, checkRole('super_admin'), async (
     const newApiKey = generateApiKey();
 
     const result = await db.query(
-      'UPDATE api_keys SET api_key = $1 WHERE id = $2 RETURNING *',
-      [newApiKey, req.params.id]
+      'UPDATE api_keys SET api_key = NULL, key_hash = $1, key_prefix = $2 WHERE id = $3 RETURNING *',
+      [hashApiKey(newApiKey), keyPrefix(newApiKey), req.params.id]
     );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'API Key non trouvee' });
+    }
 
     await auditService.logAction('REGENERATE_API_KEY', { tableName: 'api_keys', recordId: req.params.id }, req);
 
     res.json({
       success: true,
       message: 'API Key regeneree',
-      data: { ...result.rows[0], api_key: newApiKey }
+      data: { ...presentKey(result.rows[0]), api_key: newApiKey }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -192,3 +228,4 @@ router.post('/:id/regenerate', authMiddleware, checkRole('super_admin'), async (
 });
 
 module.exports = router;
+module.exports.hashApiKey = hashApiKey;

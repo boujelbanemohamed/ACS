@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader, Info, RotateCcw, Database, Server, Wifi, HardDrive, Package, FileText, Download, X, Bug, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Shield, Loader, RotateCcw, Database, Server, Wifi, HardDrive, Package, FileText, Download, X, Bug, ChevronDown, ChevronUp } from 'lucide-react';
 import api from '../services/api';
 import './PlatformTests.css';
 
 const POLL_INTERVAL = 1000;
 
 const PlatformTests = () => {
-  const [runId, setRunId] = useState(null);
+  const [, setRunId] = useState(null);
   const [progress, setProgress] = useState(null);
   const [loading, setLoading] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -300,7 +300,6 @@ const RunningView = ({ progress, percent, currentPhase }) => {
 const PhaseProgress = ({ phase, active }) => {
   const completed = phase.completedSuites;
   const total = phase.totalSuites || completed || '?';
-  const isPreflight = phase.name === 'preflight';
 
   return (
     <div className={`phase-progress ${active ? 'active' : phase.done ? 'done' : 'pending'}`}>

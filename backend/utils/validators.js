@@ -62,9 +62,9 @@ const userSchemas = {
       .messages({
         'string.email': 'Email invalide'
       }),
-    password: Joi.string().min(6).max(100).required()
+    password: Joi.string().min(8).max(128).required()
       .messages({
-        'string.min': 'Le mot de passe doit avoir au moins 6 caractères'
+        'string.min': 'Le mot de passe doit avoir au moins 8 caractères'
       }),
     role: Joi.string().valid('super_admin', 'bank', 'bank_admin').default('bank'),
     bankId: Joi.number().integer().allow(null),
@@ -74,7 +74,7 @@ const userSchemas = {
   update: Joi.object({
     username: Joi.string().min(3).max(100),
     email: Joi.string().email(),
-    password: Joi.string().min(6).max(100).allow(null, ''),
+    password: Joi.string().min(8).max(128).allow(null, ''),
     role: Joi.string().valid('super_admin', 'bank', 'bank_admin'),
     bankId: Joi.number().integer().allow(null),
     phone: Joi.string().max(20).allow(null, ''),

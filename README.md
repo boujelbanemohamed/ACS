@@ -7,7 +7,7 @@ Application complète de gestion et validation de fichiers CSV bancaires avec Re
 ### 1. **Authentification**
 - Connexion sécurisée avec JWT
 - Gestion des rôles (admin/user)
-- Identifiants par défaut: `admin` / `Admin@123`
+- Identifiants par défaut: `admin` / `Admin@123` — **changement obligatoire à la première connexion** (imposé par le serveur)
 
 ### 2. **Dashboard**
 - Vue d'ensemble des statistiques

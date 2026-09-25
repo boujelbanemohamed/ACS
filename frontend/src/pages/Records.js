@@ -309,8 +309,19 @@ const Records = () => {
 
   const handleExport = async () => {
     try {
-      const params = filters.bankId ? '?bankId=' + filters.bankId : '';
-      window.open(api.defaults.baseURL + '/records/export/csv' + params, '_blank');
+      // Téléchargement authentifié (window.open n'enverrait pas le jeton)
+      const response = await api.get('/records/export/csv', {
+        params: filters.bankId ? { bankId: filters.bankId } : {},
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'enregistrements.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       alert('Erreur lors de l\'export');
     }

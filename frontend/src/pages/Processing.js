@@ -130,6 +130,8 @@ const Processing = () => {
 
   useEffect(() => {
     fetchBanks();
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   
@@ -149,6 +151,8 @@ const Processing = () => {
     try {
       const response = await api.get('/api-keys');
       setApiKeys(response.data.data || []);
+      // Statistiques affichées au-dessus de la liste (réservées au super_admin côté serveur)
+      if (user?.role === 'super_admin') fetchApiKeyStats();
     } catch (error) {
       console.error('Error fetching API keys:', error);
     }
@@ -1320,10 +1324,8 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
                     <div className="api-key-info">
                       <span className="api-key-name">{key.name}</span>
                       <span className="api-key-institution">{key.institution || 'N/A'}</span>
-                      <code className="api-key-value">{key.api_key.substring(0, 20)}...</code>
-                      <button className="btn-icon" onClick={() => copyToClipboard(key.api_key)} title="Copier">
-                        <FileText size={14} />
-                      </button>
+                      {/* La clé complète n'est affichée qu'une fois, à sa création */}
+                      <code className="api-key-value">{(key.key_prefix || 'acs_') + '...'}</code>
                     </div>
                     <div className="api-key-meta">
                       <span className={'status-badge ' + (key.is_active ? 'success' : 'error')}>

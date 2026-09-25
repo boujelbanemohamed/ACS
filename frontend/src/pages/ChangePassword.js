@@ -7,7 +7,7 @@ import './ChangePassword.css';
 
 const ChangePassword = () => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, updateToken, clearMustChangePassword } = useAuth();
   const [formData, setFormData] = useState({
     currentPassword: '',
     newPassword: '',
@@ -26,8 +26,10 @@ const ChangePassword = () => {
     e.preventDefault();
     setError(null);
 
-    if (formData.newPassword.length < 8) {
-      setError('Le mot de passe doit contenir au moins 8 caractères');
+    if (formData.newPassword.length < 8 ||
+      !/[a-z]/.test(formData.newPassword) || !/[A-Z]/.test(formData.newPassword) ||
+      !/\d/.test(formData.newPassword) || !/[^A-Za-z0-9]/.test(formData.newPassword)) {
+      setError('Le mot de passe doit contenir au moins 8 caractères dont une minuscule, une majuscule, un chiffre et un caractère spécial');
       return;
     }
 
@@ -43,14 +45,23 @@ const ChangePassword = () => {
 
     setLoading(true);
     try {
-      await api.put('/auth/change-password', {
+      const response = await api.put('/auth/change-password', {
         currentPassword: formData.currentPassword,
         newPassword: formData.newPassword
       });
       setSuccess(true);
-      setTimeout(() => {
-        navigate('/login', { state: { passwordChanged: true }, replace: true });
-      }, 2000);
+      const newToken = response.data?.data?.token;
+      if (newToken) {
+        // La session courante continue avec le nouveau jeton
+        updateToken(newToken);
+        clearMustChangePassword();
+        setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
+      } else {
+        logout();
+        setTimeout(() => {
+          navigate('/login', { state: { passwordChanged: true }, replace: true });
+        }, 2000);
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Erreur lors du changement de mot de passe');
     } finally {
@@ -66,7 +77,7 @@ const ChangePassword = () => {
             <CheckCircle size={48} />
           </div>
           <h2>Mot de passe changé avec succès</h2>
-          <p>Vous allez être redirigé vers la page de connexion...</p>
+          <p>Vous allez être redirigé...</p>
         </div>
       </div>
     );

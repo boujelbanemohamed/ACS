@@ -63,6 +63,16 @@ if (process.env.JWT_SECRET.length < 32) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Derrière un reverse proxy (nginx) : adresse IP réelle du client pour les limites de débit
+const parseTrustProxy = (value) => {
+  if (value === undefined || value === '') return 'loopback, uniquelocal';
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^\d+$/.test(value)) return parseInt(value, 10);
+  return value;
+};
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+
 // Middleware
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',').map(s => s.trim());
 app.use(cors({
@@ -78,11 +88,14 @@ app.use(helmet({
 // Compression des réponses
 app.use(compression());
 
-// Logging des requêtes (format différent selon l'environnement)
+// Logging des requêtes : l'URL journalisée ne contient ni jeton ni numéro de carte
+morgan.token('safe-url', (req) => (req.originalUrl || req.url || '')
+  .replace(/([?&](token|api_key|apikey|key|pan)=)[^&]*/gi, '$1***')
+  .replace(/\d{12,19}/g, (digits) => '*'.repeat(digits.length - 4) + digits.slice(-4)));
 if (process.env.NODE_ENV === 'production') {
-  app.use(morgan('combined'));
+  app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
 } else {
-  app.use(morgan('dev'));
+  app.use(morgan(':method :safe-url :status :response-time ms - :res[content-length]'));
 }
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -97,10 +110,13 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
+// Anti force brute : échecs de connexion comptés par adresse IP (les connexions réussies ne comptent pas)
 const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 1000,
-  message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans une minute.' },
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 30,
+  skipSuccessfulRequests: true,
+  skip: require('./utils/passwordPolicy').rateLimitDisabled,
+  message: { success: false, message: 'Trop de tentatives de connexion, veuillez réessayer dans 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -155,7 +171,10 @@ app.use('/api/audit-logs', authMiddleware, checkFeature('audit_logs'), require('
 app.use('/api/role-features', authMiddleware, require('./routes/roleFeatures'));
 app.use('/api/api-docs', authMiddleware, isSuperAdmin, apiDocsRoutes);
 app.use('/api/platform-tests', authMiddleware, isSuperAdmin, require('./routes/platformTests'));
-app.use('/api/live', authMiddleware, isSuperAdmin, require('./routes/live'));
+// Le suivi de navigation (POST /track) est ouvert à tout utilisateur connecté ; le reste du flux est réservé au super_admin
+app.use('/api/live', authMiddleware, (req, res, next) => (
+  req.method === 'POST' && req.path === '/track' ? next() : isSuperAdmin(req, res, next)
+), require('./routes/live'));
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
@@ -193,6 +212,9 @@ const startServer = async () => {
     // Test database connection
     await db.query('SELECT NOW()');
     console.log('Database connection established');
+
+    // Migrations SQL en attente + recalcul des empreintes de PAN (une seule instance à la fois)
+    await require('./services/startupTasks').runStartupTasks();
     
     if (process.env.NODE_ENV !== 'test') {
       await cronService.createTable();
@@ -213,6 +235,7 @@ const startServer = async () => {
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
   console.log(`${signal} received, shutting down gracefully`);
+  cronService.stop();
   if (server) {
     server.close(() => {
       console.log('HTTP server closed');

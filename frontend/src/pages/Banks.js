@@ -29,6 +29,8 @@ const Banks = () => {
 
   useEffect(() => {
     fetchBanks();
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchBanks = async () => {

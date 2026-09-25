@@ -51,3 +51,10 @@ frontend/coverage/
 # Playwright test artifacts
 playwright-report/
 test-results/
+
+# Frontend test artifacts
+frontend/coverage-temp/
+
+# Uploads
+uploads/
+backend/uploads/

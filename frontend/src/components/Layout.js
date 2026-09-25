@@ -32,7 +32,8 @@ const Layout = () => {
 
   const hasFeature = (feature) => {
     if (isSuperAdmin) return true;
-    return features[feature] !== false;
+    // Refus par défaut : un menu n'apparaît que si la fonctionnalité est explicitement autorisée
+    return features[feature] === true;
   };
 
   usePageTracking();

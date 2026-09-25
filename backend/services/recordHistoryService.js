@@ -3,7 +3,10 @@
  * Traçabilité complète de chaque tentative d'import par PAN
  */
 const db = require('../config/database');
-const { encrypt, decrypt, hashPan } = require('./encryptionService');
+const { encrypt, decrypt, hashPan, maskPan } = require('./encryptionService');
+
+// L'historique ne contient jamais de PAN en clair (seul record_history.pan, chiffré, le conserve)
+const maskPanValue = (value) => (value ? maskPan(String(value)) : value);
 
 class RecordHistoryService {
   
@@ -34,6 +37,12 @@ class RecordHistoryService {
 
     const encryptedPan = encrypt(pan);
     const panHash = hashPan(pan);
+    const safeDataReceived = dataReceived && typeof dataReceived === 'object'
+      ? { ...dataReceived, ...(dataReceived.pan ? { pan: maskPanValue(dataReceived.pan) } : {}) }
+      : dataReceived;
+    const safeValidationResults = (validationResults || []).map(v =>
+      v && v.field === 'pan' ? { ...v, value: maskPanValue(v.value) } : v
+    );
     
     const client = await db.pool.connect();
     
@@ -53,8 +62,8 @@ class RecordHistoryService {
       }
       
       // Compter erreurs et warnings
-      const totalErrors = validationResults.filter(v => !v.isValid && v.severity === 'error').length;
-      const totalWarnings = validationResults.filter(v => !v.isValid && v.severity === 'warning').length;
+      const totalErrors = safeValidationResults.filter(v => !v.isValid && v.severity === 'error').length;
+      const totalWarnings = safeValidationResults.filter(v => !v.isValid && v.severity === 'warning').length;
       
       // Déterminer le username à afficher
       let displayUsername = username;
@@ -75,7 +84,7 @@ class RecordHistoryService {
         [
           bankId, encryptedPan, panHash, attemptNumber, fileLogId, fileName, sourceType,
           userId, displayUsername, status, ipAddress, userAgent, 
-          JSON.stringify(dataReceived),
+          JSON.stringify(safeDataReceived),
           totalErrors, totalWarnings, processedRecordId, xmlId
         ]
       );
@@ -97,7 +106,7 @@ class RecordHistoryService {
       }
       
       // Insérer les détails de validation pour chaque champ
-      for (const validation of validationResults) {
+      for (const validation of safeValidationResults) {
         const previousValue = previousValues[validation.field] || null;
         const isCorrected = previousValue !== null && 
                            previousValue !== validation.value && 

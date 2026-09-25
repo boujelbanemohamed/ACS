@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, PlayCircle, RefreshCw, Settings, Save, Power, Trash2 } from 'lucide-react';
+import { Clock, PlayCircle, RefreshCw, Settings, Save, Power } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './CronManager.css';
@@ -32,6 +32,8 @@ const CronManager = () => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchData = async () => {

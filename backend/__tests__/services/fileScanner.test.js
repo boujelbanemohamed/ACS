@@ -5,10 +5,14 @@ jest.mock('../../services/csvProcessor', () => jest.fn().mockImplementation(() =
   processFileFromURL: jest.fn(),
   processRowsWithHistory: jest.fn(),
   saveValidatedRecords: jest.fn(),
-  archiveOldFile: jest.fn(),
-  moveFileToDestination: jest.fn()
+  updateFileLog: jest.fn(),
+  archiveOldFile: jest.fn().mockResolvedValue({ success: true }),
+  moveFileToDestination: jest.fn().mockResolvedValue({ success: true, destinationPath: '/dest/file.csv' })
 })));
-jest.mock('../../services/xmlGenerator');
+const mockCommitValidRecords = jest.fn();
+jest.mock('../../services/pipelineService', () => ({
+  commitValidRecords: (...args) => mockCommitValidRecords(...args)
+}));
 jest.mock('../../utils/remoteFileService', () => ({
   isRemote: jest.fn(),
   listFiles: jest.fn(),
@@ -19,7 +23,6 @@ const axios = require('axios');
 const fs = require('fs');
 const db = require('../../config/database');
 const CSVProcessor = require('../../services/csvProcessor');
-const xmlGenerator = require('../../services/xmlGenerator');
 const remoteFileService = require('../../utils/remoteFileService');
 const FileScanner = require('../../services/fileScanner');
 
@@ -37,16 +40,22 @@ describe('FileScanner', () => {
   describe('scanBank', () => {
     const bank = { id: 1, name: 'TestBank', source_url: 'https://example.com/files', old_url: 'https://example.com/old', destination_url: 'https://example.com/dest' };
 
+    const okResult = (fileLogId) => ({
+      success: true, allRows: [{ pan: '123' }], validRecords: [{ id: null, pan: '4741000000000006' }],
+      errors: [], fileLogId
+    });
+
+    beforeEach(() => {
+      mockCommitValidRecords.mockReset().mockResolvedValue({
+        savedRecords: [{ id: 100 }],
+        xmlResult: { success: true, fileName: 'test.xml', filePath: '/tmp/test.xml', xmlEntriesCount: 2 }
+      });
+    });
+
     it('Full happy path: lists 2 files, processes both, generates XML', async () => {
       scanner.listFiles = jest.fn().mockResolvedValue(['file1.csv', 'file2.csv']);
       scanner.isFileProcessed = jest.fn().mockResolvedValue(false);
-      scanner.csvProcessor.processFileFromURL.mockResolvedValue({
-        success: true, allRows: [{ pan: '123' }], validRecords: [{ id: null, pan: '4741000000000006' }],
-        errors: [], fileLogId: 10
-      });
-      scanner.csvProcessor.saveValidatedRecords.mockResolvedValue([{ id: 100 }]);
-      xmlGenerator.processAndGenerateXML.mockResolvedValue({ fileName: 'test.xml', filePath: '/tmp/test.xml', xmlEntriesCount: 2 });
-      db.query.mockResolvedValue({ rows: [] });
+      scanner.csvProcessor.processFileFromURL.mockResolvedValueOnce(okResult(10)).mockResolvedValueOnce(okResult(11));
 
       const result = await scanner.scanBank(bank);
 
@@ -54,9 +63,24 @@ describe('FileScanner', () => {
       expect(result.filesProcessed).toBe(2);
       expect(result.xmlGenerated).toBe(true);
       expect(result.errors).toHaveLength(0);
+      expect(mockCommitValidRecords).toHaveBeenCalledWith(expect.objectContaining({ bank, fileLogId: 10, fileName: 'file1.csv' }));
+      expect(scanner.csvProcessor.processFileFromURL).toHaveBeenCalledWith(1, 'https://example.com/files/file1.csv', 'file1.csv',
+        { sourceType: 'cron', trustedUrl: true, skipIfUnchanged: true });
       expect(scanner.csvProcessor.archiveOldFile).toHaveBeenCalledTimes(2);
       expect(scanner.csvProcessor.moveFileToDestination).toHaveBeenCalledTimes(2);
-      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO xml_logs'), expect.any(Array));
+    });
+
+    it('archives BEFORE moving (the move deletes the source file)', async () => {
+      const order = [];
+      scanner.listFiles = jest.fn().mockResolvedValue(['file1.csv']);
+      scanner.isFileProcessed = jest.fn().mockResolvedValue(false);
+      scanner.csvProcessor.processFileFromURL.mockResolvedValue(okResult(10));
+      scanner.csvProcessor.archiveOldFile.mockImplementation(async () => { order.push('archive'); return { success: true }; });
+      scanner.csvProcessor.moveFileToDestination.mockImplementation(async () => { order.push('move'); return { success: true }; });
+
+      await scanner.scanBank(bank);
+
+      expect(order).toEqual(['archive', 'move']);
     });
 
     it('No files found: returns { filesFound: 0, filesProcessed: 0, xmlGenerated: false, errors: [] }', async () => {
@@ -65,6 +89,16 @@ describe('FileScanner', () => {
       const result = await scanner.scanBank(bank);
 
       expect(result).toEqual({ filesFound: 0, filesProcessed: 0, xmlGenerated: false, errors: [] });
+    });
+
+    it('ignores file names that could escape the source folder', async () => {
+      scanner.listFiles = jest.fn().mockResolvedValue(['../etc/passwd.csv', '.hidden.csv', 'ok.csv']);
+      scanner.isFileProcessed = jest.fn().mockResolvedValue(true);
+
+      const result = await scanner.scanBank(bank);
+
+      expect(result.filesFound).toBe(1);
+      expect(scanner.isFileProcessed).toHaveBeenCalledWith(1, 'ok.csv');
     });
 
     it('File already processed: isFileProcessed returns true, skips it', async () => {
@@ -77,37 +111,50 @@ describe('FileScanner', () => {
       expect(scanner.csvProcessor.processFileFromURL).not.toHaveBeenCalled();
     });
 
-    it('Validation errors in processing: stats has errors, no XML generation', async () => {
+    it('Unchanged rejected file: skipped without creating a new file log', async () => {
+      scanner.listFiles = jest.fn().mockResolvedValue(['file1.csv']);
+      scanner.isFileProcessed = jest.fn().mockResolvedValue(false);
+      scanner.csvProcessor.processFileFromURL.mockResolvedValue({ success: false, skipped: true, errors: [], validRecords: [], allRows: [] });
+
+      const result = await scanner.scanBank(bank);
+
+      expect(result.errors).toHaveLength(0);
+      expect(scanner.csvProcessor.processRowsWithHistory).not.toHaveBeenCalled();
+    });
+
+    it('Validation errors in processing: no XML, no card data in the scan log', async () => {
       scanner.listFiles = jest.fn().mockResolvedValue(['file1.csv']);
       scanner.isFileProcessed = jest.fn().mockResolvedValue(false);
       scanner.csvProcessor.processFileFromURL.mockResolvedValue({
-        success: false, errors: [{ field: 'pan', message: 'Invalid' }]
+        success: false, fileLogId: 12, errors: [{ field: 'pan', value: '4741000000000006', severity: 'error', rowData: { pan: '4741000000000006' } }]
       });
 
       const result = await scanner.scanBank(bank);
 
       expect(result.filesProcessed).toBe(0);
       expect(result.xmlGenerated).toBe(false);
+      expect(mockCommitValidRecords).not.toHaveBeenCalled();
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].error).toBe('Validation errors detected');
+      expect(result.errors[0].errorCount).toBe(1);
+      expect(JSON.stringify(result.errors)).not.toContain('4741000000000006');
     });
 
-    it('XML generation throws: caught, added to errors array, scan continues', async () => {
+    it('XML generation fails: error reported and the file stays in the source folder', async () => {
       scanner.listFiles = jest.fn().mockResolvedValue(['file1.csv']);
       scanner.isFileProcessed = jest.fn().mockResolvedValue(false);
-      scanner.csvProcessor.processFileFromURL.mockResolvedValue({
-        success: true, allRows: [{ pan: '123' }], validRecords: [{ id: null, pan: '4741000000000006' }],
-        errors: [], fileLogId: 10
-      });
-      scanner.csvProcessor.saveValidatedRecords.mockResolvedValue([{ id: 100 }]);
-      xmlGenerator.processAndGenerateXML.mockRejectedValue(new Error('XML error'));
+      scanner.csvProcessor.processFileFromURL.mockResolvedValue(okResult(10));
+      mockCommitValidRecords.mockRejectedValue(new Error('XML generation failed: disk full'));
 
       const result = await scanner.scanBank(bank);
 
       expect(result.xmlGenerated).toBe(false);
+      expect(result.filesProcessed).toBe(0);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].error).toContain('XML generation failed');
-      expect(scanner.csvProcessor.archiveOldFile).toHaveBeenCalled();
+      // Aucune carte perdue : le fichier n'est ni archivé ni déplacé
+      expect(scanner.csvProcessor.archiveOldFile).not.toHaveBeenCalled();
+      expect(scanner.csvProcessor.moveFileToDestination).not.toHaveBeenCalled();
     });
 
     it('Processing throws: caught, error added to results', async () => {
@@ -115,13 +162,7 @@ describe('FileScanner', () => {
       scanner.isFileProcessed = jest.fn().mockResolvedValue(false);
       scanner.csvProcessor.processFileFromURL
         .mockRejectedValueOnce(new Error('Connection timeout'))
-        .mockResolvedValueOnce({
-          success: true, allRows: [], validRecords: [{ id: null, pan: '4741000000000006' }],
-          errors: [], fileLogId: 11
-        });
-      xmlGenerator.processAndGenerateXML.mockResolvedValue({ fileName: 'test.xml', filePath: '/tmp/test.xml', xmlEntriesCount: 2 });
-      scanner.csvProcessor.saveValidatedRecords.mockResolvedValue([{ id: 101 }]);
-      db.query.mockResolvedValue({ rows: [] });
+        .mockResolvedValueOnce(okResult(11));
 
       const result = await scanner.scanBank(bank);
 
@@ -233,6 +274,16 @@ describe('FileScanner', () => {
 
     it('Returns false when status is error', async () => {
       db.query.mockResolvedValue({ rows: [{ status: 'error' }] });
+      expect(await scanner.isFileProcessed(1, 'test.csv')).toBe(false);
+    });
+
+    it('A processing interrupted for more than 1 hour becomes eligible again', async () => {
+      db.query.mockResolvedValue({ rows: [{ status: 'processing', processed_at: new Date(Date.now() - 2 * 60 * 60 * 1000) }] });
+      expect(await scanner.isFileProcessed(1, 'test.csv')).toBe(false);
+    });
+
+    it('Returns false for a validation error (unchanged files are filtered by content hash)', async () => {
+      db.query.mockResolvedValue({ rows: [{ status: 'validation_error' }] });
       expect(await scanner.isFileProcessed(1, 'test.csv')).toBe(false);
     });
   });

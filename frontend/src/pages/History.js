@@ -28,10 +28,14 @@ const History = () => {
   useEffect(() => {
     fetchBanks();
     fetchStats();
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     fetchHistory();
+    // Chargement voulu uniquement au montage / sur changement des dépendances listées
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, pagination.offset]);
 
   const handleResetFilters = () => {

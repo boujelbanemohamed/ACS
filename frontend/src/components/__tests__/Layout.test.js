@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Layout from '../Layout';
 
@@ -76,19 +76,41 @@ describe('Layout', () => {
     expect(screen.getByText('Permissions')).toBeInTheDocument();
   });
 
-  it('shows relevant links for bank_admin', () => {
-    renderLayout({ user: { username: 'ba', role: 'bank_admin', bank_name: 'BT' } });
-    expect(screen.getByText('Banques')).toBeInTheDocument();
+  const withFeatures = (features) => {
+    const api = require('../../services/api').default;
+    api.get.mockResolvedValue({ data: { data: { ...defaultFeatures, ...features } } });
+  };
+
+  it('shows relevant links for bank_admin once its features are loaded', async () => {
+    useAuth.mockReturnValue({ ...baseAuth, user: { username: 'ba', role: 'bank_admin', bank_name: 'BT' } });
+    withFeatures({ banks: true, users: true });
+    render(<MemoryRouter initialEntries={['/']}><Layout /></MemoryRouter>);
+
+    expect(await screen.findByText('Banques')).toBeInTheDocument();
     expect(screen.getByText('Utilisateurs')).toBeInTheDocument();
     expect(screen.queryByText('Test API')).not.toBeInTheDocument();
     expect(screen.queryByText('Notifications')).not.toBeInTheDocument();
   });
 
-  it('shows Ma Banque for bank user', () => {
-    renderLayout({ user: { username: 'bu', role: 'bank', bank_name: 'BT' } });
-    expect(screen.getByText('Ma Banque')).toBeInTheDocument();
+  it('shows Ma Banque for bank user', async () => {
+    useAuth.mockReturnValue({ ...baseAuth, user: { username: 'bu', role: 'bank', bank_name: 'BT' } });
+    withFeatures({ banks: true, users: true });
+    render(<MemoryRouter initialEntries={['/']}><Layout /></MemoryRouter>);
+
+    expect(await screen.findByText('Ma Banque')).toBeInTheDocument();
     expect(screen.queryByText('Utilisateurs')).not.toBeInTheDocument();
     expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
+  });
+
+  it('hides restricted menus when the features cannot be loaded (deny by default)', async () => {
+    useAuth.mockReturnValue({ ...baseAuth, user: { username: 'bu', role: 'bank', bank_name: 'BT' } });
+    const api = require('../../services/api').default;
+    api.get.mockRejectedValue(new Error('network'));
+    render(<MemoryRouter initialEntries={['/']}><Layout /></MemoryRouter>);
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/role-features/me'));
+    expect(screen.queryByText('Ma Banque')).not.toBeInTheDocument();
+    expect(screen.queryByText('Utilisateurs')).not.toBeInTheDocument();
   });
 
   it('renders user info in footer', () => {

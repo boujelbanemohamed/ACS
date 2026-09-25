@@ -23,8 +23,15 @@ export const AuthProvider = ({ children }) => {
     const savedMustChange = localStorage.getItem('must_change_password');
 
     if (token && savedUser) {
-      setUser(JSON.parse(savedUser));
-      setMustChangePassword(savedMustChange === 'true');
+      try {
+        setUser(JSON.parse(savedUser));
+        setMustChangePassword(savedMustChange === 'true');
+      } catch {
+        // Données locales corrompues : on repart d'une session vide
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        localStorage.removeItem('must_change_password');
+      }
     }
     setLoading(false);
   }, []);
@@ -62,6 +69,11 @@ export const AuthProvider = ({ children }) => {
     setMustChangePassword(false);
   };
 
+  // Nouveau jeton émis par le serveur (après un changement de mot de passe, les anciens sont révoqués)
+  const updateToken = (token) => {
+    if (token) localStorage.setItem('token', token);
+  };
+
   const value = {
     user,
     loading,
@@ -70,6 +82,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     mustChangePassword,
     clearMustChangePassword,
+    updateToken,
     isAuthenticated: !!user,
     isAdmin: user?.role === 'super_admin',
   };

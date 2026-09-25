@@ -297,7 +297,7 @@ router.get('/script/:phaseIdx/:suiteIdx', (req, res) => {
 
   const dir = phase.name === 'frontend' ? FRONTEND_DIR : BACKEND_DIR;
   const absPath = path.resolve(dir, suite.name);
-  if (!absPath.startsWith(dir)) return res.status(403).json({ success: false, message: 'Chemin invalide' });
+  if (!absPath.startsWith(dir + path.sep)) return res.status(403).json({ success: false, message: 'Chemin invalide' });
   if (!fs.existsSync(absPath)) return res.status(404).json({ success: false, message: 'Fichier introuvable: ' + suite.name });
 
   const content = fs.readFileSync(absPath, 'utf-8');
@@ -357,10 +357,7 @@ router.get('/history', (req, res) => {
   });
 });
 
-router.get('/history/:runId/report', (req, res) => {
-  const run = runHistory.find(h => h.runId === req.params.runId);
-  if (!run) return res.status(404).json({ success: false, message: 'Run introuvable' });
-
+function renderReport(run) {
   const phasesHtml = run.phases.map(p => {
     const icon = p.status === 'passed' ? '✅' : '❌';
     const detailLines = (p.rawOutput || '').split('\n').slice(-50).join('\n');
@@ -405,9 +402,63 @@ ${phasesHtml}
 <p style="text-align:center;color:#999;font-size:.8rem;margin-top:2rem">Généré par ACS Platform Tests</p>
 </body></html>`;
 
+  return html;
+}
+
+function sendReport(res, run) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="rapport-tests-${run.runId}.html"`);
-  res.send(html);
+  res.send(renderReport(run));
+}
+
+router.get('/history/:runId/report', (req, res) => {
+  const run = runHistory.find(h => h.runId === req.params.runId);
+  if (!run) return res.status(404).json({ success: false, message: 'Run introuvable' });
+  sendReport(res, run);
+});
+
+// Rapport du dernier run terminé
+router.get('/report', (req, res) => {
+  const run = runHistory[0];
+  if (!run) return res.status(404).json({ success: false, message: 'Aucun run terminé' });
+  sendReport(res, run);
+});
+
+// Sortie brute d'une phase du run courant
+router.get('/raw-output', (req, res) => {
+  if (!currentRun) return res.status(404).json({ success: false, message: 'Aucun run' });
+  const phase = currentRun.phases[parseInt(req.query.phase, 10)];
+  if (!phase) return res.status(404).json({ success: false, message: 'Phase introuvable' });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(phase.rawOutput || '');
+});
+
+// Relance les phases en échec du run courant (et les suivantes)
+router.post('/retry-failed', (req, res) => {
+  if (isRunning) {
+    return res.status(409).json({ success: false, message: 'Des tests sont déjà en cours d\'exécution.' });
+  }
+  if (!currentRun) return res.status(404).json({ success: false, message: 'Aucun run' });
+
+  const firstFailed = currentRun.phases.findIndex(p => p.status === 'failed' || p.failedTests > 0);
+  if (firstFailed === -1) {
+    return res.status(400).json({ success: false, message: 'Aucune phase en échec à relancer' });
+  }
+
+  for (let i = firstFailed; i < currentRun.phases.length; i++) {
+    Object.assign(currentRun.phases[i], {
+      suites: [], completedSuites: 0, totalSuites: currentRun.phases[i].name === 'preflight' ? 5 : 0,
+      totalTests: 0, passedTests: 0, failedTests: 0, done: false,
+      status: i === firstFailed ? 'running' : 'pending', rawOutput: '', isRetry: true
+    });
+  }
+  currentRun.currentPhase = firstFailed;
+  currentRun.finished = false;
+  currentRun.startTime = Date.now();
+  isRunning = true;
+
+  res.json({ success: true, data: { runId: currentRun.runId } });
+  runPhase(firstFailed);
 });
 
 function esc(s) {
