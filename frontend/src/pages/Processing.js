@@ -558,8 +558,14 @@ const Processing = () => {
         entries: manualEntries
       });
       
-      // Update entries with validation results
-      const validatedEntries = response.data.data.entries || [];
+      // Le serveur renvoie le PAN masqué : seul le résultat de validation est repris,
+      // le PAN saisi reste celui de la page pour l'envoi
+      const results = response.data.data.entries || [];
+      const validatedEntries = manualEntries.map((entry, index) => ({
+        ...entry,
+        ...(results[index] || {}),
+        pan: entry.pan
+      }));
       setManualEntries(validatedEntries);
       
       const validCount = validatedEntries.filter(e => e.status === 'valid').length;

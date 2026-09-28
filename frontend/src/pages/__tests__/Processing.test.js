@@ -1258,6 +1258,30 @@ describe('Processing', () => {
     expect(expiry.value).toBe('12/2');
   });
 
+  it('manual entry keeps the full PAN typed in the page when the server returns it masked', async () => {
+    const { processingAPI } = require('../../services/api');
+    processingAPI.validateManualEntries.mockImplementation(({ entries }) => Promise.resolve({
+      data: { data: { entries: entries.map(e => ({ ...e, pan: '************1111', status: 'valid', errorMessage: '' })) } },
+    }));
+    processingAPI.processManualEntries.mockResolvedValue({ data: { success: true, data: { jobId: 'man-2' } } });
+    processingAPI.getJobStatus.mockResolvedValue({ data: { success: true, data: { status: 'completed', result: { success: true, message: 'ok' } } } });
+    render(<MemoryRouter><Processing /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Saisie Manuelle'));
+    fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
+    fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'NIZAR' } });
+    fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'GHARSALLI' } });
+    fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1128' } });
+    fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
+    fireEvent.click(screen.getByText('Ajouter a la liste'));
+    fireEvent.click(await screen.findByText('Valider les donnees'));
+    await waitFor(() => expect(screen.getByText(/Validation terminee/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Traiter et Generer CSV/XML'));
+    await waitFor(() => expect(processingAPI.processManualEntries).toHaveBeenCalled());
+    expect(processingAPI.processManualEntries.mock.calls[0][0].entries[0]).toMatchObject({ pan: '4111111111111111', expiry: '11/28' });
+  });
+
   describe('correction after an upload', () => {
     const CSV = [
       'language;firstName;lastName;pan;expiry;phone;behaviour;action',
