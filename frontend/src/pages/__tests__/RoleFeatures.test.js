@@ -39,6 +39,7 @@ beforeEach(() => {
   mockGet.mockImplementation((url) => {
     if (url === '/role-features/banks') return Promise.resolve({ data: { data: banksData } });
     if (url === '/role-features') return Promise.resolve({ data: { data: defaultFeatures } });
+    if (url === '/role-features/role-defaults') return Promise.resolve({ data: { data: { roles: defaultFeatures.roles } } });
     if (url.includes('/role-features/bank/')) return Promise.resolve({ data: { data: {} } });
     if (url.includes('/role-features/user/')) return Promise.resolve({ data: { data: {} } });
     if (url.includes('/role-features/users')) return Promise.resolve({ data: { data: usersData } });
@@ -94,9 +95,26 @@ describe('RoleFeatures', () => {
       fireEvent.change(select, { target: { value: '1' } });
     }
     await waitFor(() => {
-      expect(screen.getByText('Default Rôle')).toBeInTheDocument();
+      expect(screen.getByText('Défaut admin banque')).toBeInTheDocument();
       expect(screen.getByText('Surcharge Banque')).toBeInTheDocument();
     });
+  });
+
+  it('shows the real role defaults to a bank_admin', async () => {
+    useAuth.mockReturnValue({ user: { role: 'bank_admin', bank_id: 1 } });
+    render(<MemoryRouter><RoleFeaturesPage /></MemoryRouter>);
+    await waitFor(() => { expect(mockGet).toHaveBeenCalledWith('/role-features/role-defaults'); });
+    // bank_admin : Dashboard, Banques, Utilisateurs, Permissions ; bank : Dashboard, Banques
+    await waitFor(() => { expect(screen.getAllByText('✅ Activé').length).toBe(6); });
+    expect(mockGet).not.toHaveBeenCalledWith('/role-features');
+  });
+
+  it('loads the bank users for a bank_admin (no bank selector to trigger it)', async () => {
+    useAuth.mockReturnValue({ user: { role: 'bank_admin', bank_id: 1 } });
+    render(<MemoryRouter><RoleFeaturesPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('Par Utilisateur'));
+    expect(await screen.findByText('user1 (bank - BT)')).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith('/role-features/users?bankId=1');
   });
 
   it('renders for bank_admin without error', async () => {
@@ -159,12 +177,11 @@ describe('RoleFeatures', () => {
     await waitFor(() => { expect(screen.getByText(/Sélectionnez une banque/)).toBeInTheDocument(); });
     const select = document.querySelector('select');
     if (select) fireEvent.change(select, { target: { value: '1' } });
-    await waitFor(() => { expect(screen.getByText('Default Rôle')).toBeInTheDocument(); });
-    const toggles = document.querySelectorAll('.feature-toggle');
-    if (toggles.length > 0) {
-      fireEvent.click(toggles[0]);
-    }
-    await waitFor(() => { expect(mockPut).toHaveBeenCalled(); });
+    await waitFor(() => { expect(screen.getByText('Défaut admin banque')).toBeInTheDocument(); });
+    const toggles = document.querySelectorAll('.override-toggle');
+    expect(toggles[0].textContent).toBe('Aucune');
+    fireEvent.click(toggles[0]);
+    await waitFor(() => { expect(mockPut).toHaveBeenCalledWith('/role-features/bank/1/dashboard', { enabled: false }); });
   });
 
   it('deletes bank override when toggling an active override', async () => {
@@ -184,12 +201,35 @@ describe('RoleFeatures', () => {
     await waitFor(() => { expect(screen.getByText(/Sélectionnez une banque/)).toBeInTheDocument(); });
     const select = document.querySelector('select');
     if (select) fireEvent.change(select, { target: { value: '1' } });
-    await waitFor(() => { expect(screen.getByText('Default Rôle')).toBeInTheDocument(); });
-    const toggles = document.querySelectorAll('.feature-toggle');
-    if (toggles.length > 0) {
-      fireEvent.click(toggles[0]);
-    }
-    await waitFor(() => { expect(mockDelete).toHaveBeenCalled(); });
+    await waitFor(() => { expect(screen.getByText('Défaut admin banque')).toBeInTheDocument(); });
+    await waitFor(() => { expect(screen.getByText('Activé (forcé)')).toBeInTheDocument(); });
+    fireEvent.click(document.querySelectorAll('.override-toggle')[0]);
+    await waitFor(() => { expect(mockDelete).toHaveBeenCalledWith('/role-features/bank/1/dashboard'); });
+  });
+
+  it('shows the inherited value, the user override and the effective right', async () => {
+    mockGet.mockImplementation((url) => {
+      if (url === '/role-features/banks') return Promise.resolve({ data: { data: banksData } });
+      if (url === '/role-features/role-defaults') return Promise.resolve({ data: { data: { roles: defaultFeatures.roles } } });
+      if (url.startsWith('/role-features/users')) return Promise.resolve({ data: { data: [{ id: 5, username: 'op', role: 'bank', bank_id: 1, bank_name: 'BT' }] } });
+      if (url === '/role-features/bank/1') return Promise.resolve({ data: { data: { cron: true } } });
+      if (url === '/role-features/user/5') return Promise.resolve({ data: { data: { history: false } } });
+      return Promise.resolve({ data: { data: {} } });
+    });
+    useAuth.mockReturnValue({ user: { role: 'bank_admin', bank_id: 1 } });
+    render(<MemoryRouter><RoleFeaturesPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('Par Utilisateur'));
+    await screen.findByText('op (bank - BT)');
+    fireEvent.change(document.querySelectorAll('select')[0], { target: { value: '5' } });
+    await waitFor(() => { expect(screen.getByText('Désactivé (forcé)')).toBeInTheDocument(); });
+
+    const row = (label) => screen.getAllByText(label).map(el => el.closest('tr')).find(Boolean);
+    // Historique : hérité du rôle (désactivé dans ce jeu de test), forcé désactivé
+    expect(row('Historique').textContent).toContain('Désactivé (forcé)');
+    // Tableau de bord : hérité du rôle, sans surcharge
+    expect(row('Dashboard').textContent).toMatch(/Activé.*\(rôle\).*Aucune.*Activé/);
+    // Scan automatique : activé par la surcharge de la banque
+    expect(row('Scan automatique').textContent).toMatch(/Activé.*\(banque\).*Aucune.*Activé/);
   });
 
   it('handles fetch error gracefully', async () => {

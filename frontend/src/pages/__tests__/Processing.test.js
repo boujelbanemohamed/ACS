@@ -30,6 +30,9 @@ jest.mock('../../services/api', () => ({
     downloadTemplate: jest.fn(),
     getJobStatus: jest.fn(),
     getQueueStats: jest.fn(),
+    getErrors: jest.fn(),
+    resolveError: jest.fn(),
+    reprocess: jest.fn(),
   }
 }));
 
@@ -292,13 +295,13 @@ describe('Processing', () => {
     const firstNameInput = screen.getByPlaceholderText('MOHAMED');
     const lastNameInput = screen.getByPlaceholderText('BEN ALI');
     const panInput = screen.getByPlaceholderText('4741560171719668');
-    const expiryInput = screen.getByPlaceholderText('202512 ou 2512');
+    const expiryInput = screen.getByPlaceholderText('MM/AA (ex: 12/28)');
     const phoneInput = screen.getByPlaceholderText('21624080852');
 
     fireEvent.change(firstNameInput, { target: { value: 'MOHAMED' } });
     fireEvent.change(lastNameInput, { target: { value: 'BEN ALI' } });
     fireEvent.change(panInput, { target: { value: '4111111111111111' } });
-    fireEvent.change(expiryInput, { target: { value: '202512' } });
+    fireEvent.change(expiryInput, { target: { value: '1228' } });
     fireEvent.change(phoneInput, { target: { value: '21624080852' } });
 
     fireEvent.click(screen.getByText('Ajouter a la liste'));
@@ -321,7 +324,7 @@ describe('Processing', () => {
 
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
 
     fireEvent.click(screen.getByText('Ajouter a la liste'));
@@ -344,7 +347,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
 
@@ -422,7 +425,7 @@ describe('Processing', () => {
         {
           rowNumber: 1, language: 'fr', firstName: 'Mohamed',
           lastName: 'Ben Ali', pan: '4111111111111111',
-          expiry: '202512', phone: '21624080852',
+          expiry: '12/28', phone: '21624080852',
           behaviour: 'otp', action: 'update',
         },
       ], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
@@ -733,7 +736,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '12345' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('PAN doit contenir exactement 16 chiffres')).toBeInTheDocument());
@@ -760,10 +763,10 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '123' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '133' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
-    await waitFor(() => expect(screen.getByText('Format: YYMM ou YYYYMM (ex: 2512 ou 202512)')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Format: MM/AA (ex: 12/28)')).toBeInTheDocument());
   });
 
   it('manual form shows phone missing error', async () => {
@@ -774,7 +777,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Telephone obligatoire')).toBeInTheDocument());
   });
@@ -787,7 +790,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '123' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Numero de telephone invalide (8-15 chiffres)')).toBeInTheDocument());
@@ -801,14 +804,14 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'MOHAMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'BEN ALI' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'AHMED' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'SALAH' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Ce PAN existe deja dans la liste')).toBeInTheDocument());
@@ -822,7 +825,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'TEST' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'USER' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
@@ -833,7 +836,7 @@ describe('Processing', () => {
   it('handleValidateManualEntries success path', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.validateManualEntries.mockResolvedValue({
-      data: { data: { entries: [{ id: 'm1', status: 'valid', pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', language: 'fr', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }] } },
+      data: { data: { entries: [{ id: 'm1', status: 'valid', pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', language: 'fr', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }] } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -844,7 +847,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'TEST' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'USER' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
@@ -864,7 +867,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'TEST' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'USER' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
@@ -883,12 +886,12 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'TEST' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'USER' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
     processingAPI.validateManualEntries.mockResolvedValue({
-      data: { data: { entries: [{ id: 'm1', status: 'error', pan: '4111111111111111', language: 'fr', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }] } },
+      data: { data: { entries: [{ id: 'm1', status: 'error', pan: '4111111111111111', language: 'fr', firstName: 'TEST', lastName: 'USER', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }] } },
     });
     fireEvent.click(screen.getByText('Valider les donnees'));
     await waitFor(() => expect(screen.getByText(/Validation terminee/)).toBeInTheDocument());
@@ -906,7 +909,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'TEST' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'USER' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
@@ -926,7 +929,7 @@ describe('Processing', () => {
     fireEvent.change(screen.getByPlaceholderText('MOHAMED'), { target: { value: 'TEST' } });
     fireEvent.change(screen.getByPlaceholderText('BEN ALI'), { target: { value: 'USER' } });
     fireEvent.change(screen.getByPlaceholderText('4741560171719668'), { target: { value: '4111111111111111' } });
-    fireEvent.change(screen.getByPlaceholderText('202512 ou 2512'), { target: { value: '202512' } });
+    fireEvent.change(screen.getByPlaceholderText('MM/AA (ex: 12/28)'), { target: { value: '1228' } });
     fireEvent.change(screen.getByPlaceholderText('21624080852'), { target: { value: '21624080852' } });
     fireEvent.click(screen.getByText('Ajouter a la liste'));
     await waitFor(() => expect(screen.getByText('Enregistrements a traiter (1)')).toBeInTheDocument());
@@ -958,58 +961,13 @@ describe('Processing', () => {
     await waitFor(() => expect(screen.getByText(/existe deja/)).toBeInTheDocument());
   });
 
-  it('handleResolveError corrects error and moves to valid rows', async () => {
-    const { processingAPI } = require('../../services/api');
-    processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { jobId: 'url-corr', status: 'pending' } },
-    });
-    processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
-    });
-    render(<MemoryRouter><Processing /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Traitement URL'));
-    await waitFor(() => expect(screen.getByText('Traitement par URL')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
-    fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
-    fireEvent.change(screen.getByPlaceholderText('https://example.com/ACS'), { target: { value: 'https://bank.com/data' } });
-    fireEvent.click(screen.getByText('Lancer le traitement'));
-    await waitFor(() => expect(screen.getByText('1 erreur(s) a corriger')).toBeInTheDocument());
-    const panInputs = document.querySelectorAll('.error-row-editor input[type="text"]');
-    const panInput = panInputs[3];
-    fireEvent.change(panInput, { target: { value: '4222222222222222' } });
-    fireEvent.click(screen.getByText('Valider la correction'));
-    await waitFor(() => expect(screen.getByText(/corrigee avec succes/)).toBeInTheDocument());
-  });
-
-  it('handleIgnoreError removes error and shows warning notification', async () => {
-    const { processingAPI } = require('../../services/api');
-    processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { jobId: 'url-ign', status: 'pending' } },
-    });
-    processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
-    });
-    render(<MemoryRouter><Processing /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Traitement URL'));
-    await waitFor(() => expect(screen.getByText('Traitement par URL')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
-    fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
-    fireEvent.change(screen.getByPlaceholderText('https://example.com/ACS'), { target: { value: 'https://bank.com/data' } });
-    fireEvent.click(screen.getByText('Lancer le traitement'));
-    await waitFor(() => expect(screen.getByText('1 erreur(s) a corriger')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Ignorer cette ligne'));
-    await waitFor(() => expect(screen.getByText(/ignoree/)).toBeInTheDocument());
-  });
-
   it('handleRemoveValidRow removes row from valid list', async () => {
     const { processingAPI } = require('../../services/api');
     processingAPI.processUrl.mockResolvedValue({
       data: { success: true, data: { jobId: 'url-rem', status: 'pending' } },
     });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1032,7 +990,7 @@ describe('Processing', () => {
       data: { success: true, data: { jobId: 'url-fin1', status: 'pending' } },
     });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1055,7 +1013,7 @@ describe('Processing', () => {
       data: { success: true, data: { jobId: 'url-fin2', status: 'pending' } },
     });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1076,7 +1034,7 @@ describe('Processing', () => {
       data: { success: true, data: { jobId: 'url-fin3', status: 'pending' } },
     });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1099,7 +1057,7 @@ describe('Processing', () => {
       data: { success: true, data: { jobId: 'url-fin4', status: 'pending' } },
     });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     processingAPI.processManualEntries.mockRejectedValue({ response: { data: { message: 'Process failed' } } });
     render(<MemoryRouter><Processing /></MemoryRouter>);
@@ -1121,7 +1079,7 @@ describe('Processing', () => {
       data: { success: true, data: { jobId: 'url-dl', status: 'pending' } },
     });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
+      data: { success: true, data: { status: 'completed', result: { success: true, errors: [], validRecords: [{ rowNumber: 1, pan: '4111111111111111', firstName: 'T', lastName: 'U', expiry: '12/28', phone: '21624080852', behaviour: 'otp', action: 'update' }], stats: { totalRows: 1, validRows: 1, invalidRows: 0, duplicateRows: 0 } } } },
     });
     render(<MemoryRouter><Processing /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
@@ -1290,47 +1248,162 @@ describe('Processing', () => {
     expect(dateInput.value).toBe('2026-12-31');
   });
 
-  it('ErrorRowEditor shows PAN required alert when PAN cleared', async () => {
-    const { processingAPI } = require('../../services/api');
-    processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { jobId: 'url-pan1', status: 'pending' } },
-    });
-    processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Invalid PAN', value: '1111111111111111', rowData: { pan: '1111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 1, duplicateRows: 0 } } } },
-    });
+  it('manual entry formats the expiry as MM/YY, the format the server validates', async () => {
     render(<MemoryRouter><Processing /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Traitement URL'));
-    await waitFor(() => expect(screen.getByText('Traitement par URL')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
-    fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
-    fireEvent.change(screen.getByPlaceholderText('https://example.com/ACS'), { target: { value: 'https://bank.com/data' } });
-    fireEvent.click(screen.getByText('Lancer le traitement'));
-    await waitFor(() => expect(screen.getByText('1 erreur(s) a corriger')).toBeInTheDocument());
-    const panInput = document.querySelectorAll('.error-row-editor input[type="text"]')[3];
-    fireEvent.change(panInput, { target: { value: '' } });
-    fireEvent.click(screen.getByText('Valider la correction'));
-    await waitFor(() => expect(mockAlert).toHaveBeenCalledWith('Le PAN est obligatoire'));
+    fireEvent.click(screen.getByText('Saisie Manuelle'));
+    const expiry = await screen.findByPlaceholderText('MM/AA (ex: 12/28)');
+    fireEvent.change(expiry, { target: { value: '1228' } });
+    expect(expiry.value).toBe('12/28');
+    fireEvent.change(expiry, { target: { value: '12/2' } });
+    expect(expiry.value).toBe('12/2');
   });
 
-  it('ErrorRowEditor shows duplicate PAN alert when severity is warning', async () => {
+  describe('correction after an upload', () => {
+    const CSV = [
+      'language;firstName;lastName;pan;expiry;phone;behaviour;action',
+      'fr;Amine;Ben Salah;4741550000000001;12/28;21655123456;otp;update',
+      'fr;Sarra;Trabelsi;4111111111111111;13/28;216;otp;update',
+      'ar;Mehdi;Jaziri;5555555555554444;06/29;21622334455;otp;create',
+      'en;Ines;Gharbi;5555555555554444;06/29;21671234567;otp;update',
+      ''
+    ].join('\n');
+    const masked = (last4) => '************' + last4;
+    // Résultat réel du worker : PAN masqués, lignes valides non renvoyées
+    const uploadResult = {
+      success: false,
+      fileLogId: 7,
+      stats: { totalRows: 4, validRows: 2, invalidRows: 2, duplicateRows: 1 },
+      totalValidRows: 0,
+      message: 'Fichier traité avec des erreurs de validation',
+      errors: [
+        { rowNumber: 1, field: 'pan', value: masked('0001'), error: 'PAN invalide (échec de la validation Luhn)', severity: 'warning', rowData: { pan: masked('0001'), firstName: 'Amine' } },
+        { rowNumber: 2, field: 'expiry', value: '13/28', error: 'Mois invalide (doit être 01-12)', severity: 'error', rowData: { pan: masked('1111'), firstName: 'Sarra' } },
+        { rowNumber: 2, field: 'phone', value: '216', error: 'Format téléphone invalide', severity: 'error', rowData: { pan: masked('1111'), firstName: 'Sarra' } },
+        { rowNumber: 2, field: 'pan', value: masked('1111'), error: 'Clé de contrôle douteuse', severity: 'warning', rowData: { pan: masked('1111'), firstName: 'Sarra' } },
+        { rowNumber: 4, field: 'pan', value: masked('4444'), error: 'PAN en double detecte dans le fichier (meme PAN que ligne precedente)', severity: 'warning', code: 'DUPLICATE_PAN', rowData: { pan: masked('4444'), firstName: 'Ines' } },
+      ],
+    };
+
+    const uploadCsv = async () => {
+      const { processingAPI } = require('../../services/api');
+      processingAPI.uploadFile.mockResolvedValue({ data: { success: true, data: { jobId: 'up-1', status: 'pending' } } });
+      processingAPI.getJobStatus.mockResolvedValue({ data: { success: true, data: { status: 'completed', result: uploadResult } } });
+      render(<MemoryRouter><Processing /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
+      fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
+      const file = new File([CSV], 'BT_cartes.csv', { type: 'text/csv' });
+      fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [file] } });
+      fireEvent.click(screen.getByText('Uploader et traiter'));
+      await waitFor(() => expect(screen.getByText('Lignes avec Erreurs (2)')).toBeInTheDocument());
+      return processingAPI;
+    };
+    const editors = () => document.querySelectorAll('.error-row-editor');
+    const inputs = (editor) => editor.querySelectorAll('input[type="text"]');
+
+    it('keeps the valid rows of the local file and groups the errors by row', async () => {
+      await uploadCsv();
+      expect(screen.getByText('Lignes Valides (2)')).toBeInTheDocument();
+      expect(screen.getByText(/Avertissements \(1\)/)).toBeInTheDocument();
+      expect(screen.getByText('Lignes invalides').nextSibling.textContent).toBe('2');
+      expect(screen.getByText('Lignes valides').nextSibling.textContent).toBe('2');
+      expect(screen.getByText('Doublons (PAN)').nextSibling.textContent).toBe('1');
+      expect(editors()).toHaveLength(2);
+      expect(editors()[0].textContent).toContain('Mois invalide');
+      expect(editors()[0].textContent).toContain('Format téléphone invalide');
+      // L'avertissement d'une ligne à corriger reste dans sa carte, pas parmi les lignes acceptées
+      expect(editors()[0].textContent).toContain('Clé de contrôle douteuse');
+      expect(screen.getByText('3 erreur(s) a corriger')).toBeInTheDocument();
+      // Le PAN d'une ligne dont le PAN n'est pas en cause reste masqué et non modifiable
+      expect(inputs(editors()[0])[3].value).toBe(masked('1111'));
+      expect(inputs(editors()[0])[3].readOnly).toBe(true);
+      // Un avertissement de clé de Luhn n'est pas présenté comme un doublon
+      expect(screen.getAllByText('DOUBLON PAN')).toHaveLength(1);
+    });
+
+    it('sends every valid and corrected row with its full PAN', async () => {
+      const processingAPI = await uploadCsv();
+      const row2 = inputs(editors()[0]);
+      fireEvent.change(row2[4], { target: { value: '12/28' } });
+      fireEvent.change(row2[5], { target: { value: '21698765432' } });
+      fireEvent.click(screen.getAllByText('Valider la correction')[0]);
+      await waitFor(() => expect(screen.getByText(/Ligne 2 corrigee avec succes/)).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText('Ignorer cette ligne'));
+      await waitFor(() => expect(screen.getByText(/Ligne 4 ignoree/)).toBeInTheDocument());
+
+      processingAPI.processManualEntries.mockResolvedValue({ data: { success: true, data: { jobId: 'man-1' } } });
+      processingAPI.getJobStatus.mockResolvedValue({ data: { success: true, data: { status: 'completed', result: { success: true } } } });
+      fireEvent.click(screen.getByText('Traiter 3 ligne(s) et Generer XML'));
+      await waitFor(() => expect(processingAPI.processManualEntries).toHaveBeenCalled());
+      const { entries } = processingAPI.processManualEntries.mock.calls[0][0];
+      expect(entries.map(e => e.pan)).toEqual(['4741550000000001', '4111111111111111', '5555555555554444']);
+      expect(entries[1]).toMatchObject({ expiry: '12/28', phone: '21698765432' });
+    });
+
+    it('requires a new PAN to resolve a duplicate', async () => {
+      await uploadCsv();
+      const dup = editors()[1];
+      expect(inputs(dup)[3].value).toBe('5555555555554444');
+      fireEvent.click(dup.querySelector('.btn-success'));
+      expect(mockAlert).toHaveBeenCalledWith('Vous devez modifier le PAN pour resoudre le doublon');
+      fireEvent.change(inputs(dup)[3], { target: { value: '' } });
+      fireEvent.click(dup.querySelector('.btn-success'));
+      expect(mockAlert).toHaveBeenCalledWith('Saisissez le PAN complet');
+    });
+
+    it('asks to import the file again when it no longer matches the server result', async () => {
+      const { processingAPI } = require('../../services/api');
+      processingAPI.uploadFile.mockResolvedValue({ data: { success: true, data: { jobId: 'up-2', status: 'pending' } } });
+      processingAPI.getJobStatus.mockResolvedValue({ data: { success: true, data: { status: 'completed', result: uploadResult } } });
+      render(<MemoryRouter><Processing /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
+      fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
+      fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File(['autre contenu'], 'x.csv')] } });
+      fireEvent.click(screen.getByText('Uploader et traiter'));
+      await waitFor(() => expect(screen.getByText(/importez-le a nouveau/)).toBeInTheDocument());
+      expect(screen.queryByText('Valider la correction')).not.toBeInTheDocument();
+    });
+  });
+
+  it('URL source: saves the corrections on the server then reprocesses the file', async () => {
     const { processingAPI } = require('../../services/api');
-    processingAPI.processUrl.mockResolvedValue({
-      data: { success: true, data: { jobId: 'url-pan2', status: 'pending' } },
-    });
+    processingAPI.processUrl.mockResolvedValue({ data: { success: true, data: { jobId: 'url-srv', status: 'pending' } } });
     processingAPI.getJobStatus.mockResolvedValue({
-      data: { success: true, data: { status: 'completed', result: { success: true, errors: [{ rowNumber: 1, field: 'pan', error: 'Duplicate PAN found', value: '4111111111111111', severity: 'warning', rowData: { pan: '4111111111111111', firstName: 'TEST', lastName: 'USER', expiry: '202512', phone: '21624080852', behaviour: 'otp', action: 'update' } }], validRecords: [], stats: { totalRows: 1, validRows: 0, invalidRows: 0, duplicateRows: 1 } } } },
+      data: { success: true, data: { status: 'completed', result: {
+        success: false, fileLogId: 9,
+        stats: { totalRows: 5, validRows: 4, invalidRows: 1, duplicateRows: 0 },
+        errors: [{ rowNumber: 3, field: 'pan', value: '************1234', error: 'PAN doit contenir exactement 16 chiffres', severity: 'error', rowData: { pan: '************1234', firstName: 'Ali' } }],
+      } } },
     });
+    processingAPI.getErrors.mockResolvedValue({ data: { data: [{ id: 31, row_number: 3, field_name: 'pan', is_resolved: false }] } });
+    processingAPI.resolveError.mockResolvedValue({ data: { success: true } });
+
     render(<MemoryRouter><Processing /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('Traitement des Fichiers CSV')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Traitement URL'));
-    await waitFor(() => expect(screen.getByText('Traitement par URL')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText('Banque de Tunisie (BT)')).toBeInTheDocument());
     fireEvent.change(screen.getByDisplayValue('-- Choisir une banque --'), { target: { value: '1' } });
     fireEvent.change(screen.getByPlaceholderText('https://example.com/ACS'), { target: { value: 'https://bank.com/data' } });
     fireEvent.click(screen.getByText('Lancer le traitement'));
-    await waitFor(() => expect(screen.getByText('DOUBLON PAN')).toBeInTheDocument());
+    await waitFor(() => expect(processingAPI.getErrors).toHaveBeenCalledWith(9));
+
+    expect(screen.queryByText('Ignorer cette ligne')).not.toBeInTheDocument();
+    expect(screen.getByText('Lignes valides').nextSibling.textContent).toBe('4');
+    const fields = document.querySelectorAll('.error-row-editor input[type="text"]');
+    expect(fields[1].readOnly).toBe(true);
+    expect(fields[3].value).toBe('');
+    fireEvent.change(fields[3], { target: { value: '4111111111111111' } });
     fireEvent.click(screen.getByText('Valider la correction'));
-    await waitFor(() => expect(mockAlert).toHaveBeenCalledWith('Vous devez modifier le PAN pour resoudre le doublon'));
+    await waitFor(() => expect(processingAPI.resolveError).toHaveBeenCalledWith(31, '4111111111111111'));
+
+    processingAPI.reprocess.mockResolvedValue({ data: { success: true, data: { jobId: 'rep-1' } } });
+    processingAPI.getJobStatus.mockResolvedValue({
+      data: { success: true, data: { status: 'completed', result: {
+        success: true, fileLogId: 9, totalValidRows: 5, xmlFileName: 'ACS_CARDS_BT_20260928.xml',
+        stats: { totalRows: 5, validRows: 5, invalidRows: 0, duplicateRows: 0 }, errors: [],
+      } } },
+    });
+    fireEvent.click(await screen.findByText(/Relancer le traitement avec les corrections/));
+    await waitFor(() => expect(processingAPI.reprocess).toHaveBeenCalledWith(9));
+    await waitFor(() => expect(screen.getByText(/5 ligne\(s\) enregistree\(s\)/)).toBeInTheDocument());
   });
 });

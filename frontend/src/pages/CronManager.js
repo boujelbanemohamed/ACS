@@ -39,16 +39,21 @@ const CronManager = () => {
   const fetchData = async () => {
     try {
       const bankParam = !isSuperAdmin && user?.bank_id ? `&bankId=${user.bank_id}` : '';
-      const [statusRes, logsRes, settingsRes] = await Promise.all([
+      const [statusRes, logsRes] = await Promise.all([
         api.get('/scanner/status'),
-        api.get(`/scanner/logs?limit=10${bankParam}`),
-        api.get('/settings')
+        api.get(`/scanner/logs?limit=10${bankParam}`)
       ]);
       setStatus(statusRes.data.data);
       setLogs(logsRes.data.data);
-      if (settingsRes.data.data) {
-        setSchedule(settingsRes.data.data.cron_schedule || '*/5 * * * *');
-        setEnabled(settingsRes.data.data.cron_enabled !== 'false');
+      if (isSuperAdmin) {
+        // Les paramètres (planification) sont réservés au super administrateur
+        const settingsRes = await api.get('/settings');
+        if (settingsRes.data.data) {
+          setSchedule(settingsRes.data.data.cron_schedule || '*/5 * * * *');
+          setEnabled(settingsRes.data.data.cron_enabled !== 'false');
+        }
+      } else if (statusRes.data.data) {
+        setEnabled(statusRes.data.data.enabled !== false);
       }
     } catch (err) {
       console.error(err);
@@ -100,12 +105,21 @@ const CronManager = () => {
       <div className="cron-header">
         <h1><Clock size={28} /> Scan Automatique</h1>
         <div className="cron-actions">
-          <button className="btn btn-outline" onClick={() => setShowSettings(!showSettings)}>
-            <Settings size={18} /> Config
-          </button>
-          <button className={`btn ${enabled ? 'btn-success' : 'btn-danger'}`} onClick={toggleCron}>
-            <Power size={18} /> {enabled ? 'Activé' : 'Désactivé'}
-          </button>
+          {isSuperAdmin ? (
+            <>
+              <button className="btn btn-outline" onClick={() => setShowSettings(!showSettings)}>
+                <Settings size={18} /> Config
+              </button>
+              <button className={`btn ${enabled ? 'btn-success' : 'btn-danger'}`} onClick={toggleCron}>
+                <Power size={18} /> {enabled ? 'Activé' : 'Désactivé'}
+              </button>
+            </>
+          ) : (
+            // Consultation seule : l'état est affiché, la configuration est réservée au super administrateur
+            <span className={`btn ${enabled ? 'btn-success' : 'btn-danger'}`} aria-label="État du scan">
+              <Power size={18} /> {enabled ? 'Activé' : 'Désactivé'}
+            </span>
+          )}
           {isSuperAdmin && (
           <button className="btn btn-primary" onClick={triggerScan} disabled={scanning || status?.isScanning}>
             {scanning || status?.isScanning ? <><RefreshCw size={18} className="spin" /> Scan...</> : <><PlayCircle size={18} /> Scan</>}
@@ -114,7 +128,7 @@ const CronManager = () => {
         </div>
       </div>
 
-      {showSettings && (
+      {isSuperAdmin && showSettings && (
         <div className="cron-settings">
           <div className="settings-row">
             <label>Fréquence</label>

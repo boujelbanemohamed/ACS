@@ -182,7 +182,8 @@ router.get('/cron-config', authMiddleware, superAdminOnly, async (req, res) => {
       data: {
         schedule: cronService.dailyReportSchedule || '0 8 * * *',
         enabled: cronService.dailyReportEnabled !== false,
-        nextRun: getNextCronRun(cronService.dailyReportSchedule || '0 8 * * *')
+        nextRun: getNextCronRun(cronService.dailyReportSchedule || '0 8 * * *'),
+        timezone: REPORT_TIMEZONE
       }
     });
   } catch (error) {
@@ -213,7 +214,8 @@ router.put('/cron-config', authMiddleware, superAdminOnly, async (req, res) => {
       data: {
         schedule: cronService.dailyReportSchedule,
         enabled: cronService.dailyReportEnabled,
-        nextRun: getNextCronRun(cronService.dailyReportSchedule)
+        nextRun: getNextCronRun(cronService.dailyReportSchedule),
+        timezone: REPORT_TIMEZONE
       }
     });
   } catch (error) {
@@ -230,20 +232,36 @@ function isValidCron(cronExpression) {
 }
 
 // Fonction pour calculer la prochaine execution
-function getNextCronRun(cronExpression) {
+const REPORT_TIMEZONE = process.env.TZ || 'Africa/Tunis';
+
+// Écart entre l'heure affichée dans le fuseau et l'heure UTC, à un instant donné
+function timezoneOffsetMs(date, timeZone) {
+  const parts = {};
+  new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).formatToParts(date).forEach(p => { parts[p.type] = Number(p.value); });
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - date.getTime();
+}
+
+// Prochaine occurrence de "mm hh * * *" dans le fuseau utilisé par node-cron (et non celui du serveur)
+function getNextCronRun(cronExpression, now = new Date(), timeZone = REPORT_TIMEZONE) {
   try {
-    const parts = cronExpression.split(' ');
-    const [minute, hour] = parts;
-    const now = new Date();
-    const next = new Date();
-    next.setHours(parseInt(hour), parseInt(minute), 0, 0);
-    if (next <= now) {
-      next.setDate(next.getDate() + 1);
+    const [minute, hour] = String(cronExpression).split(' ').map(Number);
+    if (!Number.isInteger(minute) || !Number.isInteger(hour)) return null;
+    const wallNow = new Date(now.getTime() + timezoneOffsetMs(now, timeZone));
+    for (let days = 0; days <= 2; days++) {
+      const wall = Date.UTC(wallNow.getUTCFullYear(), wallNow.getUTCMonth(), wallNow.getUTCDate() + days, hour, minute);
+      const guess = wall - timezoneOffsetMs(new Date(wall), timeZone);
+      const next = wall - timezoneOffsetMs(new Date(guess), timeZone);
+      if (next > now.getTime()) return new Date(next).toISOString();
     }
-    return next.toISOString();
+    return null;
   } catch (e) {
     return null;
   }
 }
+
+router.getNextCronRun = getNextCronRun;
 
 module.exports = router;

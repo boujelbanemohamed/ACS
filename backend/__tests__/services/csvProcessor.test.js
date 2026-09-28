@@ -235,6 +235,20 @@ describe('CSVProcessor', () => {
       expect(result.stats.invalidRows).toBe(1);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].error).toContain('PAN en double');
+      expect(result.errors[0].code).toBe('DUPLICATE_PAN');
+    });
+
+    it('strips the BOM and spaces that Excel leaves in CSV headers', async () => {
+      const csvParser = require('csv-parser');
+      const promise = processor.parseAndValidateCSV('/fake/test.csv', 1);
+      setupCSVStream([makeValidRow()], [
+        'language', 'firstName', 'lastName', 'pan', 'expiry', 'phone', 'behaviour', 'action'
+      ]);
+      await promise;
+
+      const { mapHeaders } = csvParser.mock.calls[csvParser.mock.calls.length - 1][0];
+      expect(mapHeaders({ header: '\uFEFFlanguage' })).toBe('language');
+      expect(mapHeaders({ header: ' pan ' })).toBe('pan');
     });
 
     it('reports header validation errors', async () => {

@@ -10,7 +10,7 @@ jest.mock('../../services/api', () => ({
 }));
 
 const TestComponent = () => {
-  const { user, loading, isAuthenticated, mustChangePassword, login, logout, clearMustChangePassword, error } = useAuth();
+  const { loading, isAuthenticated, mustChangePassword, login, logout, clearMustChangePassword, error } = useAuth();
   if (loading) return <div>Loading...</div>;
   return (
     <div>

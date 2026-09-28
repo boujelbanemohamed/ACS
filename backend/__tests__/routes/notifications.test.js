@@ -448,4 +448,22 @@ describe('Notifications Routes', () => {
       expect(res.status).toBe(500);
     });
   });
+
+  describe('getNextCronRun', () => {
+    const { getNextCronRun } = notificationsRoutes;
+
+    it('computes the next run in the report timezone, not the server one', () => {
+      // 08:12 UTC = 09:12 à Tunis : prochain envoi demain 08:00 Tunis = 07:00 UTC
+      expect(getNextCronRun('0 8 * * *', new Date('2026-09-28T08:12:00Z'), 'Africa/Tunis')).toBe('2026-09-29T07:00:00.000Z');
+      expect(getNextCronRun('0 8 * * *', new Date('2026-09-28T06:00:00Z'), 'Africa/Tunis')).toBe('2026-09-28T07:00:00.000Z');
+    });
+
+    it('handles daylight saving changes', () => {
+      expect(getNextCronRun('0 8 * * *', new Date('2026-03-28T12:00:00Z'), 'Europe/Paris')).toBe('2026-03-29T06:00:00.000Z');
+    });
+
+    it('returns null for an unsupported expression', () => {
+      expect(getNextCronRun('*/5 * * * *', new Date(), 'Africa/Tunis')).toBeNull();
+    });
+  });
 });

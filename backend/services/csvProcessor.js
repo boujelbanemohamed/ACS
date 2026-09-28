@@ -285,7 +285,8 @@ class CSVProcessor {
       const pendingChecks = [];
 
       fs.createReadStream(filePath)
-        .pipe(csv({ separator: ';' }))
+        // Un CSV enregistré par Excel commence souvent par un BOM qui fausserait le premier en-tête
+        .pipe(csv({ separator: ';', mapHeaders: ({ header }) => header.replace(/^\uFEFF/, '').trim() }))
         .on('headers', (headers) => {
           const headerValidation = this.validator.validateHeader(headers);
           if (!headerValidation.isValid) {
@@ -347,6 +348,7 @@ class CSVProcessor {
                 value: pan,
                 error: `PAN en double detecte dans le fichier (meme PAN que ligne precedente)`,
                 severity: 'warning',
+                code: 'DUPLICATE_PAN',
                 rowData: { ...normalizedRow }
               });
             } else {

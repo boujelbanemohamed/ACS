@@ -38,13 +38,6 @@ beforeEach(() => {
 });
 
 describe('Banks', () => {
-  const renderBanks = async (user) => {
-    useAuth.mockReturnValue({ user });
-    render(<MemoryRouter><Banks /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('Chargement...')).toBeInTheDocument());
-    await waitFor(() => expect(screen.queryByText('Chargement...')).not.toBeInTheDocument());
-  };
-
   it('renders bank cards for super_admin', async () => {
     useAuth.mockReturnValue({ user: { role: 'super_admin', bank_id: null } });
     render(<MemoryRouter><Banks /></MemoryRouter>);

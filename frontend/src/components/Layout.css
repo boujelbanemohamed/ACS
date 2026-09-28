@@ -77,6 +77,8 @@
 
 .main-content {
   flex: 1;
+  /* Sans min-width, un tableau large élargit toute la page au lieu de défiler dans son conteneur */
+  min-width: 0;
   margin-left: 260px;
   background: #f5f7fa;
   min-height: 100vh;

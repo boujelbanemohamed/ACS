@@ -223,6 +223,12 @@ const Records = () => {
     }
   };
 
+  // Compteur de l'onglet « Fichiers XML » affiché dès l'ouverture de la page
+  useEffect(() => {
+    fetchXmlStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fetchXmlStats = async () => {
     try {
       let url = '/xml-logs/stats/summary';

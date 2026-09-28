@@ -86,10 +86,11 @@ function presentValidationError(row) {
 // Download CSV template
 router.get('/template', authMiddleware, (req, res) => {
   const headers = ['language', 'firstName', 'lastName', 'pan', 'expiry', 'phone', 'behaviour', 'action'];
-  const sampleRow = ['fr', 'John', 'Doe', '1234567890123456', '12/28', '+21612345678', 'otp', 'update'];
+  // Lignes d'exemple conformes aux règles de validation (PAN Luhn de test, téléphone 216XXXXXXXX)
+  const sampleRow = ['fr', 'Mohamed', 'Ben Ali', '4111111111111111', '12/28', '21612345678', 'otp', 'update'];
   let csv = headers.join(';') + '\n';
   csv += sampleRow.join(';') + '\n';
-  csv += ['fr', 'Jane', 'Smith', '6543210987654321', '06/29', '+21698765432', 'otp', 'update'].join(';') + '\n';
+  csv += ['ar', 'Ahmed', 'Trabelsi', '5555555555554444', '06/29', '21698765432', 'otp', 'create'].join(';') + '\n';
 
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename=template_import.csv');

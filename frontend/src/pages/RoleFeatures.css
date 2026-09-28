@@ -325,3 +325,25 @@
   cursor: help;
   flex-shrink: 0;
 }
+
+/* Surcharges à trois états */
+.override-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.override-toggle.inherited { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; border-style: dashed; }
+.override-toggle.enabled { background: #d4edda; color: #155724; }
+.override-toggle.disabled { background: #f8d7da; color: #721c24; }
+.override-toggle.saving { opacity: 0.6; cursor: wait; }
+.state-source { color: #6b7280; font-size: 12px; }
+.overridden-default { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.overridden-default > .default-indicator:first-child { text-decoration: line-through; opacity: 0.6; }

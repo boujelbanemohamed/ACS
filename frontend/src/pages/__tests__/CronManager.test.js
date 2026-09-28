@@ -149,4 +149,21 @@ describe('CronManager', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Activé' }));
     await waitFor(() => { expect(mockPut).toHaveBeenCalledWith('/settings/cron_enabled', { value: 'false' }); });
   });
+
+  it('bank profile: shows status and logs without calling the admin-only settings', async () => {
+    mockUser.role = 'bank';
+    mockUser.bank_id = 1;
+    try {
+      render(<MemoryRouter><CronManager /></MemoryRouter>);
+      await waitFor(() => { expect(screen.getByText('Scan Automatique')).toBeInTheDocument(); });
+      expect(mockGet).toHaveBeenCalledWith('/scanner/logs?limit=10&bankId=1');
+      expect(mockGet).not.toHaveBeenCalledWith('/settings');
+      expect(screen.queryByText('Config')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Activé' })).not.toBeInTheDocument();
+      expect(screen.getByLabelText('État du scan')).toBeInTheDocument();
+    } finally {
+      mockUser.role = 'super_admin';
+      mockUser.bank_id = null;
+    }
+  });
 });

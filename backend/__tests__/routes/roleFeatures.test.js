@@ -85,6 +85,32 @@ describe('Role Features Routes', () => {
     });
   });
 
+  describe('GET /api/role-features/role-defaults', () => {
+    it('lets a bank_admin read the role defaults (without bank or user overrides)', async () => {
+      roleFeaturesService.getAll.mockResolvedValue({
+        roles: { bank_admin: { users: true }, bank: { users: false }, super_admin: { x: true } },
+        banks: [{ bank_id: 9, feature: 'cron' }],
+        users: [{ user_id: 4, feature: 'history' }]
+      });
+
+      const res = await request(createTestApp())
+        .get('/api/role-features/role-defaults')
+        .set('x-test-role', 'bank_admin')
+        .set('x-test-bank-id', '1');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ roles: { bank_admin: { users: true }, bank: { users: false } } });
+    });
+
+    it('is refused to a bank user', async () => {
+      const res = await request(createTestApp())
+        .get('/api/role-features/role-defaults')
+        .set('x-test-role', 'bank')
+        .set('x-test-bank-id', '1');
+      expect(res.status).toBe(403);
+    });
+  });
+
   describe('PUT /api/role-features/role/:role/:feature', () => {
     it('updates role feature', async () => {
       roleFeaturesService.setRoleFeature.mockResolvedValue();

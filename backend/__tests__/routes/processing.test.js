@@ -121,6 +121,23 @@ describe('Processing Routes', () => {
   });
 
   describe('GET /api/processing/template', () => {
+    it('returns a template whose sample rows pass the real CSV validation', async () => {
+      const CSVValidator = jest.requireActual('../../utils/csvValidator');
+      const validator = new CSVValidator();
+      const res = await request(createTestApp())
+        .get('/api/processing/template')
+        .set('Authorization', 'Bearer test-token');
+
+      const [header, ...lines] = res.text.trim().split('\n');
+      const headers = header.split(';');
+      expect(validator.validateHeader(headers).errors).toEqual([]);
+      for (const line of lines) {
+        const values = line.split(';');
+        const row = Object.fromEntries(headers.map((h, i) => [h, values[i]]));
+        expect(validator.validateRow(row, 1).errors).toEqual([]);
+      }
+    });
+
     it('returns CSV template with correct headers', async () => {
       const res = await request(createTestApp())
         .get('/api/processing/template')

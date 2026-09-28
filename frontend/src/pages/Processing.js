@@ -1,8 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api, { banksAPI, processingAPI } from '../services/api';
 import { Upload, Link as LinkIcon, PlayCircle, Download, RefreshCw, AlertTriangle, CheckCircle, X, Check, FileText, Send, ArrowRight, PenLine, Plus, Trash2, Globe } from 'lucide-react';
+import { CSV_FIELDS, parseCsvRows, isRowEmpty, maskPan, isMaskedPan, isDuplicateError, isBlockingError } from '../utils/csvRows';
 import './Processing.css';
+
+// Adresse de l'API publique, servie par le même point d'entrée que l'API de l'interface
+const PUBLIC_API_BASE = (() => {
+  const base = process.env.REACT_APP_API_URL || '/api';
+  const absolute = /^https?:\/\//.test(base) ? base : `${window.location.origin}${base}`;
+  return `${absolute.replace(/\/+$/, '')}/v1`;
+})();
 
 const Processing = () => {
   const { user } = useAuth();
@@ -13,6 +21,8 @@ const Processing = () => {
   const handleReset = () => {
     setValidRows([]);
     setErrors([]);
+    setWarnings([]);
+    setCorrectionMode(null);
     setStats(null);
     setResult(null);
     setManualEntries([]);
@@ -90,6 +100,13 @@ const Processing = () => {
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState([]);
   const [validRows, setValidRows] = useState([]);
+  // Avertissements non bloquants (clé de Luhn) : la ligne est acceptée telle quelle
+  const [warnings, setWarnings] = useState([]);
+  // 'local' : correction dans le navigateur à partir du fichier importé
+  // 'server' : correction enregistrée côté serveur puis retraitement de la source (URL)
+  // 'reimport' : fichier illisible localement, il faut le corriger et l'importer à nouveau
+  const [correctionMode, setCorrectionMode] = useState(null);
+  const [serverErrors, setServerErrors] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [notification, setNotification] = useState(null);
   const [stats, setStats] = useState({
@@ -138,14 +155,26 @@ const Processing = () => {
 
   useEffect(() => {
     if (result) {
+      const serverStats = result.data?.stats || {};
       setStats({
-        totalRows: result.data?.stats?.totalRows || 0,
-        validRows: validRows.length,
-        invalidRows: errors.length,
-        duplicateRows: result.data?.stats?.duplicateRows || 0
+        totalRows: serverStats.totalRows || 0,
+        // Les lignes valides d'une source distante restent côté serveur
+        validRows: validRows.length > 0 || correctionMode === 'local' ? validRows.length : (serverStats.validRows || 0),
+        invalidRows: new Set(errors.map(e => e.rowNumber)).size,
+        duplicateRows: errors.filter(isDuplicateError).length
       });
     }
-  }, [errors, validRows, result]);
+  }, [errors, validRows, result, correctionMode]);
+
+  // Une ligne peut porter plusieurs erreurs : elle est corrigée en une seule fois
+  const errorGroups = useMemo(() => {
+    const groups = new Map();
+    errors.forEach(error => {
+      if (!groups.has(error.rowNumber)) groups.set(error.rowNumber, []);
+      groups.get(error.rowNumber).push(error);
+    });
+    return [...groups.values()];
+  }, [errors]);
 
   const fetchApiKeys = async () => {
     try {
@@ -254,49 +283,89 @@ const Processing = () => {
     throw new Error('Le traitement a depasse le temps maximum d\'attente');
   };
 
-  const processResponseData = (responseData) => {
-    const errorsData = responseData.data?.errors || [];
-    const validData = responseData.data?.validRecords || [];
-    
+  const toRowData = (row = {}) => CSV_FIELDS.reduce((acc, field) => ({ ...acc, [field]: row[field] || '' }), {});
+
+  // Le navigateur relit le fichier importé : le serveur ne renvoie pas les PAN en clair
+  const readLocalRows = (file) => new Promise((resolve) => {
+    if (!file || typeof FileReader === 'undefined') return resolve(null);
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(parseCsvRows(reader.result));
+      reader.onerror = () => resolve(null);
+      reader.readAsText(file);
+    } catch (err) {
+      resolve(null);
+    }
+  });
+
+  const processResponseData = async (responseData, localRows = null) => {
+    const data = responseData.data || {};
+    const errorsData = data.errors || [];
+
+    // Les lignes locales ne sont utilisées que si elles correspondent exactement au fichier traité
+    const localMatches = !!localRows
+      && (!data.stats?.totalRows || localRows.size === data.stats.totalRows)
+      && errorsData.every(err => {
+        const local = localRows.get(err.rowNumber);
+        return !err.rowData?.pan || (local && maskPan(local.pan) === maskPan(err.rowData.pan));
+      });
+
     const processedErrors = errorsData.map((err, index) => {
-      const rowData = err.rowData || {};
+      const local = localMatches ? localRows.get(err.rowNumber) : null;
+      const rowData = toRowData(local || err.rowData);
+      const fieldName = err.field || 'unknown';
       return {
         id: `error-${index}`,
         errorIndex: index,
         rowNumber: err.rowNumber || index + 1,
-        fieldName: err.field || 'unknown',
+        fieldName,
         errorMessage: err.error || 'Erreur de validation',
-        originalValue: err.value || '',
+        originalValue: fieldName === 'pan' ? rowData.pan : (err.value || ''),
         severity: err.severity || 'error',
-        rowData: {
-          language: rowData.language || '',
-          firstName: rowData.firstName || '',
-          lastName: rowData.lastName || '',
-          pan: rowData.pan || '',
-          expiry: rowData.expiry || '',
-          phone: rowData.phone || '',
-          behaviour: rowData.behaviour || '',
-          action: rowData.action || ''
-        }
+        code: err.code,
+        rowData
       };
     });
-    
-    const processedValid = validData.map((row, index) => ({
+
+    const blocking = processedErrors.filter(isBlockingError);
+    let processedValid = (data.validRecords || []).map((row, index) => ({
       id: `valid-${index}`,
       rowNumber: row.rowNumber || index + 1,
-      language: row.language || '',
-      firstName: row.firstName || '',
-      lastName: row.lastName || '',
-      pan: row.pan || '',
-      expiry: row.expiry || '',
-      phone: row.phone || '',
-      behaviour: row.behaviour || '',
-      action: row.action || '',
+      ...toRowData(row),
       isOriginallyValid: true
     }));
-    
-    setErrors(processedErrors);
+
+    let mode = null;
+    if (blocking.length > 0) {
+      if (processedValid.length > 0 || localMatches) mode = 'local';
+      else if (data.fileLogId && activeTab === 'url') mode = 'server';
+      else mode = 'reimport';
+    }
+
+    // Fichier rejeté : rien n'a été enregistré, les lignes valides sont reprises du fichier local
+    if (mode === 'local' && processedValid.length === 0) {
+      const blockingRows = new Set(blocking.map(e => e.rowNumber));
+      processedValid = [...localRows.values()]
+        .filter(row => !isRowEmpty(row) && !blockingRows.has(row.rowNumber))
+        .map(row => ({ id: `valid-${row.rowNumber}`, ...toRowData(row), rowNumber: row.rowNumber, isOriginallyValid: true }));
+    }
+
+    // Un avertissement sur une ligne à corriger est affiché avec ses erreurs
+    const blockedRows = new Set(blocking.map(e => e.rowNumber));
+    setErrors(processedErrors.filter(e => isBlockingError(e) || blockedRows.has(e.rowNumber)));
+    setWarnings(processedErrors.filter(e => !isBlockingError(e) && !blockedRows.has(e.rowNumber)));
     setValidRows(processedValid);
+    setCorrectionMode(mode);
+    setServerErrors([]);
+
+    if (mode === 'server') {
+      try {
+        const res = await processingAPI.getErrors(data.fileLogId);
+        setServerErrors(res.data?.data || []);
+      } catch (err) {
+        setCorrectionMode('reimport');
+      }
+    }
   };
 
   const handleProcessUrl = async () => {
@@ -308,6 +377,7 @@ const Processing = () => {
     setProcessing(true);
     setResult(null);
     setErrors([]);
+    setWarnings([]);
     setValidRows([]);
 
     try {
@@ -319,10 +389,29 @@ const Processing = () => {
       const result = await pollJobStatus(response.data.data.jobId);
       response.data.data = result;
       setResult(response.data);
-      processResponseData(response.data);
+      await processResponseData(response.data);
       showNotification(result.message || 'Traitement termine');
     } catch (error) {
       alert(error.response?.data?.message || error.message || 'Erreur lors du traitement');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Retraite la source distante avec les corrections enregistrées côté serveur
+  const handleReprocess = async () => {
+    const fileLogId = result?.data?.fileLogId;
+    if (!fileLogId) return;
+    setProcessing(true);
+    try {
+      const response = await processingAPI.reprocess(fileLogId);
+      const jobResult = await pollJobStatus(response.data.data.jobId);
+      const next = { ...response.data, data: jobResult };
+      setResult(next);
+      await processResponseData(next);
+      showNotification(jobResult.message || 'Retraitement termine');
+    } catch (error) {
+      alert(error.response?.data?.message || error.message || 'Erreur lors du retraitement');
     } finally {
       setProcessing(false);
     }
@@ -343,14 +432,16 @@ const Processing = () => {
     setProcessing(true);
     setResult(null);
     setErrors([]);
+    setWarnings([]);
     setValidRows([]);
 
     try {
+      const localRows = await readLocalRows(selectedFile);
       const response = await processingAPI.uploadFile(formData);
       const result = await pollJobStatus(response.data.data.jobId);
       response.data.data = result;
       setResult(response.data);
-      processResponseData(response.data);
+      await processResponseData(response.data, localRows);
 
       setSelectedFile(null);
       e.target.reset();
@@ -379,11 +470,11 @@ const Processing = () => {
       errors.pan = 'PAN doit contenir exactement 16 chiffres';
     }
     
-    // Validation Expiry (YYYYMM ou YYMM)
+    // Validation Expiry : même format MM/AA que les fichiers CSV et le serveur
     if (!manualForm.expiry.trim()) {
       errors.expiry = 'Expiration obligatoire';
-    } else if (!/^(\d{4}|\d{6})$/.test(manualForm.expiry)) {
-      errors.expiry = 'Format: YYMM ou YYYYMM (ex: 2512 ou 202512)';
+    } else if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(manualForm.expiry)) {
+      errors.expiry = 'Format: MM/AA (ex: 12/28)';
     }
     
     // Validation Phone
@@ -517,43 +608,54 @@ const Processing = () => {
 
   // ==================== RESOLUTION ERREURS ====================
 
-  const handleResolveError = (errorIndex, correctedRowData) => {
-    const errorToResolve = errors[errorIndex];
-    
+  const handleResolveError = async (rowNumber, correctedRowData) => {
+    const rowErrors = errors.filter(e => e.rowNumber === rowNumber);
+    if (rowErrors.length === 0) return;
+
+    if (correctionMode === 'server') {
+      // Chaque champ en erreur est corrigé côté serveur ; le PAN y est stocké chiffré
+      const fields = new Set(rowErrors.filter(isBlockingError).map(e => e.fieldName));
+      const targets = serverErrors.filter(se => se.row_number === rowNumber && !se.is_resolved && fields.has(se.field_name));
+      try {
+        for (const target of targets) {
+          await processingAPI.resolveError(target.id, correctedRowData[target.field_name] ?? '');
+        }
+      } catch (error) {
+        showNotification(error.response?.data?.message || 'Erreur lors de l\'enregistrement de la correction', 'error');
+        return;
+      }
+      setErrors(prev => prev.filter(e => e.rowNumber !== rowNumber));
+      showNotification(`Ligne ${rowNumber} corrigee. Relancez le traitement pour l'appliquer.`);
+      return;
+    }
+
+    const first = rowErrors.find(isBlockingError) || rowErrors[0];
     const correctedRow = {
-      id: `corrected-${Date.now()}-${errorIndex}`,
-      rowNumber: errorToResolve.rowNumber,
-      originalData: { ...errorToResolve.rowData },
-      language: correctedRowData.language,
-      firstName: correctedRowData.firstName,
-      lastName: correctedRowData.lastName,
-      pan: correctedRowData.pan,
-      expiry: correctedRowData.expiry,
-      phone: correctedRowData.phone,
-      behaviour: correctedRowData.behaviour,
-      action: correctedRowData.action,
+      id: `corrected-${Date.now()}-${rowNumber}`,
+      rowNumber,
+      originalData: { ...first.rowData },
+      ...toRowData(correctedRowData),
       correctedAt: new Date().toISOString(),
-      correctedField: errorToResolve.fieldName,
-      originalValue: errorToResolve.originalValue,
+      correctedField: first.fieldName,
+      correctedFields: [...new Set(rowErrors.filter(isBlockingError).map(e => e.fieldName))],
+      originalValue: first.originalValue,
       isCorrected: true
     };
 
     const panExists = validRows.some(row => row.pan === correctedRowData.pan);
     if (panExists) {
-      showNotification(`Le PAN ${correctedRowData.pan} existe deja dans les lignes valides`, 'error');
+      showNotification(`Le PAN ${maskPan(correctedRowData.pan)} existe deja dans les lignes valides`, 'error');
       return;
     }
 
-    const newErrors = errors.filter((e, idx) => idx !== errorIndex);
-    setErrors(newErrors);
-    setValidRows(prev => [...prev, correctedRow]);
+    setErrors(prev => prev.filter(e => e.rowNumber !== rowNumber));
+    setValidRows(prev => [...prev, correctedRow].sort((a, b) => a.rowNumber - b.rowNumber));
     showNotification(`Ligne ${correctedRow.rowNumber} corrigee avec succes !`);
   };
 
-  const handleIgnoreError = (errorIndex) => {
-    const ignoredError = errors[errorIndex];
-    setErrors(errors.filter((e, idx) => idx !== errorIndex));
-    showNotification(`Ligne ${ignoredError.rowNumber} ignoree`, 'warning');
+  const handleIgnoreError = (rowNumber) => {
+    setErrors(prev => prev.filter(e => e.rowNumber !== rowNumber));
+    showNotification(`Ligne ${rowNumber} ignoree`, 'warning');
   };
 
   const handleRemoveValidRow = (rowIndex) => {
@@ -589,6 +691,8 @@ const handleFinalProcess = async () => {
         showNotification('Traitement reussi ! ' + validRows.length + ' lignes traitees. XML genere.');
         setValidRows([]);
         setErrors([]);
+        setWarnings([]);
+        setCorrectionMode(null);
         setStats(null);
       } else {
         alert('Erreur: ' + (result.message || 'Erreur inconnue'));
@@ -766,21 +870,21 @@ const handleFinalProcess = async () => {
                     <tr><th>Colonne</th><th>Description</th><th>Obligatoire</th><th>Exemple</th></tr>
                   </thead>
                   <tbody>
-                    <tr><td>language</td><td>Code langue (fr, en, ar)</td><td>Non</td><td>fr</td></tr>
-                    <tr><td>first_name</td><td>Prenom du porteur</td><td>Non</td><td>Mohamed</td></tr>
-                    <tr><td>last_name</td><td>Nom du porteur</td><td>Non</td><td>Ben Ali</td></tr>
-                    <tr><td>pan</td><td>Numero de carte (13-19 chiffres)</td><td><strong>Oui</strong></td><td>4111111111111111</td></tr>
-                    <tr><td>expiry</td><td>Date d'expiration (MM/YY)</td><td><strong>Oui</strong></td><td>12/25</td></tr>
-                    <tr><td>phone</td><td>Telephone avec indicatif</td><td><strong>Oui</strong></td><td>+21612345678</td></tr>
-                    <tr><td>behaviour</td><td>Comportement OTP</td><td>Non</td><td>otp</td></tr>
-                    <tr><td>action</td><td>Action (update, add, delete)</td><td>Non</td><td>update</td></tr>
+                    <tr><td>language</td><td>Code langue : fr, en ou ar</td><td><strong>Oui</strong></td><td>fr</td></tr>
+                    <tr><td>firstName</td><td>Prenom du porteur (2 a 255 caracteres)</td><td><strong>Oui</strong></td><td>Mohamed</td></tr>
+                    <tr><td>lastName</td><td>Nom du porteur (2 a 255 caracteres)</td><td><strong>Oui</strong></td><td>Ben Ali</td></tr>
+                    <tr><td>pan</td><td>Numero de carte : 16 chiffres, cle de Luhn verifiee</td><td><strong>Oui</strong></td><td>4111111111111111</td></tr>
+                    <tr><td>expiry</td><td>Date d'expiration MM/YY (carte non expiree)</td><td><strong>Oui</strong></td><td>12/28</td></tr>
+                    <tr><td>phone</td><td>Telephone au format 216XXXXXXXX (sans +)</td><td><strong>Oui</strong></td><td>21612345678</td></tr>
+                    <tr><td>behaviour</td><td>Mode d'authentification : otp, sms ou email</td><td><strong>Oui</strong></td><td>otp</td></tr>
+                    <tr><td>action</td><td>Action : update, create ou delete</td><td><strong>Oui</strong></td><td>update</td></tr>
                   </tbody>
                 </table>
                 <div className="example-csv">
                   <strong>Exemple de fichier :</strong>
-                  <pre>{`language;first_name;last_name;pan;expiry;phone;behaviour;action
-fr;Mohamed;Ben Ali;4111111111111111;12/25;+21612345678;otp;update
-fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
+                  <pre>{`language;firstName;lastName;pan;expiry;phone;behaviour;action
+fr;Mohamed;Ben Ali;4111111111111111;12/28;21612345678;otp;update
+fr;Ahmed;Trabelsi;5555555555554444;06/29;21698765432;otp;create`}</pre>
                 </div>
               </div>
             </div>
@@ -897,12 +1001,16 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
                   <input
                     type="text"
                     value={manualForm.expiry}
-                    onChange={(e) => setManualForm({...manualForm, expiry: e.target.value.replace(/\D/g, '').slice(0, 6)})}
-                    placeholder="202512 ou 2512"
-                    maxLength="6"
+                    onChange={(e) => {
+                      // Saisie guidée : la barre est ajoutée après le mois
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+                      setManualForm({ ...manualForm, expiry: digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits });
+                    }}
+                    placeholder="MM/AA (ex: 12/28)"
+                    maxLength="5"
                   />
                   {manualFormErrors.expiry && <span className="error-text">{manualFormErrors.expiry}</span>}
-                  <small>Format: YYYYMM ou YYMM</small>
+                  <small>Format: MM/AA</small>
                 </div>
 
                 <div className={`form-group ${manualFormErrors.phone ? 'has-error' : ''}`}>
@@ -1248,7 +1356,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
         <div className="api-internal-section">
           <div className="section-card">
             <h3><FileText size={20} /> Documentation API</h3>
-            <p>Votre API est accessible à l'adresse : <code>http://localhost:8000/api/v1</code></p>
+            <p>Votre API est accessible à l'adresse : <code>{PUBLIC_API_BASE}</code></p>
             
             <div className="api-docs">
               <h4>Endpoints disponibles :</h4>
@@ -1281,7 +1389,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
               </div>
 
               <h4>Exemple d'appel :</h4>
-              <pre className="code-block">{`curl -X POST http://localhost:8000/api/v1/cards/register \
+              <pre className="code-block">{`curl -X POST ${PUBLIC_API_BASE}/cards/register \
   -H "X-API-Key: votre_cle_api" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1290,7 +1398,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
       {
         "pan": "4111111111111111",
         "phone": "+21612345678",
-        "expiry": "12/25",
+        "expiry": "12/28",
         "firstName": "Mohamed",
         "lastName": "Ben Ali"
       }
@@ -1420,7 +1528,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
         <div className="result-section">
           <div className={`result-header ${errors.length === 0 ? 'success' : 'error'}`}>
             {errors.length === 0 ? <CheckCircle size={32} /> : <AlertTriangle size={32} />}
-            <h2>{errors.length === 0 ? 'Toutes les lignes sont valides !' : `${errors.length} erreur(s) a corriger`}</h2>
+            <h2>{errors.length === 0 ? 'Toutes les lignes sont valides !' : `${errors.filter(isBlockingError).length} erreur(s) a corriger`}</h2>
           </div>
 
 {stats && (
@@ -1444,25 +1552,67 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
             </div>
           )}
 
+          {result.data?.success && result.data?.totalValidRows > 0 && (
+            <div className="result-notice success">
+              <CheckCircle size={18} />
+              <span>
+                {result.data.totalValidRows} ligne(s) enregistree(s)
+                {result.data.xmlFileName ? <> — fichier XML <code>{result.data.xmlFileName}</code> genere</> : null}
+              </span>
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div className="result-notice warning">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Avertissements ({warnings.length}) — lignes acceptees</strong>
+                <ul>
+                  {warnings.map(w => (
+                    <li key={w.id}>Ligne {w.rowNumber} : {w.errorMessage}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {correctionMode === 'server' && (
+            <div className="result-notice info">
+              <AlertTriangle size={18} />
+              <span>Les donnees de la source restent sur le serveur. Saisissez la valeur corrigee de chaque champ en erreur (le PAN complet si le PAN est en cause), puis relancez le traitement : les lignes valides et corrigees seront alors enregistrees.</span>
+            </div>
+          )}
+          {correctionMode === 'reimport' && (
+            <div className="result-notice info">
+              <AlertTriangle size={18} />
+              <span>Le fichier ne peut pas etre corrige dans cette page. Corrigez-le puis importez-le a nouveau : aucune ligne n'a ete enregistree.</span>
+            </div>
+          )}
+
           {/* Errors Block */}
           <div className="data-block errors-block">
             <div className="block-header error">
               <AlertTriangle size={24} />
-              <h3>Lignes avec Erreurs ({errors.length})</h3>
+              <h3>Lignes avec Erreurs ({errorGroups.length})</h3>
             </div>
             
             {errors.length === 0 ? (
               <div className="empty-block success">
                 <CheckCircle size={48} />
-                <p>Toutes les erreurs ont ete corrigees !</p>
+                <p>{correctionMode === 'server' ? 'Toutes les erreurs ont ete corrigees : relancez le traitement.' : 'Toutes les erreurs ont ete corrigees !'}</p>
+                {correctionMode === 'server' && (
+                  <button className="btn btn-success" onClick={handleReprocess} disabled={processing}>
+                    {processing ? <RefreshCw size={18} className="spin" /> : <RefreshCw size={18} />} Relancer le traitement avec les corrections
+                  </button>
+                )}
               </div>
             ) : (
               <div className="errors-list">
-                {errors.map((error, index) => (
+                {errorGroups.map(group => (
                   <ErrorRowEditor 
-                    key={error.id || index} 
-                    error={error} 
-                    errorIndex={index}
+                    key={group[0].rowNumber} 
+                    rowErrors={group}
+                    mode={correctionMode}
                     onResolve={handleResolveError} 
                     onIgnore={handleIgnoreError}
                   />
@@ -1472,6 +1622,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
           </div>
 
           {/* Valid Rows Block */}
+          {correctionMode !== 'server' && correctionMode !== 'reimport' && (
           <div className="data-block valid-block">
             <div className="block-header success">
               <CheckCircle size={24} />
@@ -1486,7 +1637,7 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
             {validRows.length === 0 ? (
               <div className="empty-block">
                 <FileText size={48} />
-                <p>Aucune ligne valide pour le moment.</p>
+                <p>{result.data?.success && result.data?.totalValidRows > 0 ? 'Les lignes valides ont deja ete enregistrees.' : 'Aucune ligne valide pour le moment.'}</p>
               </div>
             ) : (
               <>
@@ -1515,82 +1666,115 @@ fr;Ahmed;Trabelsi;4222222222222222;06/26;+21698765432;otp;update`}</pre>
               </>
             )}
           </div>
+          )}
         </div>
       )}
     </div>
   );
 };
 
-// Error Row Editor Component
-const ErrorRowEditor = ({ error, errorIndex, onResolve, onIgnore }) => {
-  const [editedRow, setEditedRow] = useState({ ...error.rowData });
-  const fieldName = error.fieldName;
-  const isDuplicate = fieldName === 'pan' && error.severity === 'warning';
+const ROW_FIELDS = [
+  { key: 'language', label: 'Langue' },
+  { key: 'firstName', label: 'Prenom' },
+  { key: 'lastName', label: 'Nom' },
+  { key: 'pan', label: 'PAN' },
+  { key: 'expiry', label: 'Expiration' },
+  { key: 'phone', label: 'Telephone' },
+  { key: 'behaviour', label: 'Behaviour' },
+  { key: 'action', label: 'Action' }
+];
+
+// Error Row Editor Component : une carte par ligne, avec toutes ses erreurs
+const ErrorRowEditor = ({ rowErrors, mode, onResolve, onIgnore }) => {
+  const first = rowErrors[0];
+  const errorFields = new Set(rowErrors.filter(isBlockingError).map(e => e.fieldName));
+  const isDuplicate = rowErrors.some(isDuplicateError);
+  const serverMode = mode === 'server';
+  const readOnly = mode === 'reimport';
+  // Un PAN masqué ne peut pas être renvoyé tel quel : il faut saisir le PAN complet
+  const [editedRow, setEditedRow] = useState(() => {
+    const row = { ...first.rowData };
+    if (isMaskedPan(row.pan) && errorFields.has('pan')) row.pan = '';
+    return row;
+  });
+  const [saving, setSaving] = useState(false);
 
   const handleFieldChange = (field, value) => {
     setEditedRow(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = () => {
-    if (!editedRow.pan || editedRow.pan.trim() === '') {
-      alert('Le PAN est obligatoire');
+  const handleSubmit = async () => {
+    if (!editedRow.pan || editedRow.pan.trim() === '' || (errorFields.has('pan') && isMaskedPan(editedRow.pan))) {
+      alert('Saisissez le PAN complet');
       return;
     }
-    if (isDuplicate && editedRow.pan === error.originalValue) {
+    if (isDuplicate && editedRow.pan === rowErrors.find(isDuplicateError).originalValue) {
       alert('Vous devez modifier le PAN pour resoudre le doublon');
       return;
     }
-    onResolve(errorIndex, editedRow);
+    setSaving(true);
+    try {
+      await onResolve(first.rowNumber, editedRow);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const fields = [
-    { key: 'language', label: 'Langue' },
-    { key: 'firstName', label: 'Prenom' },
-    { key: 'lastName', label: 'Nom' },
-    { key: 'pan', label: 'PAN' },
-    { key: 'expiry', label: 'Expiration' },
-    { key: 'phone', label: 'Telephone' },
-    { key: 'behaviour', label: 'Behaviour' },
-    { key: 'action', label: 'Action' }
-  ];
+  // Sans le fichier local, seuls les champs en erreur sont modifiables
+  const isEditable = (key) => !readOnly && (!serverMode || errorFields.has(key)) && (key !== 'pan' || errorFields.has('pan'));
+  const displayValue = (key) => {
+    const value = editedRow[key] || '';
+    // Le PAN reste masqué à l'écran tant qu'il n'est pas en cause
+    return key === 'pan' && !errorFields.has('pan') ? maskPan(value) : value;
+  };
 
   return (
     <div className="error-row-editor">
       <div className="error-row-header">
-        <span className="row-badge">Ligne {error.rowNumber}</span>
+        <span className="row-badge">Ligne {first.rowNumber}</span>
         <span className={`error-badge ${isDuplicate ? 'warning' : ''}`}>
           {isDuplicate ? 'DOUBLON PAN' : 'ERREUR'}
         </span>
-        <span className="error-field-badge">Champ: {fieldName}</span>
+        {[...errorFields].map(field => (
+          <span key={field} className="error-field-badge">Champ: {field}</span>
+        ))}
       </div>
       
-      <div className={`error-message-box ${isDuplicate ? 'warning' : ''}`}>
-        <AlertTriangle size={16} />
-        <span>{error.errorMessage}</span>
-      </div>
+      {rowErrors.map(error => (
+        <div key={error.id} className={`error-message-box ${isDuplicateError(error) || !isBlockingError(error) ? 'warning' : ''}`}>
+          <AlertTriangle size={16} />
+          <span>{error.errorMessage}</span>
+        </div>
+      ))}
 
       <div className="row-editor-grid">
-        {fields.map(({ key, label }) => (
-          <div key={key} className={`field-group ${key === 'pan' && fieldName === 'pan' ? 'error-field' : ''}`}>
+        {ROW_FIELDS.map(({ key, label }) => (
+          <div key={key} className={`field-group ${errorFields.has(key) ? 'error-field' : ''}`}>
             <label>{label} {key === 'pan' && <span className="required">*</span>}</label>
             <input
               type="text"
-              value={editedRow[key] || ''}
+              value={displayValue(key)}
+              placeholder={key === 'pan' && errorFields.has('pan') && isMaskedPan(first.rowData.pan) ? `PAN complet (${first.rowData.pan})` : undefined}
               onChange={(e) => handleFieldChange(key, e.target.value)}
-              className={key === 'pan' && fieldName === 'pan' ? 'error-input' : ''}
+              readOnly={!isEditable(key)}
+              className={errorFields.has(key) ? 'error-input' : ''}
             />
           </div>
         ))}
       </div>
 
-      <div className="error-row-actions">
-        <button className="btn btn-success" onClick={handleSubmit}>
-          <CheckCircle size={18} /> Valider la correction
-        </button>
-        <button className="btn btn-outline" onClick={() => onIgnore(errorIndex)}>
-          <X size={18} /> Ignorer cette ligne
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="error-row-actions">
+          <button className="btn btn-success" onClick={handleSubmit} disabled={saving}>
+            <CheckCircle size={18} /> Valider la correction
+          </button>
+          {!serverMode && (
+            <button className="btn btn-outline" onClick={() => onIgnore(first.rowNumber)}>
+              <X size={18} /> Ignorer cette ligne
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -1600,16 +1784,10 @@ const ValidRowCard = ({ row, rowIndex, onRemove }) => {
   const isCorrected = row.isCorrected;
   const originalData = row.originalData || {};
 
-  const fields = [
-    { key: 'language', label: 'Langue' },
-    { key: 'firstName', label: 'Prenom' },
-    { key: 'lastName', label: 'Nom' },
-    { key: 'pan', label: 'PAN' },
-    { key: 'expiry', label: 'Expiration' },
-    { key: 'phone', label: 'Telephone' },
-    { key: 'behaviour', label: 'Behaviour' },
-    { key: 'action', label: 'Action' }
-  ];
+  const fields = ROW_FIELDS;
+  const correctedFields = row.correctedFields || [row.correctedField];
+  // Le PAN reste masqué à l'écran
+  const show = (data, key) => (key === 'pan' ? maskPan(data[key]) : data[key]) || '-';
 
   return (
     <div className={`valid-row-card ${isCorrected ? 'corrected' : ''}`}>
@@ -1631,9 +1809,9 @@ const ValidRowCard = ({ row, rowIndex, onRemove }) => {
             <div className="section-label"><span className="label-icon error">✗</span> AVANT</div>
             <div className="data-grid">
               {fields.map(({ key, label }) => (
-                <div key={key} className={`data-item ${key === row.correctedField ? 'highlighted-error' : ''}`}>
+                <div key={key} className={`data-item ${correctedFields.includes(key) ? 'highlighted-error' : ''}`}>
                   <span className="data-label">{label}</span>
-                  <span className="data-value">{originalData[key] || '-'}</span>
+                  <span className="data-value">{show(originalData, key)}</span>
                 </div>
               ))}
             </div>
@@ -1643,9 +1821,9 @@ const ValidRowCard = ({ row, rowIndex, onRemove }) => {
             <div className="section-label"><span className="label-icon success">✓</span> APRES</div>
             <div className="data-grid">
               {fields.map(({ key, label }) => (
-                <div key={key} className={`data-item ${key === row.correctedField ? 'highlighted-success' : ''}`}>
+                <div key={key} className={`data-item ${correctedFields.includes(key) ? 'highlighted-success' : ''}`}>
                   <span className="data-label">{label}</span>
-                  <span className="data-value">{row[key] || '-'}</span>
+                  <span className="data-value">{show(row, key)}</span>
                 </div>
               ))}
             </div>
@@ -1656,7 +1834,7 @@ const ValidRowCard = ({ row, rowIndex, onRemove }) => {
           {fields.map(({ key, label }) => (
             <div key={key} className="data-item">
               <span className="data-label">{label}</span>
-              <span className="data-value">{row[key] || '-'}</span>
+              <span className="data-value">{show(row, key)}</span>
             </div>
           ))}
         </div>

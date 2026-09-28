@@ -436,7 +436,7 @@ const Notifications = () => {
           <div className="cron-info">
             <p><Clock size={14} /> Les rapports seront envoyes tous les jours a <strong>{cronHour}:{cronMinute}</strong></p>
             {cronConfig.nextRun && (
-              <p className="next-run">Prochaine execution : {new Date(cronConfig.nextRun).toLocaleString('fr-FR')}</p>
+              <p className="next-run">Prochaine execution : {new Date(cronConfig.nextRun).toLocaleString('fr-FR', { timeZone: cronConfig.timezone || 'Africa/Tunis' })} ({cronConfig.timezone || 'Africa/Tunis'})</p>
             )}
           </div>
           <button className="btn btn-primary" onClick={handleSaveCronConfig} disabled={savingCron}>

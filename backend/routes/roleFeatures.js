@@ -42,6 +42,17 @@ router.get('/', authMiddleware, isSuperAdmin, async (req, res) => {
   }
 });
 
+// Valeurs par défaut des rôles (lecture seule) : affichées à l'administrateur de banque dans l'écran Permissions
+router.get('/role-defaults', authMiddleware, isSuperAdminOrBankAdmin, async (req, res) => {
+  try {
+    const { roles } = await roleFeaturesService.getAll();
+    res.json({ success: true, data: { roles: { bank_admin: roles?.bank_admin || {}, bank: roles?.bank || {} } } });
+  } catch (error) {
+    console.error('Role defaults error:', error);
+    res.status(500).json({ success: false, message: 'Erreur lors du chargement des droits par défaut' });
+  }
+});
+
 // List banks for the permissions UI
 router.get('/banks', authMiddleware, isSuperAdminOrBankAdmin, async (req, res) => {
   try {
